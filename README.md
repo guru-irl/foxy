@@ -1,0 +1,38 @@
+# Liquid Fox New Tab
+
+A private Firefox add-on for the Liquid Fox theme. It replaces the new tab page and
+the home page with a clock (Danfo), the date (Bebas Neue), this window's pinned tabs
+and its tab groups. Clicking a tab switches to it and closes the new tab page.
+
+Design: `docs/superpowers/specs/2026-09-30-newtab-design.md`.
+
+## Develop
+
+    npm test                          # node --test and the Python tests; no npm packages
+    python3 scripts/preview.py        # headless screenshots in dist/preview/ (throwaway profile)
+
+## Sign and install
+
+1. Create an API key at https://addons.mozilla.org/developers/addon/api/key/ and save it:
+
+       mkdir -p ~/.config/liquidfox-newtab
+       printf 'AMO_JWT_ISSUER=%s\nAMO_JWT_SECRET=%s\n' 'user:...' '...' > ~/.config/liquidfox-newtab/amo.env
+       chmod 600 ~/.config/liquidfox-newtab/amo.env
+
+2. Bump `version` in `manifest.json` for every new release, then:
+
+       python3 scripts/build.py && python3 scripts/sign.py
+
+3. In Firefox: about:addons → gear → Install Add-on From File →
+   `dist/liquidfox-newtab-<version>-signed.xpi`. Click "Keep changes" when Firefox asks
+   about the new tab page and the home page.
+
+The add-on is unlisted: signed by Mozilla, never published.
+
+## Undo
+
+Remove the add-on in about:addons. Firefox's own new tab page and home page come back.
+
+## Licences
+
+Danfo and Bebas Neue are under the SIL Open Font License; see `fonts/*-OFL.txt`.
