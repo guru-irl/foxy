@@ -204,6 +204,7 @@ button.dot {
 }
 
 .strip {
+  position: relative;
   display: flex;
   flex: 1;
   min-width: 0;
@@ -280,6 +281,7 @@ button.dot {
 }
 
 .rows {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -355,6 +357,41 @@ button.dot {
   color: var(--text-muted);
   font: normal 700 14px / 1 "Foxy Sans", system-ui, sans-serif;
   font-stretch: 80%;
+}
+
+/* The strip's classic scrollbar occupies layout space; fixed columns reserve
+   the same measured space so every card shares its bottom edge. */
+.board > .fixed {
+  margin-bottom: var(--strip-scrollbar, 0px);
+}
+
+.dragging,
+.column:has(.column-header.dragging) > .rows,
+.column:has(.column-header.dragging) > .other-window {
+  opacity: 0.4;
+}
+
+.column.drop-target {
+  background: color-mix(in srgb, var(--card) 85%, white);
+}
+
+.drop-line {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: white;
+}
+
+.drop-line.vertical {
+  top: 0;
+  bottom: 0;
+  right: auto;
+  height: auto;
+  width: 2px;
 }
 
 .url {

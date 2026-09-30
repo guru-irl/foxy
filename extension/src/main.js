@@ -193,7 +193,8 @@ function captureView(root) {
         rowsKey: rowsKey(list), index: [...list.querySelectorAll(".row")].indexOf(row) };
     } else if (active.matches(".rows")) focus = { rowsKey: rowsKey(active) };
     else if (active.matches(".strip")) focus = { strip: true };
-    else if (group) focus = { groupId: group.dataset.groupId, className: active.className };
+    else if (group) focus = { groupId: group.dataset.groupId, className: active.className,
+      index: [...root.querySelectorAll(".column[data-group-id]")].indexOf(group) };
   }
   return { focus, left: root.querySelector(".strip")?.scrollLeft ?? 0,
     tops: new Map([...root.querySelectorAll(".rows")].map(list => [rowsKey(list), list.scrollTop])) };
@@ -214,6 +215,11 @@ function restoreView(root, { focus, left, tops }) {
       if (!container && focus.tabId !== undefined) {
         const rows = [...(list?.querySelectorAll(".row") ?? [])];
         active = rows[Math.min(focus.index, rows.length - 1)] ?? list ?? root.querySelector(".strip");
+      } else if (!container && focus.groupId !== undefined) {
+        const columns = [...root.querySelectorAll(".column[data-group-id]")];
+        const neighbour = columns[Math.min(focus.index, columns.length - 1)];
+        active = [...(neighbour?.querySelectorAll("button, .rows") ?? [])]
+          .find(el => el.className === focus.className) ?? neighbour?.querySelector(".rows") ?? root.querySelector(".strip");
       }
     }
     active?.focus({ preventScroll: true });

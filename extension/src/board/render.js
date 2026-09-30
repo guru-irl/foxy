@@ -1,3 +1,11 @@
+import { attachDnd } from "./dnd.js";
+
+const layouts = new WeakSet();
+function alignColumns(root) {
+  const strip = root.querySelector(".strip");
+  root.style.setProperty("--strip-scrollbar", `${strip.offsetHeight - strip.clientHeight}px`);
+}
+
 // Text is always assigned as textContent, never parsed as markup.
 export function renderBoard(root, board, ui, handlers) {
   const strip = el("div", "strip");
@@ -11,6 +19,13 @@ export function renderBoard(root, board, ui, handlers) {
   strip.append(create);
   root.replaceChildren(fixedColumn("pinned", "PINNED", board.pinned, handlers), strip,
     fixedColumn("tabs", "TABS", board.tabs, handlers));
+  attachDnd(root, handlers);
+  alignColumns(root);
+  if (!layouts.has(root)) {
+    layouts.add(root);
+    // Width changes can add/remove a classic horizontal scrollbar.
+    new ResizeObserver(() => alignColumns(root)).observe(root);
+  }
 }
 
 function fixedColumn(zone, title, sections, handlers) {
