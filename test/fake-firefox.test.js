@@ -1090,3 +1090,61 @@ test("settle waits for in-flight message listeners and drains events they queue"
   assert.deepEqual(log, ["storage"]);
   assert.equal(await response, "ready");
 });
+
+// Catch lost durable data, surviving listeners, or unchanged ids at restart.
+test("session storage supports defaults, snapshots, changes, removal and clear", async () => {
+  const ff = createFirefox(), api = ff.browser;
+  const changes = logEvents(ff, ["storage.onChanged"]);
+  await api.storage.session.set({ marker: { ready: true }, other: 2 });
+  const result = await api.storage.session.get({ marker: null, absent: 3 });
+  assert.deepEqual(result, { marker: { ready: true }, absent: 3 });
+  result.marker.ready = false;
+  assert.deepEqual(await api.storage.session.get("marker"), { marker: { ready: true } });
+  await api.storage.session.remove("marker");
+  await api.storage.session.clear();
+  await ff.settle();
+  assert.deepEqual(await api.storage.session.get(), {});
+  assert.deepEqual(changes.map(([, , area]) => area), ["session", "session", "session"]);
+  assert.deepEqual(changes[1][1], { marker: { oldValue: { ready: true } } });
+});
+
+test("restart with restore retains windows, pins and bookmark/local data but changes ids and clears listeners/session", async () => {
+  const ff = strip(), api = ff.browser;
+  await api.storage.local.set({ durable: 1 });
+  await api.storage.session.set({ marker: true });
+  const folder = await api.bookmarks.create({ title: "Keep" });
+  let oldListener = 0, startup = 0;
+  api.runtime.onStartup.addListener(() => oldListener++);
+  api.tabs.onCreated.addListener(() => oldListener++);
+  const before = await api.tabs.query({});
+  await ff.restart({ restore: true });
+  api.runtime.onStartup.addListener(() => startup++);
+  await ff.settle();
+  const after = await api.tabs.query({});
+  assert.equal(oldListener, 0);
+  assert.equal(startup, 1);
+  assert.deepEqual(await api.storage.session.get(), {});
+  assert.deepEqual(await api.storage.local.get(), { durable: 1 });
+  assert.equal((await api.bookmarks.get(folder.id))[0].title, "Keep");
+  assert.equal(after.length, before.length);
+  assert.ok(after.every(t => !before.some(old => old.id === t.id)));
+  assert.equal(after.filter(t => t.pinned).length, 1);
+  assert.notEqual((await api.tabGroups.query({}))[0].id, 101);
+  await invariants(ff);
+});
+
+test("restart without restore leaves one home tab and durable bookmarks/local storage", async () => {
+  const ff = strip(), api = ff.browser;
+  await api.storage.local.set({ durable: true });
+  const folder = await api.bookmarks.create({ title: "Keep" });
+  await ff.restart({ restore: false });
+  await ff.settle();
+  assert.equal((await api.windows.getAll()).length, 1);
+  const tabs = await api.tabs.query({});
+  assert.equal(tabs.length, 1);
+  assert.equal(tabs[0].url, "about:home");
+  assert.ok(tabs[0].id > 5);
+  assert.deepEqual(await api.tabGroups.query({}), []);
+  assert.deepEqual(await api.storage.local.get(), { durable: true });
+  assert.equal((await api.bookmarks.get(folder.id))[0].title, "Keep");
+});

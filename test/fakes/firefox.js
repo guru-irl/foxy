@@ -18,7 +18,7 @@ export function createFirefox(setup = {}) {
   let nextGroup = Math.max(0, ...groups.map(g => g.id)) + 1;
   const currentWindowId = setup.currentWindowId ?? wins.find(w => w.focused)?.id ?? wins[0]?.id;
   let lastFocusedId = wins.find(w => w.focused)?.id ?? wins[0]?.id;
-  const browser = { tabs: {}, tabGroups: {}, windows: {}, bookmarks: {}, storage: { local: {} }, runtime: {} };
+  const browser = { tabs: {}, tabGroups: {}, windows: {}, bookmarks: {}, storage: { local: {}, session: {} }, runtime: {} };
 
   function event(name) {
     const listeners = new Set();
@@ -76,7 +76,7 @@ export function createFirefox(setup = {}) {
       calls.push({ api: `${namespace}.${name}`, args: copy(args) });
       return fn(...args);
     };
-    const target = namespace === "storage.local" ? browser.storage.local : browser[namespace];
+    const target = namespace.startsWith("storage.") ? browser.storage[namespace.split(".")[1]] : browser[namespace];
     target[name] = sync ? (...args) => copy(wrapped(...args)) : async (...args) => {
       const result = wrapped(...args);
       return copy(result && typeof result.then === "function" ? await result : result);
@@ -454,7 +454,7 @@ export function createFirefox(setup = {}) {
     closeEmptyWindow(id);
   }
 
-  const nodes = [], storage = {};
+  const nodes = [], localStore = {};
   let nextBookmark = 1, bookmarkClock = 0;
   function nodeById(id) {
     const node = nodes.find(n => n.id === id);
@@ -552,31 +552,34 @@ export function createFirefox(setup = {}) {
   });
   api("bookmarks", "removeTree", id => removeNode(mutableNode(id)));
 
-  api("storage.local", "get", keys => {
-    if (keys == null) return jsonCopy(storage);
-    const result = {};
-    const defaults = typeof keys === "object" && !Array.isArray(keys) ? keys : undefined;
-    for (const key of defaults ? Object.keys(defaults) : asArray(keys)) {
-      if (Object.hasOwn(storage, key)) result[key] = jsonCopy(storage[key]);
-      else if (defaults && defaults[key] !== undefined) result[key] = jsonCopy(defaults[key]);
+  const session = {};
+  for (const [area, storage] of [["local", localStore], ["session", session]]) {
+    api(`storage.${area}`, "get", keys => {
+      if (keys == null) return jsonCopy(storage);
+      const result = {};
+      const defaults = typeof keys === "object" && !Array.isArray(keys) ? keys : undefined;
+      for (const key of defaults ? Object.keys(defaults) : asArray(keys)) {
+        if (Object.hasOwn(storage, key)) result[key] = jsonCopy(storage[key]);
+        else if (defaults && defaults[key] !== undefined) result[key] = jsonCopy(defaults[key]);
+      }
+      return result;
+    });
+    api(`storage.${area}`, "set", obj => {
+      const changes = {}, values = jsonCopy(obj);
+      for (const [key, value] of Object.entries(values)) {
+        changes[key] = Object.hasOwn(storage, key) ? { oldValue: storage[key], newValue: value } : { newValue: value };
+        storage[key] = value;
+      }
+      if (Object.keys(changes).length) queue("storage.onChanged", changes, area);
+    });
+    function removeStorage(keys) {
+      const changes = {};
+      for (const key of keys) if (Object.hasOwn(storage, key)) { changes[key] = { oldValue: storage[key] }; delete storage[key]; }
+      if (Object.keys(changes).length) queue("storage.onChanged", changes, area);
     }
-    return result;
-  });
-  api("storage.local", "set", obj => {
-    const changes = {}, values = jsonCopy(obj);
-    for (const [key, value] of Object.entries(values)) {
-      changes[key] = Object.hasOwn(storage, key) ? { oldValue: storage[key], newValue: value } : { newValue: value };
-      storage[key] = value;
-    }
-    if (Object.keys(changes).length) queue("storage.onChanged", changes, "local");
-  });
-  function removeStorage(keys) {
-    const changes = {};
-    for (const key of keys) if (Object.hasOwn(storage, key)) { changes[key] = { oldValue: storage[key] }; delete storage[key]; }
-    if (Object.keys(changes).length) queue("storage.onChanged", changes, "local");
+    api(`storage.${area}`, "remove", keys => removeStorage(asArray(keys)));
+    api(`storage.${area}`, "clear", () => removeStorage(Object.keys(storage)));
   }
-  api("storage.local", "remove", keys => removeStorage(asArray(keys)));
-  api("storage.local", "clear", () => removeStorage(Object.keys(storage)));
 
   browser.runtime.id = setup.extensionId ?? "foxy-test";
   api("runtime", "getURL", path => `moz-extension://${browser.runtime.id}/${path}`, true);
@@ -591,6 +594,32 @@ export function createFirefox(setup = {}) {
     return response;
   });
 
+  function restart({ restore = true } = {}) {
+    if (settling || messages.size) throw new Error("Settle Firefox before restarting");
+    pending.length = 0;
+    for (const listeners of events.values()) listeners.clear();
+    for (const key of Object.keys(session)) delete session[key];
+    if (restore) {
+      const ids = new Map();
+      for (const group of groups) {
+        const oldId = group.id;
+        group.id = nextGroup++;
+        ids.set(oldId, group.id);
+      }
+      for (const win of wins) for (const tab of win.tabs) {
+        tab.id = nextTab++;
+        tab.groupId = ids.get(tab.groupId) ?? -1;
+      }
+    } else {
+      groups.length = 0;
+      wins.splice(0, wins.length, { id: currentWindowId, focused: true, type: "normal", incognito: false,
+        tabs: [makeTab({ id: nextTab++, windowId: currentWindowId, url: "about:home", active: true })] });
+      lastFocusedId = currentWindowId;
+      reindex(currentWindowId);
+    }
+    queue("runtime.onStartup");
+  }
+
   function layout(id) {
     const tabs = wins.find(w => w.id === id)?.tabs ?? [];
     const pinned = tabs.filter(t => t.pinned).map(t => `P${t.id}`).join(" ");
@@ -604,5 +633,5 @@ export function createFirefox(setup = {}) {
     }
     return `${pinned ? `${pinned} ` : ""}| ${items.join(" ")}`;
   }
-  return { browser, settle, layout, closeWindow, fire: queue, errors, calls };
+  return { browser, settle, layout, closeWindow, restart, fire: queue, errors, calls };
 }
