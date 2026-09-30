@@ -19,9 +19,11 @@ Design: `docs/superpowers/specs/2026-09-30-newtab-design.md`.
 
 1. Create an API key at https://addons.mozilla.org/developers/addon/api/key/ and save it:
 
-       mkdir -p ~/.config/liquidfox-newtab
-       printf 'AMO_JWT_ISSUER=%s\nAMO_JWT_SECRET=%s\n' 'user:...' '...' > ~/.config/liquidfox-newtab/amo.env
-       chmod 600 ~/.config/liquidfox-newtab/amo.env
+       mkdir -p ~/.config/liquidfox-newtab && chmod 700 ~/.config/liquidfox-newtab
+       read -r "ISSUER?JWT issuer: "
+       read -rs "SECRET?JWT secret: "; echo
+       ( umask 077; printf 'AMO_JWT_ISSUER=%s\nAMO_JWT_SECRET=%s\n' "$ISSUER" "$SECRET" > ~/.config/liquidfox-newtab/amo.env )
+       unset ISSUER SECRET
 
 2. Bump `version` in `manifest.json` for every new release, then:
 
@@ -36,6 +38,9 @@ The add-on is unlisted: signed by Mozilla, never published.
 ## Undo
 
 Remove the add-on in about:addons. Firefox's own new tab page and home page come back.
+If you removed the address-bar rule after installing, restore it in your Firefox
+profile's `chrome/userChrome.css` (section 5) from
+`chrome/userChrome.css.bak-2026-09-30`.
 
 ## Licences
 

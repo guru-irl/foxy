@@ -70,6 +70,7 @@ body {
   text-indent: 0.12em;
   color: var(--text-muted);
 }
+
 /* --- Buttons and icons -------------------------------------------------- */
 
 /* No native look. Hover, pressed and keyboard focus are fills, not outlines. */
@@ -226,6 +227,10 @@ button:focus-visible {
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--thumb) transparent;
+}
+
+.card-tabs:focus-visible {
+  outline: none;
 }
 
 .row {

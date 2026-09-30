@@ -32,9 +32,11 @@ async function startTabs(pinnedEl, groupsEl) {
   const self = await api.tabs.getCurrent();
   let queued = false;
   let generation = 0;
+  let lastRenderedKey;
 
   const pick = async (tabId) => {
-    if (!(await activateTab(api, tabId, self.id))) schedule();
+    // Keep the home tab when Back can return to it.
+    if (!(await activateTab(api, tabId, self.id, { close: history.length === 1 }))) schedule();
   };
 
   async function refresh() {
@@ -48,8 +50,11 @@ async function startTabs(pinnedEl, groupsEl) {
     }
     if (mine !== generation) return;
     const model = buildModel(tabs, groups, self.id);
+    const key = JSON.stringify(model);
+    if (key === lastRenderedKey) return;
     renderPinned(pinnedEl, model.pinned, pick);
     renderGroups(groupsEl, model.groups, pick);
+    lastRenderedKey = key;
   }
 
   function schedule() {
@@ -73,10 +78,14 @@ async function startTabs(pinnedEl, groupsEl) {
     api.tabGroups?.onRemoved,
   ];
   for (const event of events) event?.addListener(schedule);
-  api.tabs.onUpdated.addListener(schedule, {
-    windowId: self.windowId,
-    properties: ["favIconUrl", "groupId", "hidden", "pinned", "title"],
-  });
+  try {
+    api.tabs.onUpdated.addListener(schedule, {
+      windowId: self.windowId,
+      properties: ["favIconUrl", "groupId", "hidden", "pinned", "title"],
+    });
+  } catch {
+    api.tabs.onUpdated.addListener(schedule, { windowId: self.windowId });
+  }
 
   await refresh();
 }

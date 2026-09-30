@@ -92,16 +92,22 @@ class MultipartTest(unittest.TestCase):
 
 
 class FakeAmo:
-    def __init__(self, responses):
+    def __init__(self, responses, download_error=None):
         self.responses = list(responses)
+        self.download_error = download_error
         self.calls = []
 
     def json(self, method, url, payload=None, body=None, content_type=None):
-        self.calls.append((method, url, payload))
-        return self.responses.pop(0)
+        self.calls.append((method, url, payload, body, content_type))
+        response = self.responses.pop(0)
+        if isinstance(response, BaseException):
+            raise response
+        return response
 
     def request(self, method, url, body=None, content_type=None):
-        self.calls.append((method, url, None))
+        self.calls.append((method, url, None, body, content_type))
+        if self.download_error:
+            raise self.download_error
         return b"SIGNED"
 
 
@@ -126,6 +132,14 @@ class SignFlowTest(unittest.TestCase):
         self.assertEqual(self.out.read_bytes(), b"SIGNED")
         self.assertEqual([c[0] for c in amo.calls], ["POST", "GET", "GET", "PUT", "GET", "GET", "GET"])
         self.assertEqual(amo.calls[0][1], "https://addons.mozilla.org/api/v5/addons/upload/")
+        upload_body, upload_type = amo.calls[0][3:]
+        self.assertTrue(upload_type.startswith("multipart/form-data; boundary="))
+        self.assertIn(b'Content-Disposition: form-data; name="channel"\r\n\r\nunlisted\r\n', upload_body)
+        self.assertIn(
+            b'Content-Disposition: form-data; name="upload"; filename="x.zip"\r\n'
+            b'Content-Type: application/zip\r\n\r\nPK\r\n',
+            upload_body,
+        )
         self.assertEqual(amo.calls[1][1], "https://addons.mozilla.org/api/v5/addons/upload/u1/")
         self.assertEqual(amo.calls[3][1], "https://addons.mozilla.org/api/v5/addons/addon/%7Babc%7D/")
         self.assertEqual(amo.calls[3][2], {"version": {"upload": "u1"}})
@@ -146,6 +160,13 @@ class SignFlowTest(unittest.TestCase):
         self.assertEqual([c[0] for c in amo.calls], ["POST", "GET"])
         self.assertFalse(self.out.exists())
 
+    def assert_submitted_message(self, error):
+        message = str(error)
+        self.assertIn("already submitted", message)
+        self.assertIn("https://addons.mozilla.org/developers/addon/%7Babc%7D/versions", message)
+        self.assertIn("version bump", message)
+        self.assertFalse(self.out.exists())
+
     def test_stops_when_amo_disables_the_version(self):
         amo = FakeAmo([
             {"uuid": "u1"},
@@ -153,9 +174,48 @@ class SignFlowTest(unittest.TestCase):
             {"id": 1},
             {"file": {"status": "disabled"}},
         ])
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(SystemExit) as ctx:
             sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
-        self.assertFalse(self.out.exists())
+        self.assert_submitted_message(ctx.exception)
+
+    def test_timeout_after_submit_explains_how_to_recover(self):
+        class PendingAmo(FakeAmo):
+            def json(self, method, url, payload=None, body=None, content_type=None):
+                if method == "GET" and "/versions/" in url:
+                    self.calls.append((method, url, payload, body, content_type))
+                    return {"file": {"status": "unreviewed"}}
+                return super().json(method, url, payload, body, content_type)
+
+        amo = PendingAmo([
+            {"uuid": "u1"},
+            {"uuid": "u1", "processed": True, "valid": True, "validation": {"messages": []}},
+            {"id": 1},
+        ])
+        with self.assertRaises(SystemExit) as ctx:
+            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0, timeout=0)
+        self.assert_submitted_message(ctx.exception)
+
+    def test_http_error_during_polling_after_submit_explains_how_to_recover(self):
+        amo = FakeAmo([
+            {"uuid": "u1"},
+            {"uuid": "u1", "processed": True, "valid": True, "validation": {"messages": []}},
+            {"id": 1},
+            SystemExit("GET failed: HTTP 503"),
+        ])
+        with self.assertRaises(SystemExit) as ctx:
+            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+        self.assert_submitted_message(ctx.exception)
+
+    def test_http_error_during_download_after_submit_explains_how_to_recover(self):
+        amo = FakeAmo([
+            {"uuid": "u1"},
+            {"uuid": "u1", "processed": True, "valid": True, "validation": {"messages": []}},
+            {"id": 1},
+            {"file": {"status": "public", "url": "https://addons.mozilla.org/f/1.xpi"}},
+        ], download_error=SystemExit("GET failed: HTTP 503"))
+        with self.assertRaises(SystemExit) as ctx:
+            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+        self.assert_submitted_message(ctx.exception)
 
 
 if __name__ == "__main__":

@@ -132,7 +132,7 @@ def wait(check, what, interval, timeout=900):
         time.sleep(interval)
 
 
-def sign(amo, xpi, guid, version, out, interval=5):
+def sign(amo, xpi, guid, version, out, interval=5, timeout=900):
     """Upload (unlisted), wait for validation, submit, wait for signing, download."""
     guid_path = urllib.parse.quote(guid, safe="@")
 
@@ -164,8 +164,16 @@ def sign(amo, xpi, guid, version, out, interval=5):
             raise SystemExit("AMO rejected or disabled this version.")
         return file if file.get("status") == "public" and file.get("url") else None
 
-    file = wait(signed, "signing", interval)
-    out.write_bytes(amo.request("GET", file["url"]))
+    try:
+        file = wait(signed, "signing", interval, timeout=timeout)
+        out.write_bytes(amo.request("GET", file["url"]))
+    except (SystemExit, urllib.error.URLError, TimeoutError):
+        raise SystemExit(
+            "Signing or download failed after the version was already submitted. "
+            "Get the signed file at "
+            f"https://addons.mozilla.org/developers/addon/{guid_path}/versions. "
+            "Submitting again needs a version bump."
+        ) from None
     print(f"Signed: {out}")
 
 

@@ -27,6 +27,14 @@ test("switches to the tab, then closes the page's own tab", async (t) => {
   assert.equal(warn.mock.callCount(), 0);
 });
 
+test("switches without closing the page when preserving its history", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const api = fakeApi();
+  assert.equal(await activateTab(api, 5, 99, { close: false }), true);
+  assert.deepEqual(api.calls, [["update", 5, { active: true }]]);
+  assert.equal(warn.mock.callCount(), 0);
+});
+
 test("stays open when the tab can't be switched to", async (t) => {
   const warn = t.mock.method(console, "warn", () => {});
   const api = fakeApi({ updateFails: true });

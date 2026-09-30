@@ -1,19 +1,21 @@
 /**
- * Switch to a tab, then close the new tab page it was picked from.
+ * Switch to a tab, then optionally close the new tab page it was picked from.
  * If the switch fails (the tab closed in the meantime) the page stays open.
  * Switch and close failures are logged with console.warn.
  * @param {{tabs: {update: Function, remove: Function}}} api  the WebExtension `browser` object
  * @param {number} targetTabId
  * @param {number} selfTabId  the new tab page's own tab
+ * @param {{close?: boolean}} options  keep the page when it has Back history; defaults to closing
  * @returns {Promise<boolean>} whether the switch happened
  */
-export async function activateTab(api, targetTabId, selfTabId) {
+export async function activateTab(api, targetTabId, selfTabId, { close = true } = {}) {
   try {
     await api.tabs.update(targetTabId, { active: true });
   } catch (error) {
     console.warn("Liquid Fox New Tab: could not switch to tab", targetTabId, error);
     return false;
   }
+  if (!close) return true;
   try {
     await api.tabs.remove(selfTabId);
   } catch (error) {

@@ -60,6 +60,7 @@ function card(group, onPick) {
   heading.append(el("span", "dot"), name);
 
   const list = el("div", "card-tabs");
+  list.tabIndex = -1;
   list.dataset.groupId = String(group.id);
   for (const tab of group.tabs) {
     const row = tabButton("row", tab, onPick);
