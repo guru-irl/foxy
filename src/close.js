@@ -7,12 +7,14 @@ export async function blankAndClose(api, tabId, { timeoutMs = 2000 } = {}) {
   const onUpdated = (id, changeInfo, tab) => {
     if (id === tabId && changeInfo.status === "complete" && tab.url === "about:blank") finish();
   };
-  api.tabs.onUpdated.addListener(onUpdated);
+  api.tabs.onUpdated.addListener(onUpdated, { tabId, properties: ["status"] });
   const timer = setTimeout(finish, timeoutMs);
+  let blanked = true;
   try {
     try {
       await api.tabs.update(tabId, { url: "about:blank", loadReplace: true });
     } catch (error) {
+      blanked = false;
       console.warn("Liquid Fox New Tab: could not blank the page before closing it", tabId, error);
       finish();
     }
@@ -20,6 +22,14 @@ export async function blankAndClose(api, tabId, { timeoutMs = 2000 } = {}) {
   } finally {
     api.tabs.onUpdated.removeListener(onUpdated);
     clearTimeout(timer);
+  }
+  if (blanked) {
+    // SessionStore caches history on a timer; discard flushes the blank entry before close.
+    try {
+      await api.tabs.discard(tabId);
+    } catch (error) {
+      console.warn("Liquid Fox New Tab: could not flush the page's state before closing it", tabId, error);
+    }
   }
   try {
     await api.tabs.remove(tabId);

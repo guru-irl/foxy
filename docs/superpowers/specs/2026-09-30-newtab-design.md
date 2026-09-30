@@ -6,8 +6,9 @@ Date: 2026-09-30. Status: approved in chat (three design sections, all "go").
 
 Replace Firefox's new tab page (and home page) with a page that shows a big clock, the date,
 the current window's pinned tabs and its tab groups. Clicking a tab switches to it and closes
-the new tab page only if it has no Back history. It sits on the user's "Liquid Fox" glass theme
-(userChrome.css), so the page is transparent and the window's glass shows through.
+the new tab page only if it is its tab's only history entry (`history.length === 1`).
+It sits on the user's "Liquid Fox" glass theme (userChrome.css), so the page is
+transparent and the window's glass shows through.
 
 ## Context and constraints
 
@@ -37,7 +38,7 @@ the new tab page only if it has no Back history. It sits on the user's "Liquid F
 | Search | No search box in the page. The address bar comes back on new tabs |
 | Top of page | 24-hour clock without seconds in Danfo; date in Bebas Neue below it |
 | Tabs shown | Current window only: pinned tabs, then tab groups. Ungrouped tabs are not shown |
-| Click | Switch to the tab; blank and close this page only when it has no Back history |
+| Click | Switch to the tab; blank and close this page only when it is its tab's only history entry |
 | Group card | Header (color dot + name) and one row per tab (icon + title); scrolls after 8 rows |
 | Home page | The add-on also replaces the home page, so new windows show the same page |
 | Code | Plain HTML/CSS/JS modules, no framework, no build step |
@@ -52,9 +53,9 @@ Repo: `~/src/liquidfox-newtab/` (local git only).
 | `newtab.html` | Page skeleton: clock, date, pinned strip, groups grid |
 | `newtab.css` | All page styling |
 | `src/model.js` | Pure functions: sort tabs into pinned + groups, group color key, time text, date text, delay to next minute |
-| `src/actions.js` | `activateTab`: switch; close only without Back history; stays open on failure |
+| `src/actions.js` | `activateTab`: switch; request close when passed a close flag; stays open on failure |
 | `src/render.js` | DOM building for the pinned strip and the group cards (text only, no HTML strings) |
-| `src/main.js` | Wires the browser API: reads tabs, listens for changes, runs the clock |
+| `src/main.js` | Wires the browser API: reads tabs, checks `history.length === 1` for the close flag, listens for changes, runs the clock |
 | `background.js` | Module event page: listens for blank-and-close requests from the page |
 | `src/close.js` | Blanks the requesting tab's history entry before closing it |
 | `fonts/` | Danfo (variable, ELSH axis) and Bebas Neue, both OFL, with licence files |
@@ -65,11 +66,11 @@ Repo: `~/src/liquidfox-newtab/` (local git only).
 | `scripts/sign.py` | AMO v5 signing: upload, wait for validation, create/update, wait for signing, download |
 
 The page reads the tabs itself while it is open. The module background event page
-(`background.js`, `src/close.js`) only blanks and closes the page on request after a
-click when the page has no Back history. A tab whose only history entry is about:blank
-stays out of Recently Closed Tabs.
-Closing the page with Cmd+W still adds a "New Tab" entry; no other closed entries are
-forgotten.
+(`background.js`, `src/close.js`) only blanks, flushes and closes the page on request after a
+click when `src/main.js` passes `close: history.length === 1`. After blanking, discard
+flushes SessionStore's cached history before closing; a tab whose only history entry is
+about:blank stays out of Recently Closed Tabs. Closing the page with Cmd+W (or any way
+other than clicking a tab on it) still adds a "New Tab" entry to Recently Closed Tabs.
 
 ## Behavior
 
@@ -83,11 +84,12 @@ forgotten.
   updated, moved, removed) schedules one re-query and re-render per animation frame.
 - Re-render keeps each card's scroll position (keyed by group id).
 - Titles and names are set with `textContent`; nothing is parsed as HTML.
-- Click (or Enter/Space on the focused button): `tabs.update(id, {active: true})`, then
-  ask the background to replace this page's history entry with about:blank and close it
-  only if this page has no Back history (a fresh new tab). If the update rejects (tab gone),
-  the page stays open and redraws. With Back history (Home in an existing tab), it switches
-  without closing.
+- Click (or Enter/Space on the focused button): `src/main.js` passes
+  `close: history.length === 1` to `activateTab`, which switches via
+  `tabs.update(id, {active: true})`. With that flag, it asks the background to replace
+  this page's history entry with about:blank, flush it and close it. If the update
+  rejects (tab gone), the page stays open and redraws. With more than one history
+  entry (Home in an existing tab), it switches without closing.
 - Tab title fallback: the URL, then an empty string.
 - Group name fallback: `Unnamed group` (shown in capitals by Bebas Neue).
 - Group color: API `grey` maps to the sidebar's `gray`; unknown colors fall back to `gray`.

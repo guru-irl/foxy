@@ -165,11 +165,16 @@ def sign(amo, xpi, guid, version, out, interval=5, timeout=900):
             raise SystemExit("AMO rejected or disabled this version.")
         return file if file.get("status") == "public" and file.get("url") else None
 
+    part = out.with_suffix(".xpi.part")
     try:
         file = wait(signed, "signing", interval, timeout=timeout)
-        out.write_bytes(amo.request("GET", file["url"]))
+        part.write_bytes(amo.request("GET", file["url"]))
+        part.replace(out)
     except (SystemExit, OSError, http.client.HTTPException, ValueError, KeyboardInterrupt) as err:
+        part.unlink(missing_ok=True)
         cause = err.code if isinstance(err, SystemExit) and isinstance(err.code, str) else str(err)
+        if not cause:
+            cause = f"Interrupted ({type(err).__name__})"
         rejected = cause == "AMO rejected or disabled this version."
         summary = (
             "The version was already submitted. " if rejected else

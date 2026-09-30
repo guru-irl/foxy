@@ -116,11 +116,16 @@ class FakeAmo:
 
 class SignFlowTest(unittest.TestCase):
     def setUp(self):
+        progress = mock.patch("builtins.print")
+        progress.start()
+        self.addCleanup(progress.stop)
         SCRATCH.mkdir(parents=True, exist_ok=True)
         self.xpi = SCRATCH / "x.zip"
         self.xpi.write_bytes(b"PK")
         self.out = SCRATCH / "x-signed.xpi"
+        self.part = self.out.with_suffix(".xpi.part")
         self.out.unlink(missing_ok=True)
+        self.part.unlink(missing_ok=True)
 
     def test_uploads_waits_submits_waits_and_downloads(self):
         amo = FakeAmo([
@@ -133,6 +138,7 @@ class SignFlowTest(unittest.TestCase):
         ])
         sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
         self.assertEqual(self.out.read_bytes(), b"SIGNED")
+        self.assertFalse(self.part.exists())
         self.assertEqual([c[0] for c in amo.calls], ["POST", "GET", "GET", "PUT", "GET", "GET", "GET"])
         self.assertEqual(amo.calls[0][1], "https://addons.mozilla.org/api/v5/addons/upload/")
         upload_body, upload_type = amo.calls[0][3:]
@@ -248,18 +254,37 @@ class SignFlowTest(unittest.TestCase):
                 self.assert_submitted_message(ctx.exception)
                 self.assertIn(str(error), str(ctx.exception))
 
-    def test_write_failure_after_submit_keeps_the_cause(self):
+    def test_bare_keyboard_interrupt_after_submit_names_the_cause(self):
+        amo = FakeAmo([
+            {"uuid": "u1"},
+            {"uuid": "u1", "processed": True, "valid": True, "validation": {"messages": []}},
+            {"id": 1},
+            KeyboardInterrupt(),
+        ])
+        with self.assertRaises(SystemExit) as ctx:
+            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+        self.assert_submitted_message(ctx.exception)
+        self.assertTrue(str(ctx.exception).startswith("Interrupted (KeyboardInterrupt)\n"))
+
+    def test_partial_write_failure_after_submit_cleans_up_and_keeps_the_cause(self):
         amo = FakeAmo([
             {"uuid": "u1"},
             {"uuid": "u1", "processed": True, "valid": True, "validation": {"messages": []}},
             {"id": 1},
             {"file": {"status": "public", "url": "https://addons.mozilla.org/f/1.xpi"}},
         ])
-        with mock.patch.object(pathlib.Path, "write_bytes", side_effect=OSError("disk full")):
+        real_write_bytes = pathlib.Path.write_bytes
+
+        def fail_after_partial_write(path, data):
+            real_write_bytes(path, data[:3])
+            raise OSError("disk full")
+
+        with mock.patch.object(pathlib.Path, "write_bytes", fail_after_partial_write):
             with self.assertRaises(SystemExit) as ctx:
                 sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
         self.assert_submitted_message(ctx.exception)
         self.assertIn("disk full", str(ctx.exception))
+        self.assertFalse(self.part.exists(), "a failed write must not leave a partial download")
 
     def test_pre_submit_error_does_not_claim_submission(self):
         amo = FakeAmo([urllib.error.URLError("upload offline")])
