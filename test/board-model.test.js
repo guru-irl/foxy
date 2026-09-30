@@ -1,0 +1,222 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { buildBoard } from "../extension/src/board/model.js";
+import { createFirefox } from "./fakes/firefox.js";
+
+async function snapshot(setup = {}) {
+  const { browser } = createFirefox(setup);
+  return {
+    windows: await browser.windows.getAll(),
+    tabs: await browser.tabs.query({}),
+    groups: await browser.tabGroups.query({}),
+    currentWindowId: setup.currentWindowId ?? 1,
+    selfTabId: setup.selfTabId ?? 99,
+  };
+}
+
+function freeze(value) {
+  if (value && typeof value === "object") {
+    Object.values(value).forEach(freeze);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+test("window order puts the current window first, then highest tab access time, then lower id", async () => {
+  const input = await snapshot({
+    windows: [{ id: 4 }, { id: 3 }, { id: 2 }, { id: 1 }, { id: 5 }],
+    tabs: [
+      { id: 41, windowId: 4, lastAccessed: 400 },
+      { id: 31, windowId: 3, lastAccessed: 200 },
+      { id: 21, windowId: 2, lastAccessed: 200 },
+      { id: 22, windowId: 2, lastAccessed: 10 },
+      { id: 11, windowId: 1, lastAccessed: 1 },
+    ],
+  });
+  assert.deepEqual(buildBoard(input).windowOrder, [1, 4, 2, 3, 5]);
+});
+
+test("recency includes hidden tabs and the self tab, even though they are not rows", async () => {
+  const input = await snapshot({
+    windows: [{ id: 1 }, { id: 2 }, { id: 3 }],
+    tabs: [
+      { id: 11, windowId: 1, lastAccessed: 1 },
+      { id: 21, windowId: 2, lastAccessed: 10 },
+      { id: 22, windowId: 2, lastAccessed: 500 },
+      { id: 99, windowId: 3, lastAccessed: 600 },
+      { id: 31, windowId: 3, lastAccessed: 20 },
+    ],
+  });
+  input.tabs.find(tab => tab.id === 22).hidden = true;
+  const board = buildBoard(input);
+  assert.deepEqual(board.windowOrder, [1, 3, 2]);
+  assert.deepEqual(board.tabs.flatMap(section => section.rows.map(row => row.id)), [11, 31, 21]);
+});
+
+test("only non-private normal windows contribute sections or group columns", async () => {
+  // The fake always returns normal, non-private windows. Annotate its detached
+  // snapshots to cover API states outside that fake's supported subset.
+  const input = await snapshot({
+    windows: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }],
+    groups: [
+      { id: 102, windowId: 2 }, { id: 103, windowId: 3 }, { id: 104, windowId: 4 },
+    ],
+    tabs: [
+      { id: 11, windowId: 1 },
+      { id: 21, windowId: 2, pinned: true }, { id: 22, windowId: 2, groupId: 102 },
+      { id: 31, windowId: 3 }, { id: 32, windowId: 3, groupId: 103 },
+      { id: 41, windowId: 4 }, { id: 42, windowId: 4, groupId: 104 },
+    ],
+  });
+  input.windows.find(win => win.id === 2).incognito = true;
+  input.windows.find(win => win.id === 3).type = "popup";
+  input.windows.find(win => win.id === 4).type = "panel";
+  assert.deepEqual(buildBoard(input), {
+    windowOrder: [1], pinned: [], columns: [],
+    tabs: [{ windowId: 1, current: true, rows: [{
+      id: 11, windowId: 1, index: 0, title: "about:blank", url: "about:blank",
+      icon: null, pinned: false, groupId: -1, active: true,
+    }] }],
+  });
+});
+
+test("group columns follow window order and first-tab index, with rows in strip order", async () => {
+  const input = await snapshot({
+    windows: [{ id: 2 }, { id: 1 }],
+    groups: [
+      { id: 10, windowId: 1, title: "Later", color: "blue" },
+      { id: 30, windowId: 2, title: "Remote", color: "red" },
+      { id: 20, windowId: 1, title: "First", color: "grey", collapsed: true },
+    ],
+    tabs: [
+      { id: 1, windowId: 1, groupId: 20 }, { id: 2, windowId: 1, groupId: 20 },
+      { id: 3, windowId: 1, groupId: 10 }, { id: 4, windowId: 2, groupId: 30 },
+    ],
+  });
+  input.tabs.reverse();
+  const board = buildBoard(input);
+  assert.deepEqual(board.columns.map(column => [column.id, column.windowId, column.current]), [
+    [20, 1, true], [10, 1, true], [30, 2, false],
+  ]);
+  assert.deepEqual(board.columns[0], {
+    id: 20, windowId: 1, current: true, title: "First", color: "gray", apiColor: "grey", collapsed: true,
+    rows: [
+      { id: 1, windowId: 1, index: 0, title: "about:blank", url: "about:blank", icon: null,
+        pinned: false, groupId: 20, active: true },
+      { id: 2, windowId: 1, index: 1, title: "about:blank", url: "about:blank", icon: null,
+        pinned: false, groupId: 20, active: false },
+    ],
+  });
+  assert.equal(board.columns[1].collapsed, false);
+});
+
+test("empty group titles stay empty for the renderer's unnamed placeholder", async () => {
+  const input = await snapshot({
+    groups: [
+      { id: 10, windowId: 1, title: "" },
+      { id: 20, windowId: 1, title: "  Work  " },
+    ],
+    tabs: [{ id: 1, windowId: 1, groupId: 10 }, { id: 2, windowId: 1, groupId: 20 }],
+  });
+  assert.deepEqual(buildBoard(input).columns.map(column => column.title), ["", "  Work  "]);
+});
+
+test("self and hidden tabs are excluded from all zones, and empty groups and sections disappear", async () => {
+  const input = await snapshot({
+    windows: [{ id: 1 }, { id: 2 }, { id: 3 }],
+    groups: [{ id: 10, windowId: 1 }, { id: 20, windowId: 1 }, { id: 30, windowId: 1 }],
+    tabs: [
+      { id: 1, windowId: 1, pinned: true },
+      { id: 2, windowId: 1, groupId: 10 }, { id: 3, windowId: 1, groupId: 10 },
+      { id: 99, windowId: 1, groupId: 20 }, { id: 4, windowId: 1, groupId: 30 },
+      { id: 5, windowId: 2 },
+    ],
+  });
+  for (const tab of input.tabs) if ([1, 2, 4, 5].includes(tab.id)) tab.hidden = true;
+  const board = buildBoard(input);
+  assert.deepEqual(board.pinned, []);
+  assert.deepEqual(board.tabs, []);
+  assert.deepEqual(board.columns.map(column => [column.id, column.rows.map(row => row.id)]), [[10, [3]]]);
+  assert.equal(board.windowOrder.length, 3);
+  input.selfTabId = 3;
+  input.tabs.find(tab => tab.id === 99).hidden = true;
+  assert.deepEqual(buildBoard(input).columns, []);
+  input.selfTabId = 1;
+  input.tabs.find(tab => tab.id === 1).hidden = false;
+  assert.deepEqual(buildBoard(input).pinned, []);
+  input.selfTabId = 5;
+  input.tabs.find(tab => tab.id === 5).hidden = false;
+  assert.deepEqual(buildBoard(input).tabs, []);
+});
+
+test("pinned and loose tabs get one non-empty section per window, in board and strip order", async () => {
+  const input = await snapshot({
+    windows: [{ id: 3 }, { id: 2 }, { id: 1 }, { id: 4 }],
+    groups: [{ id: 10, windowId: 1 }, { id: 40, windowId: 4 }],
+    tabs: [
+      { id: 11, windowId: 1, pinned: true, lastAccessed: 1 },
+      { id: 12, windowId: 1, pinned: true, lastAccessed: 1 },
+      { id: 13, windowId: 1, groupId: 10, lastAccessed: 1 },
+      { id: 14, windowId: 1, lastAccessed: 1 }, { id: 15, windowId: 1, lastAccessed: 1 },
+      { id: 21, windowId: 2, pinned: true, lastAccessed: 100 }, { id: 22, windowId: 2, lastAccessed: 100 },
+      { id: 31, windowId: 3, lastAccessed: 200 },
+      { id: 41, windowId: 4, groupId: 40, lastAccessed: 10 },
+    ],
+  });
+  input.tabs.reverse();
+  const board = buildBoard(input);
+  const sections = list => list.map(section => [section.windowId, section.current, section.rows.map(row => row.id)]);
+  assert.deepEqual(board.windowOrder, [1, 3, 2, 4]);
+  assert.deepEqual(sections(board.pinned), [[1, true, [11, 12]], [2, false, [21]]]);
+  assert.deepEqual(sections(board.tabs), [[1, true, [14, 15]], [3, false, [31]], [2, false, [22]]]);
+});
+
+test("rows retain move and activation metadata, with URL and icon fallbacks", async () => {
+  const input = await snapshot({
+    tabs: [
+      { id: 1, windowId: 1, pinned: true, title: "", url: "https://example.com/1", active: true },
+      { id: 2, windowId: 1, title: "Named", url: "https://example.com/2", favIconUrl: "https://example.com/2.ico" },
+      { id: 3, windowId: 1, title: "", favIconUrl: "" },
+    ],
+  });
+  delete input.tabs[2].url;
+  delete input.tabs[2].groupId;
+  const board = buildBoard(input);
+  assert.deepEqual(board.pinned[0].rows, [{
+    id: 1, windowId: 1, index: 0, title: "https://example.com/1", url: "https://example.com/1",
+    icon: null, pinned: true, groupId: -1, active: true,
+  }]);
+  assert.deepEqual(board.tabs[0].rows, [
+    { id: 2, windowId: 1, index: 1, title: "Named", url: "https://example.com/2",
+      icon: "https://example.com/2.ico", pinned: false, groupId: -1, active: false },
+    { id: 3, windowId: 1, index: 2, title: "", url: "", icon: null, pinned: false, groupId: -1, active: false },
+  ]);
+});
+
+test("pinned tabs never become group members, even if an input has a stale groupId", async () => {
+  const input = await snapshot({
+    groups: [{ id: 10, windowId: 1 }],
+    tabs: [{ id: 1, windowId: 1, pinned: true }, { id: 2, windowId: 1, groupId: 10 }],
+  });
+  input.tabs[0].groupId = 10;
+  const board = buildBoard(input);
+  assert.deepEqual(board.pinned[0].rows.map(row => row.id), [1]);
+  assert.deepEqual(board.columns[0].rows.map(row => row.id), [2]);
+});
+
+test("building a board does not mutate input snapshots", async () => {
+  const input = await snapshot({
+    groups: [{ id: 10, windowId: 1 }],
+    tabs: [{ id: 1, windowId: 1, groupId: 10 }, { id: 2, windowId: 1 }],
+  });
+  input.tabs.reverse();
+  const before = structuredClone(input);
+  buildBoard(freeze(input));
+  assert.deepEqual(input, before);
+});
+
+test("no eligible windows gives an empty board, without inventing a current window", () => {
+  assert.deepEqual(buildBoard({ windows: [], tabs: [], groups: [], currentWindowId: 1, selfTabId: 99 }), {
+    windowOrder: [], pinned: [], columns: [], tabs: [],
+  });
+});
