@@ -9,7 +9,7 @@ Needs ~/.config/liquidfox-newtab/amo.env, readable only by you (chmod 600):
 Create the key and secret at https://addons.mozilla.org/developers/addon/api/key/.
 
 Usage: python3 scripts/build.py && python3 scripts/sign.py
-Output: dist/liquidfox-newtab-<version>-signed.xpi
+Output: dist/foxy-<version>-signed.xpi
 """
 import base64
 import hashlib
@@ -28,7 +28,7 @@ import uuid
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 API = "https://addons.mozilla.org/api/v5"
 CREDENTIALS = pathlib.Path.home() / ".config" / "liquidfox-newtab" / "amo.env"
-USER_AGENT = "liquidfox-newtab-sign/1.0"
+USER_AGENT = "foxy-sign/1.0"
 
 
 def b64url(data):
@@ -190,14 +190,14 @@ def sign(amo, xpi, guid, version, out, interval=5, timeout=900):
 
 
 def main():
-    manifest = json.loads((ROOT / "manifest.json").read_text())
+    manifest = json.loads((ROOT / "extension" / "manifest.json").read_text())
     version = manifest["version"]
     guid = manifest["browser_specific_settings"]["gecko"]["id"]
-    xpi = ROOT / "dist" / f"liquidfox-newtab-{version}.zip"
+    xpi = ROOT / "dist" / f"foxy-{version}.zip"
     if not xpi.exists():
         raise SystemExit(f"Missing {xpi}. Run: python3 scripts/build.py")
     issuer, secret = read_credentials()
-    sign(Amo(issuer, secret), xpi, guid, version, ROOT / "dist" / f"liquidfox-newtab-{version}-signed.xpi")
+    sign(Amo(issuer, secret), xpi, guid, version, ROOT / "dist" / f"foxy-{version}-signed.xpi")
 
 
 if __name__ == "__main__":

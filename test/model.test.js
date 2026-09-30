@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildModel, colorKey, formatDate, formatTime, msUntilNextMinute } from "../src/model.js";
+import { buildModel, colorKey, formatDate, formatTime, msUntilNextMinute } from "../extension/src/model.js";
 
 const tab = (id, index, extra = {}) => ({
   id,

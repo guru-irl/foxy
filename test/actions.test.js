@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { activateTab } from "../src/actions.js";
+import { activateTab } from "../extension/src/actions.js";
 
 function fakeApi({ updateFails = false, sendFails = false, removeFails = false } = {}) {
   const calls = [];
@@ -47,7 +47,7 @@ test("stays open when the tab can't be switched to", async (t) => {
   assert.equal(await activateTab(api, 5, 99), false);
   assert.deepEqual(api.calls, [["update", 5, { active: true }]]);
   assert.equal(warn.mock.callCount(), 1);
-  assert.deepEqual(warn.mock.calls[0].arguments.slice(0, 2), ["Default New Tab: could not switch to tab", 5]);
+  assert.deepEqual(warn.mock.calls[0].arguments.slice(0, 2), ["Foxy: could not switch to tab", 5]);
   assert.match(warn.mock.calls[0].arguments[2].message, /Invalid tab ID/);
 });
 
@@ -61,7 +61,7 @@ test("a failed close request warns and falls back to removing the page", async (
     ["remove", 99],
   ]);
   assert.equal(warn.mock.callCount(), 1);
-  assert.equal(warn.mock.calls[0].arguments[0], "Default New Tab: could not ask to close the page, closing it directly");
+  assert.equal(warn.mock.calls[0].arguments[0], "Foxy: could not ask to close the page, closing it directly");
   assert.match(warn.mock.calls[0].arguments[1].message, /No background listener/);
 });
 
@@ -75,9 +75,9 @@ test("a failed close request and fallback remove both warn but still count as sw
     ["remove", 99],
   ]);
   assert.equal(warn.mock.callCount(), 2);
-  assert.equal(warn.mock.calls[0].arguments[0], "Default New Tab: could not ask to close the page, closing it directly");
+  assert.equal(warn.mock.calls[0].arguments[0], "Foxy: could not ask to close the page, closing it directly");
   assert.match(warn.mock.calls[0].arguments[1].message, /No background listener/);
-  assert.deepEqual(warn.mock.calls[1].arguments.slice(0, 2), ["Default New Tab: could not close the new tab page", 99]);
+  assert.deepEqual(warn.mock.calls[1].arguments.slice(0, 2), ["Foxy: could not close the new tab page", 99]);
   assert.match(warn.mock.calls[1].arguments[2].message, /Invalid tab ID/);
 });
 

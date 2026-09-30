@@ -1,9 +1,10 @@
-# Default New Tab
+# Foxy
 
-A private Firefox add-on for the Liquid Fox theme. It replaces the new tab page and
-the home page with a clock (Danfo), the date (Bebas Neue), this window's pinned tabs
-and its tab groups. Clicking a tab switches to it; the page closes only when it is its
-own tab's only history entry (`history.length === 1`).
+A private Firefox add-on and browser theme. The add-on replaces the new tab page and
+the home page with a clock, the date, this window's pinned tabs and its tab groups.
+All page text uses Google Sans Flex: the clock is heavy and upright, the date upright,
+and group titles condensed, heavy and slanted. Clicking a tab switches to it; the page
+closes only when it is its own tab's only history entry (`history.length === 1`).
 
 After a click on a page with only one history entry, it switches to the selected tab,
 blanks its own tab, flushes the blank entry and closes, so it stays out of Recently
@@ -16,6 +17,12 @@ permission is needed; the add-on keeps nothing and sends nothing.
 Design: `docs/superpowers/specs/2026-09-30-newtab-design.md`.
 
 ## Develop
+
+The add-on root is `extension/`: `extension/manifest.json`, `extension/newtab.html`,
+`extension/newtab.css`, `extension/background.js`, `extension/src/`,
+`extension/icons/` and `extension/fonts/`. Scripts and tests stay at the repo root.
+The build packages only the add-on, with `manifest.json` at the root of
+`dist/foxy-<version>.zip`.
 
     npm test                          # node --test and the Python tests; no npm packages
     python3 scripts/preview.py        # headless screenshots in dist/preview/ (throwaway profile)
@@ -31,12 +38,12 @@ Design: `docs/superpowers/specs/2026-09-30-newtab-design.md`.
        ( umask 077; printf 'AMO_JWT_ISSUER=%s\nAMO_JWT_SECRET=%s\n' "$ISSUER" "$SECRET" > ~/.config/liquidfox-newtab/amo.env )
        unset ISSUER SECRET
 
-2. Bump `version` in `manifest.json` for every new release, then:
+2. Bump `version` in `extension/manifest.json` for every new release, then:
 
        python3 scripts/build.py && python3 scripts/sign.py
 
 3. In Firefox: about:addons → gear → Install Add-on From File →
-   `dist/liquidfox-newtab-<version>-signed.xpi`. Click "Keep changes" when Firefox asks
+   `dist/foxy-<version>-signed.xpi`. Click "Keep changes" when Firefox asks
    about the new tab page and the home page.
 
 The add-on is unlisted: signed by Mozilla, never published.
@@ -50,4 +57,8 @@ profile's `chrome/userChrome.css` (section 5) from
 
 ## Licences
 
-Danfo and Bebas Neue are under the SIL Open Font License; see `fonts/*-OFL.txt`.
+Google Sans Flex and Cascadia Mono are under the SIL Open Font License. The fonts
+and their licence files are bundled in `extension/fonts/`; see
+`GoogleSansFlex-OFL.txt`, `GoogleSansFlex-TRADEMARKS.md` and `CascadiaMono-OFL.txt`
+there. Cascadia Mono is declared as `"Foxy Mono"` for later monospace use;
+Google Sans Flex is `"Foxy Sans"`. Its roundness axis stays at the default 0.

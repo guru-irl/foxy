@@ -2,12 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 
-const root = new URL("../", import.meta.url);
+const root = new URL("../extension/", import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), "utf8");
 const manifest = JSON.parse(read("manifest.json"));
 
-test("manifest names the add-on Default New Tab", () => {
-  assert.equal(manifest.name, "Default New Tab");
+test("manifest names the add-on Foxy 1.1.0", () => {
+  assert.equal(manifest.name, "Foxy");
+  assert.equal(manifest.version, "1.1.0");
+  assert.equal(manifest.description, "Your tabs, pinned tabs and tab groups on the new tab page.");
 });
 
 test("manifest replaces the new tab page and the home page with newtab.html", () => {
@@ -50,7 +52,7 @@ test("every file the page references exists", () => {
 });
 
 test("fonts ship with their licences", () => {
-  for (const file of ["fonts/Danfo-OFL.txt", "fonts/BebasNeue-OFL.txt"]) {
+  for (const file of ["fonts/GoogleSansFlex-OFL.txt", "fonts/GoogleSansFlex-TRADEMARKS.md", "fonts/CascadiaMono-OFL.txt"]) {
     assert.ok(existsSync(new URL(file, root)), `missing ${file}`);
   }
 });
