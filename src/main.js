@@ -83,7 +83,8 @@ async function startTabs(pinnedEl, groupsEl) {
       windowId: self.windowId,
       properties: ["favIconUrl", "groupId", "hidden", "pinned", "title"],
     });
-  } catch {
+  } catch (error) {
+    console.warn("Liquid Fox New Tab: filtered tab updates unavailable, listening to all updates in this window", error);
     api.tabs.onUpdated.addListener(schedule, { windowId: self.windowId });
   }
 

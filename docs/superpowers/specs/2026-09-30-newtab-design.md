@@ -6,8 +6,8 @@ Date: 2026-09-30. Status: approved in chat (three design sections, all "go").
 
 Replace Firefox's new tab page (and home page) with a page that shows a big clock, the date,
 the current window's pinned tabs and its tab groups. Clicking a tab switches to it and closes
-the new tab page. It sits on the user's "Liquid Fox" glass theme (userChrome.css), so the page
-is transparent and the window's glass shows through.
+the new tab page only if it has no Back history. It sits on the user's "Liquid Fox" glass theme
+(userChrome.css), so the page is transparent and the window's glass shows through.
 
 ## Context and constraints
 
@@ -37,7 +37,7 @@ is transparent and the window's glass shows through.
 | Search | No search box in the page. The address bar comes back on new tabs |
 | Top of page | 24-hour clock without seconds in Danfo; date in Bebas Neue below it |
 | Tabs shown | Current window only: pinned tabs, then tab groups. Ungrouped tabs are not shown |
-| Click | Switch to the tab, then blank and close the new tab page |
+| Click | Switch to the tab; blank and close this page only when it has no Back history |
 | Group card | Header (color dot + name) and one row per tab (icon + title); scrolls after 8 rows |
 | Home page | The add-on also replaces the home page, so new windows show the same page |
 | Code | Plain HTML/CSS/JS modules, no framework, no build step |
@@ -52,7 +52,7 @@ Repo: `~/src/liquidfox-newtab/` (local git only).
 | `newtab.html` | Page skeleton: clock, date, pinned strip, groups grid |
 | `newtab.css` | All page styling |
 | `src/model.js` | Pure functions: sort tabs into pinned + groups, group color key, time text, date text, delay to next minute |
-| `src/actions.js` | `activateTab`: switch, then request blank-and-close; stays open if the switch fails |
+| `src/actions.js` | `activateTab`: switch; close only without Back history; stays open on failure |
 | `src/render.js` | DOM building for the pinned strip and the group cards (text only, no HTML strings) |
 | `src/main.js` | Wires the browser API: reads tabs, listens for changes, runs the clock |
 | `background.js` | Module event page: listens for blank-and-close requests from the page |
@@ -66,7 +66,8 @@ Repo: `~/src/liquidfox-newtab/` (local git only).
 
 The page reads the tabs itself while it is open. The module background event page
 (`background.js`, `src/close.js`) only blanks and closes the page on request after a
-click. A tab whose only history entry is about:blank stays out of Recently Closed Tabs.
+click when the page has no Back history. A tab whose only history entry is about:blank
+stays out of Recently Closed Tabs.
 Closing the page with Cmd+W still adds a "New Tab" entry; no other closed entries are
 forgotten.
 
@@ -83,9 +84,10 @@ forgotten.
 - Re-render keeps each card's scroll position (keyed by group id).
 - Titles and names are set with `textContent`; nothing is parsed as HTML.
 - Click (or Enter/Space on the focused button): `tabs.update(id, {active: true})`, then
-  ask the background to replace this page's history entry with about:blank and close it.
-  If the update rejects (tab gone), the page stays open and redraws. When this page has
-  Back history (Home button), it switches without closing.
+  ask the background to replace this page's history entry with about:blank and close it
+  only if this page has no Back history (a fresh new tab). If the update rejects (tab gone),
+  the page stays open and redraws. With Back history (Home in an existing tab), it switches
+  without closing.
 - Tab title fallback: the URL, then an empty string.
 - Group name fallback: `Unnamed group` (shown in capitals by Bebas Neue).
 - Group color: API `grey` maps to the sidebar's `gray`; unknown colors fall back to `gray`.
@@ -169,4 +171,5 @@ forgotten.
 ## Undo
 
 Remove the add-on in about:addons; Firefox's new tab page and home page return. The
-address-bar rule can be restored from `chrome/userChrome.css.bak-2026-09-30`.
+address-bar rule can be restored from `chrome/userChrome.css.bak-before-newtab`, made
+right before the rule is removed.

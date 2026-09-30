@@ -14,6 +14,7 @@ Output: dist/liquidfox-newtab-<version>-signed.xpi
 import base64
 import hashlib
 import hmac
+import http.client
 import json
 import pathlib
 import stat
@@ -167,11 +168,17 @@ def sign(amo, xpi, guid, version, out, interval=5, timeout=900):
     try:
         file = wait(signed, "signing", interval, timeout=timeout)
         out.write_bytes(amo.request("GET", file["url"]))
-    except (SystemExit, urllib.error.URLError, TimeoutError):
-        raise SystemExit(
+    except (SystemExit, OSError, http.client.HTTPException, ValueError, KeyboardInterrupt) as err:
+        cause = err.code if isinstance(err, SystemExit) and isinstance(err.code, str) else str(err)
+        rejected = cause == "AMO rejected or disabled this version."
+        summary = (
+            "The version was already submitted. " if rejected else
             "Signing or download failed after the version was already submitted. "
-            "Get the signed file at "
-            f"https://addons.mozilla.org/developers/addon/{guid_path}/versions. "
+        )
+        recovery = "Check why at " if rejected else "Get the signed file at "
+        raise SystemExit(
+            f"{cause}\n{summary}"
+            f"{recovery}https://addons.mozilla.org/developers/addon/{guid_path}/versions. "
             "Submitting again needs a version bump."
         ) from None
     print(f"Signed: {out}")

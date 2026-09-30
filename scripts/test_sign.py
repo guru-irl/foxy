@@ -1,11 +1,14 @@
 import base64
 import hashlib
 import hmac
+import http.client
 import json
 import os
 import pathlib
 import sys
 import unittest
+import urllib.error
+from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import sign  # noqa: E402
@@ -177,6 +180,9 @@ class SignFlowTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
         self.assert_submitted_message(ctx.exception)
+        self.assertIn("rejected or disabled", str(ctx.exception))
+        self.assertIn("Check why at", str(ctx.exception))
+        self.assertNotIn("download", str(ctx.exception).lower())
 
     def test_timeout_after_submit_explains_how_to_recover(self):
         class PendingAmo(FakeAmo):
@@ -194,17 +200,19 @@ class SignFlowTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0, timeout=0)
         self.assert_submitted_message(ctx.exception)
+        self.assertIn("Timed out waiting for signing", str(ctx.exception))
 
     def test_http_error_during_polling_after_submit_explains_how_to_recover(self):
         amo = FakeAmo([
             {"uuid": "u1"},
             {"uuid": "u1", "processed": True, "valid": True, "validation": {"messages": []}},
             {"id": 1},
-            SystemExit("GET failed: HTTP 503"),
+            SystemExit("GET failed: HTTP 500\nserver broke"),
         ])
         with self.assertRaises(SystemExit) as ctx:
             sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
         self.assert_submitted_message(ctx.exception)
+        self.assertIn("HTTP 500\nserver broke", str(ctx.exception))
 
     def test_http_error_during_download_after_submit_explains_how_to_recover(self):
         amo = FakeAmo([
@@ -216,6 +224,49 @@ class SignFlowTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
         self.assert_submitted_message(ctx.exception)
+        self.assertIn("GET failed: HTTP 503", str(ctx.exception))
+
+    def test_polling_errors_after_submit_keep_the_cause(self):
+        for error in (
+            urllib.error.URLError("network down"),
+            TimeoutError("poll timed out"),
+            ConnectionResetError("peer reset"),
+            http.client.RemoteDisconnected("remote disconnected"),
+            ValueError("invalid JSON"),
+            KeyboardInterrupt("poll interrupted"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                amo = FakeAmo([
+                    {"uuid": "u1"},
+                    {"uuid": "u1", "processed": True, "valid": True, "validation": {"messages": []}},
+                    {"id": 1},
+                    error,
+                ])
+                with self.assertRaises(BaseException) as ctx:
+                    sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+                self.assertIsInstance(ctx.exception, SystemExit)
+                self.assert_submitted_message(ctx.exception)
+                self.assertIn(str(error), str(ctx.exception))
+
+    def test_write_failure_after_submit_keeps_the_cause(self):
+        amo = FakeAmo([
+            {"uuid": "u1"},
+            {"uuid": "u1", "processed": True, "valid": True, "validation": {"messages": []}},
+            {"id": 1},
+            {"file": {"status": "public", "url": "https://addons.mozilla.org/f/1.xpi"}},
+        ])
+        with mock.patch.object(pathlib.Path, "write_bytes", side_effect=OSError("disk full")):
+            with self.assertRaises(SystemExit) as ctx:
+                sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+        self.assert_submitted_message(ctx.exception)
+        self.assertIn("disk full", str(ctx.exception))
+
+    def test_pre_submit_error_does_not_claim_submission(self):
+        amo = FakeAmo([urllib.error.URLError("upload offline")])
+        with self.assertRaises(urllib.error.URLError) as ctx:
+            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+        self.assertIn("upload offline", str(ctx.exception))
+        self.assertFalse(self.out.exists())
 
 
 if __name__ == "__main__":
