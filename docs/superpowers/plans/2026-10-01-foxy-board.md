@@ -166,6 +166,7 @@ Algorithms (Firefox 157 facts: `tabs.move` inserts the tab next to the tab curre
   2. If it's unpinned in another window: `tabs.move(tabId, { windowId: W, index: -1 })`, then pin it.
   3. If it's unpinned in W: pin it.
   4. With `before`: re-read both, then `tabs.move(tabId, { index: indexBefore(tab, before) })`.
+  4b. With `before` null and the tab already pinned in W but not W's last pin: `tabs.move(tabId, { index: pinnedCount(W) - 1 })` (end of W's pins).
   5. Correct: re-read; if it's not pinned, or not in W, log a warning.
 - **`dropTab`, kind `new-group`:** unpin if pinned, then `groupId = await tabs.group({ tabIds: [tabId], createProperties: { windowId } })`. Return `{ ok: true, groupId }`.
 - **`dropGroup`:**
