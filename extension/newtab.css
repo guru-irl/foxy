@@ -3,14 +3,18 @@
    (Liquid Fox userChrome.css) shows through. */
 
 @font-face {
-  font-family: "LF Danfo";
-  src: url("fonts/Danfo.ttf") format("truetype");
+  font-family: "Foxy Sans";
+  src: url("fonts/GoogleSansFlex.ttf") format("truetype");
+  font-weight: 1 1000;
+  font-stretch: 25% 151%;
+  font-style: oblique 0deg 10deg;
   font-display: block;
 }
 
 @font-face {
-  font-family: "LF Bebas";
-  src: url("fonts/BebasNeue-Regular.ttf") format("truetype");
+  font-family: "Foxy Mono";
+  src: url("fonts/CascadiaMono.ttf") format("truetype");
+  font-weight: 200 700;
   font-display: block;
 }
 
@@ -40,7 +44,7 @@ body {
 
 body {
   color: var(--text);
-  font: 13px system-ui, sans-serif;
+  font: 400 13px "Foxy Sans", system-ui, sans-serif;
 }
 
 .page {
@@ -55,17 +59,21 @@ body {
   text-align: center;
 }
 
-/* Danfo is a heavy display face with one weight: no synthetic bold. */
+/* Only group titles slant; the clock keeps upright, heavy tabular figures. */
 .clock-time {
   display: block;
-  font: normal clamp(88px, 11vw, 160px) / 1 "LF Danfo", serif;
+  font: normal 900 clamp(88px, 11vw, 160px) / 1 "Foxy Sans", system-ui, sans-serif;
+  font-stretch: 100%;
+  font-variation-settings: "opsz" 144;
+  font-variant-numeric: tabular-nums;
 }
 
 /* text-indent matches the trailing letter-spacing after the last letter, so
    the date's letters are centered, not the letters plus one trailing gap. */
 .clock-date {
   margin-top: 8px;
-  font: normal 22px / 1 "LF Bebas", sans-serif;
+  font: normal 600 22px / 1 "Foxy Sans", system-ui, sans-serif;
+  text-transform: uppercase;
   letter-spacing: 0.12em;
   text-indent: 0.12em;
   color: var(--text-muted);
@@ -176,23 +184,23 @@ button:focus-visible {
 }
 
 /* The dot's center lines up with the row icons below it: 10px + 6px here,
-   8px + 8px in the rows.
-   Same label as the sidebar's tab groups: 12px / 0.7 makes Bebas Neue's
-   capitals (0.7em) exactly 12px, the dot's height. The dot hangs off the
-   text's baseline (vertical-align), so the dot and the capitals are placed
-   from the same position and round to the same pixels. On a 32px line
-   Firefox rounds the font's ascent and descent to whole pixels (15px and
-   5px at this size), which puts the capitals exactly 1px above the middle,
-   so the title is nudged down 1px to center both on the row. */
+   8px + 8px in the rows. At weight 800, width 50 and automatic optical size,
+   14.5px gives capitals exactly 12 raster rows tall in the Firefox preview.
+   Rounded ascent/descent are 15px/5px: on the 32px line the baseline is
+   21px down, so the baseline-aligned dot needs no additional row nudge. */
 .card-title {
-  position: relative;
-  top: 1px;
   height: var(--row);
   margin: 0;
   padding-inline: 10px 8px;
   overflow: hidden;
-  font: normal calc(12px / 0.7) / var(--row) "LF Bebas", sans-serif;
-  letter-spacing: 0.06em;
+  font-family: "Foxy Sans", system-ui, sans-serif;
+  font-size: 14.5px;
+  line-height: var(--row);
+  font-weight: 800;
+  font-stretch: 50%;
+  font-style: oblique 10deg;
+  text-transform: uppercase;
+  letter-spacing: 0;
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--label);
@@ -202,18 +210,17 @@ button:focus-visible {
   min-width: 0;
 }
 
-/* Same dot as the sidebar's tab group labels. Its bottom edge (it has no
-   text, so that's its baseline) sits this far below the text's baseline,
-   which centers it on the 0.7em capitals. */
+/* The empty inline dot's baseline is its bottom edge. The nominal half-cap
+   offset is -0.809px at 14.5px; Firefox rounds both dot and capital edges
+   to the same 12 pixel rows. Verified with scripts/preview.py two-groups. */
 .dot {
   display: inline-block;
   width: 12px;
   height: 12px;
   margin-inline-end: 10px;
-  vertical-align: calc(0.35em - 6px);
+  vertical-align: calc(0.358em - 6px);
   border-radius: 50%;
   background-image: linear-gradient(135deg, color-mix(in oklab, var(--g1) 75%, transparent), var(--g2));
-  box-shadow: 0 0 6px color-mix(in oklab, var(--g2) 50%, transparent);
 }
 
 .card[data-color="red"] { --g1: oklch(0.86 0.10 45); --g2: oklch(0.72 0.17 18); }

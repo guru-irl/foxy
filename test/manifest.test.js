@@ -52,7 +52,7 @@ test("every file the page references exists", () => {
 });
 
 test("fonts ship with their licences", () => {
-  for (const file of ["fonts/Danfo-OFL.txt", "fonts/BebasNeue-OFL.txt"]) {
+  for (const file of ["fonts/GoogleSansFlex-OFL.txt", "fonts/GoogleSansFlex-TRADEMARKS.md", "fonts/CascadiaMono-OFL.txt"]) {
     assert.ok(existsSync(new URL(file, root)), `missing ${file}`);
   }
 });

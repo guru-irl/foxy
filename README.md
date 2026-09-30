@@ -1,9 +1,10 @@
 # Foxy
 
 A private Firefox add-on and browser theme. The add-on replaces the new tab page and
-the home page with a clock (Danfo), the date (Bebas Neue), this window's pinned tabs
-and its tab groups. Clicking a tab switches to it; the page closes only when it is its
-own tab's only history entry (`history.length === 1`).
+the home page with a clock, the date, this window's pinned tabs and its tab groups.
+All page text uses Google Sans Flex: the clock is heavy and upright, the date upright,
+and group titles condensed, heavy and slanted. Clicking a tab switches to it; the page
+closes only when it is its own tab's only history entry (`history.length === 1`).
 
 After a click on a page with only one history entry, it switches to the selected tab,
 blanks its own tab, flushes the blank entry and closes, so it stays out of Recently
@@ -56,4 +57,8 @@ profile's `chrome/userChrome.css` (section 5) from
 
 ## Licences
 
-Danfo and Bebas Neue are under the SIL Open Font License; see `extension/fonts/*-OFL.txt`.
+Google Sans Flex and Cascadia Mono are under the SIL Open Font License. The fonts
+and their licence files are bundled in `extension/fonts/`; see
+`GoogleSansFlex-OFL.txt`, `GoogleSansFlex-TRADEMARKS.md` and `CascadiaMono-OFL.txt`
+there. Cascadia Mono is declared as `"Foxy Mono"` for later monospace use;
+Google Sans Flex is `"Foxy Sans"`. Its roundness axis stays at the default 0.

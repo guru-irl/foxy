@@ -9,7 +9,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import build  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SCRATCH = ROOT / ".spider" / "scratch" / "task-1"
+SCRATCH = ROOT / ".spider" / "scratch" / "tests"
 OUT_DIR = SCRATCH / "test-build"
 
 
@@ -19,11 +19,18 @@ class BuildTest(unittest.TestCase):
         for required in [
             "manifest.json", "newtab.html", "newtab.css", "background.js",
             "src/close.js", "src/main.js", "src/model.js", "src/actions.js", "src/render.js",
-            "fonts/Danfo.ttf", "fonts/Danfo-OFL.txt",
-            "fonts/BebasNeue-Regular.ttf", "fonts/BebasNeue-OFL.txt",
+            "fonts/GoogleSansFlex.ttf", "fonts/GoogleSansFlex-OFL.txt",
+            "fonts/GoogleSansFlex-TRADEMARKS.md",
+            "fonts/CascadiaMono.ttf", "fonts/CascadiaMono-OFL.txt",
             "icons/globe.svg",
         ]:
             self.assertIn(required, names)
+        self.assertEqual(
+            sorted(name for name in names if name.startswith("fonts/")),
+            ["fonts/CascadiaMono-OFL.txt", "fonts/CascadiaMono.ttf",
+             "fonts/GoogleSansFlex-OFL.txt", "fonts/GoogleSansFlex-TRADEMARKS.md",
+             "fonts/GoogleSansFlex.ttf"],
+        )
         for name in names:
             self.assertFalse(
                 name.startswith(("extension/", "theme/", "test/", "preview/", "docs/", "scripts/", "dist/", ".")),
