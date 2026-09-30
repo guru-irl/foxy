@@ -176,34 +176,41 @@ button:focus-visible {
 }
 
 /* The dot's center lines up with the row icons below it: 10px + 6px here,
-   8px + 8px in the rows. */
+   8px + 8px in the rows.
+   Same label as the sidebar's tab groups: 12px / 0.7 makes Bebas Neue's
+   capitals (0.7em) exactly 12px, the dot's height. The dot hangs off the
+   text's baseline (vertical-align), so the dot and the capitals are placed
+   from the same position and round to the same pixels. On a 32px line
+   Firefox rounds the font's ascent and descent to whole pixels (15px and
+   5px at this size), which puts the capitals exactly 1px above the middle,
+   so the title is nudged down 1px to center both on the row. */
 .card-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  position: relative;
+  top: 1px;
   height: var(--row);
   margin: 0;
   padding-inline: 10px 8px;
-  font: normal 15px / 1 "LF Bebas", sans-serif;
+  overflow: hidden;
+  font: normal calc(12px / 0.7) / var(--row) "LF Bebas", sans-serif;
   letter-spacing: 0.06em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--label);
 }
 
-/* Bebas capitals sit 0.05em above the middle of the line box. */
 .card-name {
-  position: relative;
-  top: 0.05em;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-/* Same dot as the sidebar's tab group labels. */
+/* Same dot as the sidebar's tab group labels. Its bottom edge (it has no
+   text, so that's its baseline) sits this far below the text's baseline,
+   which centers it on the 0.7em capitals. */
 .dot {
-  flex: none;
+  display: inline-block;
   width: 12px;
   height: 12px;
+  margin-inline-end: 10px;
+  vertical-align: calc(0.35em - 6px);
   border-radius: 50%;
   background-image: linear-gradient(135deg, color-mix(in oklab, var(--g1) 75%, transparent), var(--g2));
   box-shadow: 0 0 6px color-mix(in oklab, var(--g2) 50%, transparent);
