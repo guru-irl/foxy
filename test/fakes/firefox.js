@@ -6,7 +6,7 @@ const COLORS = ["blue", "purple", "cyan", "orange", "yellow", "pink", "green", "
 const ROOTS = ["root________", "menu________", "toolbar_____", "unfiled_____", "mobile______"];
 
 export function createFirefox(setup = {}) {
-  const calls = [], errors = [], pending = [], events = new Map();
+  const calls = [], errors = [], pending = [], events = new Map(), messages = new Set();
   const wins = (setup.windows ?? [{ id: 1, focused: true }]).map(w => ({
     id: w.id, focused: w.focused ?? false, type: "normal", incognito: false, tabs: [],
   }));
@@ -60,9 +60,13 @@ export function createFirefox(setup = {}) {
     if (settling) return settling;
     settling = (async () => {
       let deliveries = 0;
-      while (pending.length) {
-        if (++deliveries > 10000) throw new Error("Event delivery limit exceeded: 10000");
-        await deliver(pending.shift());
+      while (pending.length || messages.size) {
+        if (pending.length) {
+          if (++deliveries > 10000) throw new Error("Event delivery limit exceeded: 10000");
+          await deliver(pending.shift());
+        } else {
+          await Promise.all([...messages]);
+        }
       }
     })().finally(() => { settling = undefined; });
     return settling;
@@ -73,7 +77,10 @@ export function createFirefox(setup = {}) {
       return fn(...args);
     };
     const target = namespace === "storage.local" ? browser.storage.local : browser[namespace];
-    target[name] = sync ? (...args) => copy(wrapped(...args)) : async (...args) => copy(await wrapped(...args));
+    target[name] = sync ? (...args) => copy(wrapped(...args)) : async (...args) => {
+      const result = wrapped(...args);
+      return copy(result && typeof result.then === "function" ? await result : result);
+    };
   }
   function windowById(id) {
     const win = wins.find(w => w.id === id);
@@ -119,7 +126,11 @@ export function createFirefox(setup = {}) {
   }
   function ensureActive(id) {
     const tabs = windowTabs(id);
-    if (tabs.length && !tabs.some(t => t.active)) activate(tabs[0]);
+    if (tabs.length && !tabs.some(t => t.active)) {
+      const before = { ...tabs[0] };
+      activate(tabs[0]);
+      updated(tabs[0], before);
+    }
   }
   function removeEmptyGroups() {
     for (const group of [...groups]) {
@@ -187,7 +198,7 @@ export function createFirefox(setup = {}) {
     const index = pinned ? Math.max(0, Math.min(props.index ?? count, count))
       : Math.max(count, Math.min(props.index ?? tabs.length, tabs.length));
     const before = tabs[index - 1], after = tabs[index];
-    const groupId = !pinned && before?.groupId !== -1 && before?.groupId === after?.groupId ? before.groupId : -1;
+    const groupId = !pinned && before && before.groupId !== -1 && before.groupId === after?.groupId ? before.groupId : -1;
     const t = makeTab({ ...props, id: nextTab++, windowId: id, groupId, active: false,
       title: discarded ? props.title : props.url ?? "about:blank" });
     tabs.splice(index, 0, t);
@@ -228,7 +239,8 @@ export function createFirefox(setup = {}) {
     target.splice(index, 0, t);
     reindex(targetId);
     if (oldWindowId !== targetId) {
-      if (t.active) for (const other of target) other.active = other === t;
+      // adoptTab defaults selectTab to false; destination selection is preserved.
+      t.active = false;
       queue("tabs.onDetached", t.id, { oldWindowId, oldPosition });
       queue("tabs.onAttached", t.id, { newWindowId: targetId, newPosition: t.index });
     } else if (oldPosition !== t.index) {
@@ -254,7 +266,10 @@ export function createFirefox(setup = {}) {
         const membership = neighbor?.groupId ?? -1;
         const sourceId = relocate(t, targetId, index, membership);
         removeEmptyGroups();
-        if (sourceId !== targetId) closeEmptyWindow(sourceId);
+        if (sourceId !== targetId) {
+          closeEmptyWindow(sourceId);
+          ensureActive(targetId);
+        }
       }
       last.set(targetId, t.index);
       moved.push(tabObject(t));
@@ -366,7 +381,10 @@ export function createFirefox(setup = {}) {
     index = Math.min(index, target.length);
     target.splice(index, 0, ...members);
     group.windowId = targetId;
-    for (const tab of members) tab.windowId = targetId;
+    for (const tab of members) {
+      tab.windowId = targetId;
+      if (!same) tab.active = false;
+    }
     reindex(sourceId);
     if (!same) reindex(targetId);
     members.forEach((tab, i) => {
@@ -377,10 +395,7 @@ export function createFirefox(setup = {}) {
         queue("tabs.onAttached", tab.id, { newWindowId: targetId, newPosition: tab.index });
       }
     });
-    if (!same && members.some(t => t.active)) {
-      const active = members.find(t => t.active);
-      for (const tab of target) tab.active = tab === active;
-    }
+    if (!same) ensureActive(targetId);
     queue("tabGroups.onMoved", group);
     if (!same) closeEmptyWindow(sourceId);
     return group;
@@ -535,13 +550,15 @@ export function createFirefox(setup = {}) {
 
   browser.runtime.id = setup.extensionId ?? "foxy-test";
   api("runtime", "getURL", path => `moz-extension://${browser.runtime.id}/${path}`, true);
-  api("runtime", "sendMessage", async msg => {
+  api("runtime", "sendMessage", msg => {
     // Messaging needs a response without an explicit settle(), but is never synchronous.
     const sender = { id: browser.runtime.id };
     if (setup.selfTabId != null) sender.tab = tabObject(tabById(setup.selfTabId));
     const args = copy([msg, sender]);
-    await Promise.resolve();
-    return deliver({ name: "runtime.onMessage", args }, true);
+    const response = Promise.resolve().then(() => deliver({ name: "runtime.onMessage", args }, true));
+    messages.add(response);
+    response.then(() => messages.delete(response), () => messages.delete(response));
+    return response;
   });
 
   function layout(id) {

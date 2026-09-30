@@ -684,3 +684,70 @@ test("new-group creation precedes membership events and closed-group snapshots k
   assert.deepEqual(log.at(-1), ["tabGroups.onRemoved", { id, windowId: 1, title: "Example", color: "red", collapsed: false },
     { isWindowClosing: false }]);
 });
+
+
+test("adopting tabs or groups does not steal the destination's active tab", async () => {
+  for (const operation of ["move", "group", "block"]) {
+    const ff = createFirefox({ windows: [{ id: 1 }, { id: 2 }],
+      groups: [{ id: 101, windowId: 1 }, { id: 102, windowId: 2 }],
+      tabs: [{ id: 1, windowId: 1, groupId: 101 }, { id: 2, windowId: 1 },
+        { id: 3, windowId: 2, groupId: 102 }] });
+    if (operation === "move") await ff.browser.tabs.move(1, { windowId: 2, index: -1 });
+    if (operation === "group") await ff.browser.tabs.group({ tabIds: [1], groupId: 102 });
+    if (operation === "block") await ff.browser.tabGroups.move(101, { windowId: 2, index: -1 });
+    assert.equal((await ff.browser.tabs.get(1)).active, false, operation);
+    assert.equal((await ff.browser.tabs.get(3)).active, true, operation);
+    assert.equal((await ff.browser.tabs.get(2)).active, true, operation);
+    await invariants(ff);
+  }
+});
+
+test("automatic activation after removal loads a discarded tab and emits its discarded change", async () => {
+  const ff = createFirefox({ tabs: [{ id: 1, windowId: 1 }, { id: 2, windowId: 1, discarded: true }] });
+  const log = logEvents(ff, ["tabs.onUpdated"]);
+  await ff.browser.tabs.remove(1);
+  assert.equal((await ff.browser.tabs.get(2)).active, true);
+  assert.equal((await ff.browser.tabs.get(2)).discarded, false);
+  await ff.settle();
+  assert.deepEqual(log.map(e => [e[1], e[2]]), [[2, { discarded: false }]]);
+});
+
+
+test("creating the first tab in an empty fixture window leaves it ungrouped", async () => {
+  const ff = createFirefox();
+  const tab = await ff.browser.tabs.create({ url: "https://example.com/a" });
+  assert.equal(tab.groupId, -1);
+  assert.equal(tab.index, 0);
+  assert.equal(tab.active, true);
+  assert.equal(ff.layout(1), `| ${tab.id}`);
+  await invariants(ff);
+});
+
+
+test("overlapping API calls snapshot return values at each operation, not after later mutations", async () => {
+  const ff = strip();
+  const firstGroup = ff.browser.tabGroups.update(101, { title: "First" });
+  const secondGroup = ff.browser.tabGroups.update(101, { title: "Second" });
+  assert.equal((await firstGroup).title, "First");
+  assert.equal((await secondGroup).title, "Second");
+  const firstBookmark = ff.browser.bookmarks.create({ title: "First" });
+  const secondBookmark = ff.browser.bookmarks.create({ title: "Second", index: 0 });
+  assert.equal((await firstBookmark).index, 0);
+  assert.equal((await secondBookmark).index, 0);
+});
+
+
+test("settle waits for in-flight message listeners and drains events they queue", async () => {
+  const ff = createFirefox(), log = [];
+  ff.browser.runtime.onMessage.addListener(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await ff.browser.storage.local.set({ ready: true });
+    return "ready";
+  });
+  ff.browser.storage.onChanged.addListener(() => log.push("storage"));
+  const response = ff.browser.runtime.sendMessage({ type: "example" });
+  await ff.settle();
+  assert.deepEqual(log, ["storage"]);
+  assert.equal(await response, "ready");
+});
