@@ -221,14 +221,14 @@ export function createFirefox(setup = {}) {
     const t = tabById(id), before = { ...t };
     if (props.url != null) checkURL(props.url);
     if (props.pinned != null) pin(t, props.pinned);
-    if (props.active === true) activate(t);
+    if (props.active === true) activate(t, !t.active);
     if (props.url != null) { t.url = props.url; t.title = props.url; t.discarded = false; }
     if (props.muted != null) t.muted = props.muted;
     updated(t, before);
     removeEmptyGroups();
     return tabObject(t);
   });
-  function relocate(t, targetId, index, membership) {
+  function relocate(t, targetId, index, membership, selectTab = false) {
     const oldWindowId = t.windowId, oldPosition = t.index, before = { ...t };
     const source = windowTabs(oldWindowId);
     source.splice(oldPosition, 1);
@@ -239,10 +239,11 @@ export function createFirefox(setup = {}) {
     target.splice(index, 0, t);
     reindex(targetId);
     if (oldWindowId !== targetId) {
-      // adoptTab defaults selectTab to false; destination selection is preserved.
+      // tabs.move defaults to false; group.addTabs passes the source selection.
       t.active = false;
       queue("tabs.onDetached", t.id, { oldWindowId, oldPosition });
       queue("tabs.onAttached", t.id, { newWindowId: targetId, newPosition: t.index });
+      if (selectTab) activate(t);
     } else if (oldPosition !== t.index) {
       queue("tabs.onMoved", t.id, { windowId: targetId, fromIndex: oldPosition, toIndex: t.index });
     }
@@ -279,47 +280,53 @@ export function createFirefox(setup = {}) {
   api("tabs", "group", options => {
     const tabs = asArray(options.tabIds).map(tabById);
     if (!tabs.length) throw new Error("No tabs to group");
+    const windowId = options.createProperties?.windowId ?? currentWindowId;
+    windowById(windowId);
     let group = options.groupId == null ? undefined : groupById(options.groupId);
-    const targetId = group?.windowId ?? options.createProperties?.windowId ?? tabs[0].windowId;
-    windowById(targetId);
-    // Unpin before calculating placement, as Firefox's group API does.
+    const targetId = group?.windowId ?? windowId;
+    const target = windowTabs(targetId);
+    // Capture the DOM insertion reference before unpinning, as ext-tabs does.
+    let insertBefore = tabs.find(tab => tab.windowId === targetId);
+    if (!group && insertBefore && insertBefore.groupId !== -1) {
+      const members = groupTabs(insertBefore.groupId);
+      if (insertBefore !== members[0]) insertBefore = target[members.at(-1).index + 1];
+    }
     for (const tab of tabs) {
       const before = { ...tab };
       pin(tab, false);
       updated(tab, before);
     }
-    let anchor;
-    if (group) anchor = groupTabs(group.id).at(-1);
-    else {
-      const first = tabs[0];
-      let index = windowTabs(targetId).length;
-      if (first.windowId === targetId) {
-        index = first.index;
-        if (first.groupId !== -1 && groupTabs(first.groupId)[0] !== first) {
-          // The DOM cannot split a group; Firefox places this after the old block.
-          index = groupTabs(first.groupId).at(-1).index + 1;
-        }
+    const sourceIds = new Set();
+    function place(tab, index) {
+      if (tab.windowId === targetId && tab.index < index) index--;
+      const sourceId = relocate(tab, targetId, index, group.id, tab.active);
+      sourceIds.add(sourceId);
+      if (sourceId !== targetId) ensureActive(sourceId);
+    }
+    let toAppend = tabs;
+    if (group) {
+      const first = groupTabs(group.id)[0];
+      const before = tabs.filter(tab => tab.windowId === windowId && tab.index < first.index);
+      if (before.length && targetId !== windowId) {
+        throw new Error("tabs.group: moving tabs before a group in another window is undefined in Firefox 157");
       }
-      anchor = windowTabs(targetId)[index - 1];
+      toAppend = tabs.filter(tab => !before.includes(tab));
+      // moveTabsBefore preserves tabIds order, unlike tabs.ungroup's index sort.
+      let anchor;
+      for (const tab of before) {
+        place(tab, anchor ? anchor.index + 1 : first.index);
+        anchor = tab;
+      }
+    } else {
       group = { id: nextGroup++, windowId: targetId, title: "", color: COLORS[colorIndex++ % COLORS.length], collapsed: false };
       groups.push(group);
       queue("tabGroups.onCreated", group);
     }
-    const sourceIds = new Set();
-    for (const tab of tabs) {
-      if (tab === anchor) {
-        // An anchor can be the old group's last tab: change its membership in place.
-        const before = { ...tab };
-        tab.groupId = group.id;
-        updated(tab, before);
-        anchor = tab;
-        continue;
-      }
-      const target = windowTabs(targetId);
-      let index = anchor ? target.indexOf(anchor) + 1 : 0;
-      if (tab.windowId === targetId && tab.index < index) index--;
-      sourceIds.add(relocate(tab, targetId, index, group.id));
-      anchor = tab;
+    for (const tab of toAppend) {
+      // moveTabToExistingGroup does not reorder a tab already in this group.
+      if (tab.groupId === group.id) continue;
+      const last = groupTabs(group.id).at(-1);
+      place(tab, last ? last.index + 1 : insertBefore?.index ?? target.length);
     }
     removeEmptyGroups();
     for (const id of sourceIds) if (id !== targetId) closeEmptyWindow(id);
@@ -327,11 +334,21 @@ export function createFirefox(setup = {}) {
     return group.id;
   });
   api("tabs", "ungroup", ids => {
+    const byGroup = new Map();
     for (const tab of asArray(ids).map(tabById)) {
       if (tab.groupId === -1) continue;
-      const members = groupTabs(tab.groupId);
-      const index = members.at(-1).index;
-      relocate(tab, tab.windowId, index, -1);
+      if (!byGroup.has(tab.groupId)) byGroup.set(tab.groupId, []);
+      byGroup.get(tab.groupId).push(tab);
+    }
+    for (const [id, tabs] of byGroup) {
+      tabs.sort((a, b) => a.index - b.index);
+      const members = groupTabs(id);
+      let index = tabs[0] === members[0] ? members[0].index : members.at(-1).index + 1;
+      for (const tab of tabs) {
+        if (tab.index < index) index--;
+        relocate(tab, tab.windowId, index, -1);
+        index = tab.index + 1;
+      }
       removeEmptyGroups();
     }
   });
@@ -445,6 +462,7 @@ export function createFirefox(setup = {}) {
   }
   function insertNode(props, notify = true) {
     const parentId = props.parentId ?? "unfiled_____";
+    if (parentId === ROOTS[0]) throw new Error("The bookmark root cannot be modified");
     folderById(parentId);
     if (props.url != null) checkURL(props.url, true);
     const siblings = children(parentId), index = Math.max(0, Math.min(props.index ?? siblings.length, siblings.length));
@@ -474,15 +492,17 @@ export function createFirefox(setup = {}) {
   api("bookmarks", "search", q => nodes.filter(n => (q.title == null || n.title === q.title) && (q.url == null || n.url === q.url)));
   api("bookmarks", "create", insertNode);
   api("bookmarks", "update", (id, props) => {
-    const node = nodeById(id), change = {};
+    const node = nodeById(id);
     if (props.url != null) {
       checkURL(props.url, true);
       if (node.type !== "bookmark") throw new Error("Cannot set a folder URL");
     }
     for (const key of ["title", "url"]) {
-      if (props[key] != null && node[key] !== props[key]) { node[key] = props[key]; change[key] = props[key]; }
+      if (props[key] != null && node[key] !== props[key]) {
+        node[key] = props[key];
+        queue("bookmarks.onChanged", id, { [key]: props[key] });
+      }
     }
-    if (Object.keys(change).length) queue("bookmarks.onChanged", id, change);
     return node;
   });
   function mutableNode(id) {
@@ -527,14 +547,13 @@ export function createFirefox(setup = {}) {
     const defaults = typeof keys === "object" && !Array.isArray(keys) ? keys : undefined;
     for (const key of defaults ? Object.keys(defaults) : asArray(keys)) {
       if (Object.hasOwn(storage, key)) result[key] = jsonCopy(storage[key]);
-      else if (defaults) result[key] = jsonCopy(defaults[key]);
+      else if (defaults && defaults[key] !== undefined) result[key] = jsonCopy(defaults[key]);
     }
     return result;
   });
   api("storage.local", "set", obj => {
     const changes = {}, values = jsonCopy(obj);
     for (const [key, value] of Object.entries(values)) {
-      if (JSON.stringify(storage[key]) === JSON.stringify(value)) continue;
       changes[key] = Object.hasOwn(storage, key) ? { oldValue: storage[key], newValue: value } : { newValue: value };
       storage[key] = value;
     }

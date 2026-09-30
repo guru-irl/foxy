@@ -89,6 +89,22 @@ test("create handles current window, pinned range, discarded titles and activati
   await invariants(ff);
 });
 
+test("create defaults to the calling page window in a two-window fixture, not setup order or focus", async () => {
+  const ff = createFirefox({ windows: [{ id: 1, focused: true }, { id: 2 }], currentWindowId: 2,
+    tabs: [{ id: 1, windowId: 1 }, { id: 2, windowId: 2 }] });
+  const log = logEvents(ff, ["tabs.onCreated"]);
+  const tab = await ff.browser.tabs.create({ url: "https://example.com/a" });
+  assert.equal(tab.windowId, 2);
+  assert.equal(tab.index, 1);
+  assert.equal(ff.layout(1), "| 1");
+  assert.equal(ff.layout(2), "| 2 3");
+  assert.deepEqual((await ff.browser.tabs.query({ active: true })).map(t => t.id), [1, 3]);
+  assert.deepEqual(log, []);
+  await ff.settle();
+  assert.deepEqual(log, [["tabs.onCreated", tab]]);
+  await invariants(ff);
+});
+
 test("create joins a group only between two of its tabs", async () => {
   const ff = strip();
   const inside = await ff.browser.tabs.create({ index: 3, active: false });
@@ -122,6 +138,20 @@ test("update activates, pins out of groups, unpins at the boundary and loads dis
   const tab = await ff.browser.tabs.create({ discarded: true });
   assert.equal((await ff.browser.tabs.update(tab.id, { url: "https://example.com/a" })).discarded, false);
   await invariants(ff);
+});
+
+test("updating the already-active tab does not emit onActivated, but selecting another tab does", async () => {
+  const ff = createFirefox({ tabs: [{ id: 1, windowId: 1 }, { id: 2, windowId: 1 }] });
+  const log = logEvents(ff, ["tabs.onActivated"]);
+  await ff.browser.tabs.update(1, { active: true });
+  await ff.settle();
+  assert.deepEqual(log, []);
+  await ff.browser.tabs.update(2, { active: true });
+  await ff.browser.tabs.update(2, { active: true });
+  assert.deepEqual(log, []);
+  await ff.settle();
+  assert.deepEqual(log, [["tabs.onActivated", { tabId: 2, windowId: 1 }]]);
+  assert.deepEqual((await ff.browser.tabs.query({ active: true })).map(t => t.id), [2]);
 });
 
 test("same-window moves take the forward or backward neighbor group and no-op at own index", async () => {
@@ -172,6 +202,9 @@ test("adoption inserts before target, takes its group, keeps pinned and closes e
   await ff.settle();
   assert.deepEqual(log[0], ["tabs.onDetached", 1, { oldWindowId: 1, oldPosition: 0 }]);
   assert.deepEqual(log[1], ["tabs.onAttached", 1, { newWindowId: 2, newPosition: 2 }]);
+  assert.deepEqual(log[2], ["tabs.onUpdated", 1, { groupId: 101 }, await ff.browser.tabs.get(1)]);
+  assert.equal(log[2][3].groupId, 101);
+  assert.equal(log[2][3].windowId, 2);
   assert.deepEqual(log.at(-1), ["windows.onRemoved", 1]);
   await invariants(ff);
 });
@@ -238,15 +271,163 @@ test("new groups form at first tab or target end with cycling colors and created
   await invariants(ff);
 });
 
-test("ungroup puts each tab just after the remaining group and removes empty groups", async () => {
+test("group placement defaults to the calling window rather than the first tab's window", async () => {
+  const ff = createFirefox({ windows: [{ id: 1 }, { id: 2, focused: true }], currentWindowId: 1,
+    tabs: [{ id: 1, windowId: 1 }, { id: 2, windowId: 1 }, { id: 3, windowId: 2 }, { id: 4, windowId: 2 }] });
+  const id = await ff.browser.tabs.group({ tabIds: [3] });
+  assert.equal((await ff.browser.tabGroups.get(id)).windowId, 1);
+  assert.equal(ff.layout(1), `| 1 2 [${id}: 3]`);
+  assert.equal(ff.layout(2), "| 4");
+  await invariants(ff);
+});
+
+test("group placement anchors on the first listed tab already in the target window", async () => {
+  const ff = createFirefox({ windows: [{ id: 1 }, { id: 2 }],
+    tabs: [{ id: 1, windowId: 1 }, { id: 2, windowId: 1 }, { id: 3, windowId: 2 }, { id: 4, windowId: 2 }] });
+  const id = await ff.browser.tabs.group({ tabIds: [3, 1], createProperties: { windowId: 1 } });
+  assert.equal(ff.layout(1), `| [${id}: 3 1] 2`);
+  assert.equal(ff.layout(2), "| 4");
+  await invariants(ff);
+});
+
+for (const [anchor, want] of [[1, "| [102: 4 1] [101: 2] 3"], [2, "| [101: 1] [102: 4 2] 3"]]) {
+  test(`group placement respects the old group boundary for local anchor ${anchor}`, async () => {
+    const ff = createFirefox({ windows: [{ id: 1 }, { id: 2 }], groups: [{ id: 101, windowId: 1 }],
+      tabs: [{ id: 1, windowId: 1, groupId: 101 }, { id: 2, windowId: 1, groupId: 101 },
+        { id: 3, windowId: 1 }, { id: 4, windowId: 2 }, { id: 5, windowId: 2 }] });
+    await ff.browser.tabs.group({ tabIds: [4, anchor], createProperties: { windowId: 1 } });
+    assert.equal(ff.layout(1), want);
+    assert.equal(ff.layout(2), "| 5");
+    await invariants(ff);
+  });
+}
+
+test("group placement leaves existing members where they are without membership or move events", async () => {
+  const ff = strip();
+  const log = logEvents(ff, ["tabs.onMoved", "tabs.onUpdated"]);
+  await ff.browser.tabs.group({ tabIds: [3], groupId: 101 });
+  assert.equal(ff.layout(1), "P1 | 2 [101: 3 4] 5");
+  await ff.browser.tabs.group({ tabIds: [4, 3], groupId: 101 });
+  assert.equal(ff.layout(1), "P1 | 2 [101: 3 4] 5");
+  await ff.settle();
+  assert.deepEqual(log, []);
+  await ff.browser.tabs.group({ tabIds: [2], groupId: 101 });
+  assert.equal(ff.layout(1), "P1 | [101: 2 3 4] 5");
+  await ff.settle();
+  assert.deepEqual(log.filter(e => e[0] === "tabs.onUpdated").map(e => [e[1], e[2]]), [[2, { groupId: 101 }]]);
+  await invariants(ff);
+});
+
+test("group placement prepends before-tabs and appends after-tabs in tabIds order", async () => {
+  const ff = createFirefox({ groups: [{ id: 101, windowId: 1 }],
+    tabs: [1, 2, 3, 4, 5, 6, 7].map(id => ({ id, windowId: 1, groupId: id === 4 || id === 5 ? 101 : -1 })) });
+  const log = logEvents(ff, ["tabs.onUpdated"]);
+  await ff.browser.tabs.group({ tabIds: [3, 7, 1, 5, 2, 6, 4], groupId: 101 });
+  assert.equal(ff.layout(1), "| [101: 3 1 2 4 5 7 6]");
+  assert.deepEqual(log, []);
+  await ff.settle();
+  assert.deepEqual(log.map(e => [e[1], e[2]]),
+    [[3, { groupId: 101 }], [1, { groupId: 101 }], [2, { groupId: 101 }],
+      [7, { groupId: 101 }], [6, { groupId: 101 }]]);
+  await invariants(ff);
+});
+
+test("group placement partitions local before-tabs from foreign and local after-tabs", async () => {
+  const ff = createFirefox({ windows: [{ id: 1 }, { id: 2 }], groups: [{ id: 101, windowId: 1 }],
+    tabs: [{ id: 1, windowId: 1 }, { id: 2, windowId: 1, groupId: 101 },
+      { id: 3, windowId: 1 }, { id: 4, windowId: 2 }, { id: 5, windowId: 2 }] });
+  await ff.browser.tabs.group({ tabIds: [4, 1, 2, 3], groupId: 101 });
+  assert.equal(ff.layout(1), "| [101: 1 2 4 3]");
+  assert.equal(ff.layout(2), "| 5");
+  await invariants(ff);
+});
+
+for (const [createProperties, want] of [
+  [undefined, "| 3 [101: 4 5 2]"],
+  [{ windowId: 2 }, "| 3 [101: 2 4 5]"],
+]) {
+  test(`group placement partitions against the calling or explicit window, not the group's window (${JSON.stringify(createProperties)})`, async () => {
+    const ff = createFirefox({ windows: [{ id: 1 }, { id: 2 }], currentWindowId: 1,
+      groups: [{ id: 101, windowId: 2 }], tabs: [{ id: 1, windowId: 1 },
+        { id: 2, windowId: 2 }, { id: 3, windowId: 2 },
+        { id: 4, windowId: 2, groupId: 101 }, { id: 5, windowId: 2, groupId: 101 }] });
+    await ff.browser.tabs.group({ tabIds: [2, 5], groupId: 101, createProperties });
+    assert.equal(ff.layout(1), "| 1");
+    assert.equal(ff.layout(2), want);
+    await invariants(ff);
+  });
+}
+
+for (const [currentWindowId, createProperties] of [[1, undefined], [2, { windowId: 1 }]]) {
+  test(`group placement rejects undefined cross-window before-group moves (caller ${currentWindowId})`, async () => {
+    const ff = createFirefox({ windows: [{ id: 1 }, { id: 2 }], currentWindowId,
+      groups: [{ id: 101, windowId: 2 }], tabs: [{ id: 1, windowId: 1 }, { id: 2, windowId: 1 },
+        { id: 3, windowId: 2 }, { id: 4, windowId: 2, groupId: 101 }, { id: 5, windowId: 2, groupId: 101 }] });
+    const before = await ff.browser.windows.getAll({ populate: true });
+    const log = logEvents(ff, ["tabs.onDetached", "tabs.onAttached", "tabs.onMoved", "tabs.onUpdated", "tabGroups.onRemoved"]);
+    await assert.rejects(ff.browser.tabs.group({ tabIds: [1, 2], groupId: 101, createProperties }), {
+      message: "tabs.group: moving tabs before a group in another window is undefined in Firefox 157",
+    });
+    assert.deepEqual(await ff.browser.windows.getAll({ populate: true }), before);
+    await ff.settle();
+    assert.deepEqual(log, []);
+    // Equal indexes are tabsAfter, so this defined adoption remains supported.
+    await ff.browser.tabs.group({ tabIds: [2], groupId: 101, createProperties });
+    assert.equal(ff.layout(1), "| 1");
+    assert.equal(ff.layout(2), "| 3 [101: 4 5 2]");
+    await invariants(ff);
+  });
+}
+
+test("group placement validates an explicit window even for an existing group", async () => {
+  const ff = strip();
+  await assert.rejects(ff.browser.tabs.group({ tabIds: [2], groupId: 101, createProperties: { windowId: 99 } }),
+    { message: "Invalid window ID: 99" });
+  assert.equal(ff.layout(1), "P1 | 2 [101: 3 4] 5");
+});
+
+test("ungroup preserves strip order and removes empty groups", async () => {
   const ff = strip();
   const log = logEvents(ff, ["tabs.onUpdated", "tabGroups.onRemoved"]);
   await ff.browser.tabs.ungroup([3, 4]);
-  assert.equal(ff.layout(1), "P1 | 2 4 3 5");
+  assert.equal(ff.layout(1), "P1 | 2 3 4 5");
   await ff.browser.tabs.ungroup(2);
   await ff.settle();
   assert.deepEqual(log.filter(e => e[0] === "tabs.onUpdated").map(e => e[2]), [{ groupId: -1 }, { groupId: -1 }]);
   assert.equal(log.filter(e => e[0] === "tabGroups.onRemoved").length, 1);
+  await invariants(ff);
+});
+
+for (const [ids, want] of [
+  [[3], "P1 | 2 3 [101: 4] 5"],
+  [[4], "P1 | 2 [101: 3] 4 5"],
+  [[3, 4], "P1 | 2 3 4 5"],
+  [[4, 3], "P1 | 2 3 4 5"],
+]) {
+  test(`ungroup ${ids} uses the group boundary in index order`, async () => {
+    const ff = strip();
+    const log = logEvents(ff, ["tabs.onUpdated", "tabGroups.onRemoved"]);
+    await ff.browser.tabs.ungroup(ids);
+    assert.equal(ff.layout(1), want);
+    assert.deepEqual(log, []);
+    await ff.settle();
+    assert.deepEqual(log.filter(e => e[0] === "tabs.onUpdated").map(e => [e[1], e[2], e[3].groupId]),
+      [...ids].sort((a, b) => a - b).map(id => [id, { groupId: -1 }, -1]));
+    assert.equal(log.filter(e => e[0] === "tabGroups.onRemoved").length, ids.length === 2 ? 1 : 0);
+    await invariants(ff);
+  });
+}
+
+test("ungroup processes groups independently and preserves nonselected members", async () => {
+  const ff = createFirefox({ windows: [{ id: 1 }, { id: 2 }],
+    groups: [{ id: 101, windowId: 1 }, { id: 102, windowId: 2 }],
+    tabs: [{ id: 1, windowId: 1, groupId: 101 }, { id: 2, windowId: 1, groupId: 101 },
+      { id: 3, windowId: 1, groupId: 101 }, { id: 4, windowId: 1 },
+      { id: 5, windowId: 2, groupId: 102 }, { id: 6, windowId: 2, groupId: 102 },
+      { id: 7, windowId: 2, groupId: 102 }, { id: 8, windowId: 2 }] });
+  await ff.browser.tabs.ungroup([7, 3, 6, 1, 8]);
+  assert.equal(ff.layout(1), "| 1 3 [101: 2] 4");
+  assert.equal(ff.layout(2), "| [102: 5] 6 7 8");
   await invariants(ff);
 });
 
@@ -375,7 +556,7 @@ test("bookmark tree roots, seeded nodes, subtree, children and get return indepe
   assert.equal((await b.get(child.id))[0].title, "Page");
 });
 
-test("bookmark create, exact search, update and events reflect only changed fields", async () => {
+test("bookmark create and search work, and update emits separate changed-field events", async () => {
   const ff = createFirefox();
   const b = ff.browser.bookmarks;
   const log = logEvents(ff, ["bookmarks.onCreated", "bookmarks.onChanged"]);
@@ -388,8 +569,38 @@ test("bookmark create, exact search, update and events reflect only changed fiel
   await b.update(first.id, { title: "New", url: "https://example.com/c" });
   assert.equal(log.length, 0);
   await ff.settle();
-  assert.deepEqual(log.map(e => e[0]), ["bookmarks.onCreated", "bookmarks.onCreated", "bookmarks.onChanged"]);
-  assert.deepEqual(log[2], ["bookmarks.onChanged", first.id, { title: "New", url: "https://example.com/c" }]);
+  assert.deepEqual(log, [
+    ["bookmarks.onCreated", first.id, first],
+    ["bookmarks.onCreated", second.id, second],
+    ["bookmarks.onChanged", first.id, { title: "New" }],
+    ["bookmarks.onChanged", first.id, { url: "https://example.com/c" }],
+  ]);
+  log.length = 0;
+  await b.update(first.id, { title: "New", url: "https://example.com/c" });
+  await b.update(first.id, { title: "Title only" });
+  await b.update(first.id, { url: "https://example.com/d" });
+  await ff.settle();
+  assert.deepEqual(log, [
+    ["bookmarks.onChanged", first.id, { title: "Title only" }],
+    ["bookmarks.onChanged", first.id, { url: "https://example.com/d" }],
+  ]);
+});
+
+test("bookmark create rejects the root parent without mutating the tree or queuing events", async () => {
+  const ff = createFirefox();
+  const b = ff.browser.bookmarks;
+  const tree = await b.getTree();
+  const log = logEvents(ff, ["bookmarks.onCreated"]);
+  for (const props of [{ title: "Folder" }, { title: "Page", url: "https://example.com/a" }]) {
+    await assert.rejects(b.create({ parentId: "root________", ...props }));
+  }
+  assert.deepEqual(await b.getTree(), tree);
+  await ff.settle();
+  assert.deepEqual(log, []);
+  for (const parentId of ["menu________", "toolbar_____", "unfiled_____", "mobile______"]) {
+    const node = await b.create({ parentId, title: "Page", url: "https://example.com/a" });
+    assert.equal(node.parentId, parentId);
+  }
 });
 
 test("bookmark move reindexes siblings and emits old and new locations", async () => {
@@ -455,6 +666,14 @@ test("storage get accepts all, string, array and default maps with JSON copies",
   assert.deepEqual(await s.get("a"), { a: { nested: [1] } });
 });
 
+test("storage get omits missing undefined defaults and returns stored values over undefined defaults", async () => {
+  const s = createFirefox().browser.storage.local;
+  assert.deepEqual(await s.get({ k: undefined }), {});
+  await s.set({ stored: 0 });
+  assert.deepEqual(await s.get({ stored: undefined, missing: undefined, fallback: null, other: { nested: [1] } }),
+    { stored: 0, fallback: null, other: { nested: [1] } });
+});
+
 test("storage set remove and clear emit local changes with old and new JSON values", async () => {
   const ff = createFirefox();
   const log = logEvents(ff, ["storage.onChanged"]);
@@ -471,6 +690,33 @@ test("storage set remove and clear emit local changes with old and new JSON valu
     ["storage.onChanged", { a: { oldValue: 3 } }, "local"],
     ["storage.onChanged", { b: { oldValue: 2 } }, "local"],
   ]);
+});
+
+test("storage set emits every written key even when unchanged but missing remove and empty clear do not", async () => {
+  const ff = createFirefox();
+  const log = logEvents(ff, ["storage.onChanged"]);
+  const s = ff.browser.storage.local;
+  await s.set({ a: 1, b: { nested: [2] }, c: false });
+  await ff.settle();
+  log.length = 0;
+  await s.set({ a: 1, b: { nested: [2] }, c: true });
+  await s.set({ a: 1 });
+  await s.set({});
+  await s.remove("missing");
+  assert.deepEqual(log, []);
+  await ff.settle();
+  assert.deepEqual(log, [
+    ["storage.onChanged", { a: { oldValue: 1, newValue: 1 },
+      b: { oldValue: { nested: [2] }, newValue: { nested: [2] } }, c: { oldValue: false, newValue: true } }, "local"],
+    ["storage.onChanged", { a: { oldValue: 1, newValue: 1 } }, "local"],
+  ]);
+  await s.clear();
+  await ff.settle();
+  log.length = 0;
+  await s.clear();
+  await s.remove(["a", "b"]);
+  await ff.settle();
+  assert.deepEqual(log, []);
 });
 
 test("runtime supplies identity and URL and asynchronously returns first defined listener result", async () => {
@@ -686,7 +932,7 @@ test("new-group creation precedes membership events and closed-group snapshots k
 });
 
 
-test("adopting tabs or groups does not steal the destination's active tab", async () => {
+test("adopting via group selects an active source tab while move and block preserve destination selection", async () => {
   for (const operation of ["move", "group", "block"]) {
     const ff = createFirefox({ windows: [{ id: 1 }, { id: 2 }],
       groups: [{ id: 101, windowId: 1 }, { id: 102, windowId: 2 }],
@@ -695,11 +941,46 @@ test("adopting tabs or groups does not steal the destination's active tab", asyn
     if (operation === "move") await ff.browser.tabs.move(1, { windowId: 2, index: -1 });
     if (operation === "group") await ff.browser.tabs.group({ tabIds: [1], groupId: 102 });
     if (operation === "block") await ff.browser.tabGroups.move(101, { windowId: 2, index: -1 });
-    assert.equal((await ff.browser.tabs.get(1)).active, false, operation);
-    assert.equal((await ff.browser.tabs.get(3)).active, true, operation);
+    assert.equal((await ff.browser.tabs.get(1)).active, operation === "group", operation);
+    assert.equal((await ff.browser.tabs.get(3)).active, operation !== "group", operation);
     assert.equal((await ff.browser.tabs.get(2)).active, true, operation);
     await invariants(ff);
   }
+});
+
+for (const kind of ["new", "existing"]) {
+  for (const tabId of [1, 2]) {
+    test(`group adoption selects only the active source tab ${tabId} into a ${kind} group`, async () => {
+      const ff = createFirefox({ windows: [{ id: 1 }, { id: 2 }], groups: [{ id: 101, windowId: 2 }],
+        tabs: [{ id: 1, windowId: 1 }, { id: 2, windowId: 1 }, { id: 3, windowId: 2, groupId: 101 }] });
+      const log = logEvents(ff, ["tabs.onActivated", "tabs.onUpdated"]);
+      const options = kind === "new" ? { createProperties: { windowId: 2 } } : { groupId: 101 };
+      const id = await ff.browser.tabs.group({ tabIds: [tabId], ...options });
+      assert.equal((await ff.browser.tabs.get(tabId)).active, tabId === 1);
+      assert.equal((await ff.browser.tabs.get(3)).active, tabId !== 1);
+      assert.equal((await ff.browser.tabs.get(tabId === 1 ? 2 : 1)).active, true);
+      assert.equal(ff.layout(1), tabId === 1 ? "| 2" : "| 1");
+      assert.equal(ff.layout(2), kind === "new" ? `| [101: 3] [${id}: ${tabId}]` : `| [101: 3 ${tabId}]`);
+      assert.deepEqual(log, []);
+      await ff.settle();
+      assert.deepEqual(log.filter(e => e[0] === "tabs.onActivated" && e[1].windowId === 2),
+        tabId === 1 ? [["tabs.onActivated", { tabId: 1, windowId: 2 }]] : []);
+      assert.deepEqual(log.filter(e => e[0] === "tabs.onUpdated").map(e => [e[1], e[2], e[3].active]),
+        [[tabId, { groupId: id }, tabId === 1]]);
+      await invariants(ff);
+    });
+  }
+}
+
+test("group adoption uses source selection for each tab as the source becomes empty", async () => {
+  const ff = createFirefox({ windows: [{ id: 1 }, { id: 2 }], groups: [{ id: 101, windowId: 2 }],
+    tabs: [{ id: 1, windowId: 1 }, { id: 2, windowId: 1 }, { id: 3, windowId: 2, groupId: 101 }] });
+  await ff.browser.tabs.group({ tabIds: [1, 2], groupId: 101 });
+  assert.deepEqual((await ff.browser.tabs.query({ windowId: 2, active: true })).map(t => t.id), [2]);
+  assert.equal(ff.layout(1), "| ");
+  assert.equal(ff.layout(2), "| [101: 3 1 2]");
+  assert.deepEqual((await ff.browser.windows.getAll()).map(w => w.id), [2]);
+  await invariants(ff);
 });
 
 test("automatic activation after removal loads a discarded tab and emits its discarded change", async () => {
