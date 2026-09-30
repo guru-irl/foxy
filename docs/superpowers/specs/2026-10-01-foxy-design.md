@@ -41,28 +41,33 @@ userContent.css, user.js) and the fonts.
 ```
 foxy/
   extension/          the add-on (manifest, pages, src, background)
+  extension/fonts/    GoogleSansFlex.ttf, CascadiaMono.ttf, OFL and TRADEMARKS files
+                      (shared with the theme through a symlink)
   theme/              userChrome.css, userContent.css, user.js
-  fonts/              GoogleSansFlex.ttf, CascadiaMono.ttf, OFL and TRADEMARKS files
-  scripts/            build.py, sign.py, preview.py, install-theme.py (+ tests)
+  scripts/            build.py, sign.py, preview.py, install_theme.py,
+                      check_private.py (+ tests)
   test/               node tests for extension/src
   docs/
 ```
 
-- `build.py` packages `extension/` plus `fonts/` into the xpi (fonts at
-  `fonts/` inside the xpi). Nothing from `theme/` goes into the xpi.
+- `build.py` packages `extension/` into the xpi (`dist/foxy-<version>.zip`).
+  Nothing from `theme/` goes into the xpi.
 - `theme/` becomes the source of truth for the browser theme. It starts as a
   copy of the profile's current `userChrome.css`, `userContent.css` and
   `user.js`. The Liquid Fox base part has no licence notice; the repo stays
   private for that reason.
-- `scripts/install-theme.py` finds the default profile (profiles.ini),
+- `scripts/install_theme.py` finds the default profile (profiles.ini),
   moves the profile's current `chrome/userChrome.css`, `chrome/userContent.css`,
   `chrome/fonts` and `user.js` into `chrome/backup-<timestamp>/`, and replaces
-  them with symlinks to the repo's `theme/` files and `fonts/`. Idempotent: a
+  them with symlinks to the repo's `theme/` files and `extension/fonts/`. Idempotent: a
   second run with the links already in place changes nothing. `--profile PATH`
   overrides the profile. Firefox still needs a restart to load changes.
 - Danfo and Bebas Neue are removed from the repo, the xpi and the theme.
-- Before every push: a check that the tracked tree contains no Microsoft
-  internal names or URLs (the pattern list lives in the script, not in docs).
+- Before every push: `scripts/check_private.py` checks that tracked files and
+  commit messages contain no Microsoft internal names or URLs. Its pattern
+  list lives outside the repo (`~/.config/foxy/scan-patterns.txt`).
+- The signing credentials stay in `~/.config/liquidfox-newtab/amo.env`,
+  outside the repo.
 - The add-on keeps ID `{4408f971-7930-41ea-9f93-b01231e40861}`, so each
   signed version installs over the last.
 
@@ -77,8 +82,8 @@ everywhere. Only group titles are slanted.
 | Default text (page and Firefox's UI) | wght 400, wdth 100, opsz automatic |
 | Clock | wght 900, wdth 100, opsz 144, tabular figures, upright |
 | Date | wght 600, capitals, letter-spacing 0.12em, upright |
-| Group titles (board columns, sidebar group names) | wght 800, wdth 50, slnt −10, capitals, letter-spacing 0.04em. The Bebas Neue look. |
-| Other column titles (PINNED, SAVED, TABS), sidebar pinned names, the "SEARCH" placeholder | Same as group titles, upright |
+| Group titles (board columns, sidebar group names) | wght 800, wdth 50, slnt −10, capitals, letter-spacing 0 (compressed). The Bebas Neue look. |
+| Other column titles (PINNED, SAVED, TABS), sidebar pinned names, the "SEARCH" placeholder | Same as group titles, upright, letter-spacing 0 |
 | Subheadings ("OTHER WINDOWS") | wght 600, wdth 90, capitals, small, letter-spacing 0.12em, faint |
 | Actions ("+ NEW GROUP", "RESTORE ALL") | wght 700, wdth 80, capitals, upright |
 | URLs and code-like text | Cascadia Mono (OFL, bundled), ligatures off |
@@ -89,8 +94,8 @@ everywhere. Only group titles are slanted.
   line at the bottom of the window. Native macOS context menus are drawn by the
   system and keep the system font. Web pages and Firefox's about: pages are
   not changed.
-- The theme loads the fonts from `chrome/fonts/` (symlinked); the page from
-  the xpi's `fonts/`.
+- The theme loads the fonts from `chrome/fonts/` (a symlink to
+  `extension/fonts/`); the page from the xpi's `fonts/`.
 - Group title size: chosen so the capitals are exactly as tall as the 12px
   dot (Google Sans Flex capitals are 0.716em at the default optical size; the
   exact size is set from a pixel measurement in the headless preview). The dot
@@ -341,6 +346,10 @@ page going to sleep.
   that merges and replays events; checks for convergence, no echo loops,
   whole-group close keeping the folder, window close and quit writing
   nothing, the safety rule, startup restore of pins and the banner.
+- DOM tests in real (headless) Firefox: `scripts/browser_test.py` serves the
+  repo on localhost, opens test pages that run the board against the fake
+  browser (drag and drop with real DragEvents, editors, live updates), and
+  collects the results over HTTP. No npm packages needed.
 - Headless preview scenarios for layout (1, 3 and 8 groups; two windows;
   saved entries; banner; narrow window), used for pixel checks of the font
   metrics and dot alignment. Not shown to the user.
