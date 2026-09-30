@@ -35,10 +35,6 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     delete state.tabs[tabId];
     delete state.quietUntil[tabId];
   }
-  function cantReopen(folderId, url) {
-    const state = getState(), urls = state.cantReopen[folderId] ??= [];
-    if (!urls.includes(url)) urls.push(url);
-  }
   const mapped = bookmarkId => Object.entries(getState().tabs)
     .find(([, entry]) => entry.bookmarkId === bookmarkId);
   async function bookmarks(folderId) {
@@ -46,18 +42,21 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
       .filter(node => node.type === "bookmark").sort((a, b) => a.index - b.index);
   }
 
-  // Place this tab only, using live indices (tab ids and bookmark indices
-  // need not be contiguous). Pins are ordered within their window only.
+  // Place only an arriving tab. Existing members' relative order belongs to
+  // outbound unless a bookmarkMoved event explicitly requests a whole sort.
   async function positionTab(tabId, folderId, nodes) {
-    const state = getState(), tab = await api.tabs.get(tabId);
+    const state = getState();
+    const members = await api.tabs.query(folderId === state.pinnedId
+      ? { pinned: true } : { groupId: groupOfFolder(state, folderId) });
+    const byId = new Map(members.map(tab => [tab.id, tab])), tab = byId.get(tabId);
     const index = nodes.findIndex(node => node.id === state.tabs[tabId]?.bookmarkId);
-    if (index < 0) return;
+    if (!tab || index < 0) return;
     const neighbors = [];
     for (const node of nodes) {
       const pair = mapped(node.id);
       if (!pair || pair[1].folderId !== folderId) continue;
-      const other = await attempt(() => api.tabs.get(Number(pair[0])));
-      if (other && other.windowId === tab.windowId && (tab.pinned ? other.pinned : other.groupId === tab.groupId)) {
+      const other = byId.get(Number(pair[0]));
+      if (other && other.windowId === tab.windowId) {
         neighbors.push({ tab: other, index: node.index });
       }
     }
@@ -74,6 +73,16 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
   async function transfer(tabId, entry, folderId, group) {
     const tab = await api.tabs.get(tabId);
     if (await isShown(tab)) { defer(entry.folderId, folderId); return false; }
+    if (folderId === getState().pinnedId) {
+      if (tab.groupId != null && tab.groupId !== -1) await api.tabs.ungroup([tabId]);
+      if (!tab.pinned) await api.tabs.update(tabId, { pinned: true });
+      entry.folderId = folderId;
+      await positionTab(tabId, folderId, await bookmarks(folderId));
+      return true;
+    }
+    // A pin cannot be moved to an unpinned group index. Unpin first, before
+    // attaching it to the destination window or calling tabs.group.
+    if (tab.pinned) await api.tabs.update(tabId, { pinned: false });
     if (tab.windowId !== group.windowId) {
       // Firefox 157 grouping a tab before a group in another window is
       // undefined. Attach at the target group's end before assigning it.
@@ -90,6 +99,10 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
   async function departure(tabId, entry) {
     const nodes = await attempt(() => api.bookmarks.get(entry.bookmarkId));
     const bookmark = nodes?.[0], state = getState();
+    if (bookmark?.parentId === state.pinnedId) {
+      await transfer(tabId, entry, state.pinnedId, null);
+      return;
+    }
     const groupId = bookmark ? groupOfFolder(state, bookmark.parentId) : null;
     const group = groupId === null ? null : await attempt(() => api.tabGroups.get(groupId));
     if (group) {
@@ -103,7 +116,7 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
   }
 
   async function openBookmark(node, folderId, group) {
-    if (!isOpenableUrl(node.url)) { cantReopen(folderId, node.url); return; }
+    if (!isOpenableUrl(node.url)) return;
     let tab;
     if (folderId === getState().pinnedId) {
       const win = await api.windows.getLastFocused({ windowTypes: ["normal"] });
@@ -120,6 +133,17 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
       tab = await api.tabs.create({ windowId: group.windowId, url: node.url,
         title: node.title, discarded: true, active: false });
     }
+    if (!tab.pinned) {
+      try { await api.tabs.group({ groupId: group.id, tabIds: [tab.id] }); }
+      catch (error) {
+        warn(error);
+        // No mapping yet: the cleanup's onRemoved event cannot make outbound
+        // delete the remote bookmark. Leave it for a later reconcile retry.
+        const live = await attempt(() => api.tabs.get(tab.id));
+        if (live && !await isShown(live)) await attempt(() => api.tabs.remove(tab.id));
+        return;
+      }
+    }
     const state = getState();
     state.tabs[tab.id] = { bookmarkId: node.id, folderId, url: node.url, title: tab.title ?? "" };
     state.quietUntil[tab.id] = now() + quietMs;
@@ -127,7 +151,6 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
       // Firefox cannot create a discarded pin. Discard failure is non-fatal.
       await attempt(() => api.tabs.discard(tab.id));
     } else {
-      await api.tabs.group({ groupId: group.id, tabIds: [tab.id] });
       await positionTab(tab.id, folderId, await bookmarks(folderId));
     }
   }
@@ -136,7 +159,7 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     // Direction is relative to lastSynced, not the live tab. A local navigation
     // awaiting outbound must never be sent back to an unchanged bookmark URL.
     if (node.url === entry.url) return;
-    if (!isOpenableUrl(node.url)) { cantReopen(entry.folderId, node.url); return; }
+    if (!isOpenableUrl(node.url)) return;
     const tab = await api.tabs.get(tabId);
     if (await isShown(tab)) { defer(entry.folderId); return; }
     const updated = await api.tabs.update(tabId, { url: node.url });
@@ -152,22 +175,57 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     const expected = nodes.map(node => mapped(node.id)).filter(pair => pair?.[1].folderId === folderId)
       .map(pair => Number(pair[0])).filter(id => members.some(tab => tab.id === id));
     const actual = members.filter(tab => expected.includes(tab.id));
-    // Do not implement a deferred move indirectly by shuffling its neighbors.
-    for (const [index, tab] of actual.entries()) {
-      if (expected[index] !== tab.id && await isShown(tab)) { defer(folderId); return; }
+    if (expected.every((id, index) => actual[index]?.id === id)) return;
+    // Place a prefix in bookmark order. Mutate this detached snapshot after
+    // each planned move, so later targets use final indices without n rereads.
+    const moves = [], touched = new Set();
+    let target = members[0]?.pinned ? 0 : members[0]?.index;
+    for (const id of expected) {
+      const tab = members.find(member => member.id === id), from = tab.index;
+      if (from !== target) {
+        moves.push({ id, index: target });
+        for (const member of members) {
+          const before = member.index;
+          if (member.id === id) member.index = target;
+          else if (from > target && member.index >= target && member.index < from) member.index++;
+          else if (from < target && member.index > from && member.index <= target) member.index--;
+          if (before !== member.index) touched.add(member);
+        }
+      }
+      target = tab.index + 1;
     }
-    for (const id of expected) await positionTab(id, folderId, nodes);
+    // Do not implement a deferred move indirectly by shuffling neighbours,
+    // including shown members whose departure to another folder is blocked.
+    for (const tab of touched) {
+      if (await isShown(tab)) { defer(folderId); return; }
+    }
+    for (const move of moves) await api.tabs.move(move.id, { index: move.index });
   }
 
   async function reconcileFolder(folderId, retryOrder = false) {
     const state = getState(), pinned = folderId && folderId === state.pinnedId;
     const groupId = groupOfFolder(state, folderId);
     if (!pinned && groupId === null) return; // Saved here, never auto-open.
-    const folder = (await attempt(() => api.bookmarks.get(folderId)))?.[0];
-    if (!folder) { await folderRemoved(folderId); return; }
+    let folder;
+    try { [folder] = await api.bookmarks.get(folderId); }
+    catch (error) {
+      // Firefox's missing-GUID error (and the strict fake's equivalent) is
+      // deletion evidence. Permission/backend errors are not.
+      if (/^(?:Bookmark not found[.!]?$|Invalid bookmark ID:)/i.test(error?.message ?? String(error))) {
+        await folderRemoved(folderId);
+      } else {
+        warn(error);
+        if (retryOrder) defer(folderId);
+      }
+      return;
+    }
+    if (!folder) return;
     const group = pinned ? null : await attempt(() => api.tabGroups.get(groupId));
     if (!pinned && !group) return; // A missing group at startup is not deletion.
     const nodes = await bookmarks(folderId), ids = new Set(nodes.map(n => n.id));
+    const unopenable = [...new Set(nodes.filter(node => !isOpenableUrl(node.url)).map(node => node.url))];
+    if (unopenable.length) state.cantReopen[folderId] = unopenable;
+    else delete state.cantReopen[folderId];
     if (group) {
       const members = await api.tabs.query({ windowId: group.windowId, groupId });
       const allDeparting = members.length && members.every(tab => {
@@ -191,12 +249,7 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
         if (pair && pair[1].folderId !== folderId) {
           // Destination-first events must not create a duplicate of a tab that
           // is still mapped to its source (including a deferred source move).
-          if (group) {
-            if (!await transfer(Number(pair[0]), pair[1], folderId, group)) return;
-          } else {
-            await departure(Number(pair[0]), pair[1]);
-            if (mapped(node.id)) { defer(pair[1].folderId, folderId); return; }
-          }
+          if (!await transfer(Number(pair[0]), pair[1], folderId, group)) return;
         }
         pair = mapped(node.id);
         if (!pair) await openBookmark(node, folderId, group);
@@ -209,7 +262,9 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
         await api.tabGroups.update(groupId, decoded);
         state.groups[groupId].title = title;
       }
-      await orderMapped(folderId, nodes, await api.tabs.query({ windowId: group.windowId, groupId: group.id }));
+      if (retryOrder) {
+        await orderMapped(folderId, nodes, await api.tabs.query({ windowId: group.windowId, groupId: group.id }));
+      }
     } else if (retryOrder) {
       // A deferred explicit pin move is retried per window. New pins already
       // use bookmark-relative placement; never move pins between windows.
@@ -256,14 +311,13 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
 
   async function bookmarkMoved(id, moveInfo) {
     if (moveInfo.parentId !== moveInfo.oldParentId) {
-      await reconcileFolder(moveInfo.oldParentId);
-      await reconcileFolder(moveInfo.parentId);
+      await reconcileFolder(moveInfo.oldParentId, true);
+      await reconcileFolder(moveInfo.parentId, true);
       return;
     }
-    const folderId = moveInfo.parentId, pair = mapped(id);
-    if (!pair || pair[1].folderId !== folderId) return;
-    if (folderId !== getState().pinnedId && groupOfFolder(getState(), folderId) === null) return;
-    await positionTab(Number(pair[0]), folderId, await bookmarks(folderId));
+    // Several remote moves can arrive before either event is processed.
+    // Sort the whole current folder, including when this bookmark is unmapped.
+    await reconcileFolder(moveInfo.parentId, true);
   }
 
   async function applyDeferred() {

@@ -82,6 +82,29 @@ for (const [index, layout] of [[0, "| [7: 200 30 10 20] 99"], [1, "| [7: 30 200 
   });
 }
 
+test("failed grouping closes the new tab without mapping or deleting its remote bookmark", async (t) => {
+  const f = await fixture(), group = f.api.tabs.group;
+  const b = await f.api.bookmarks.create({ parentId: f.folder(), url: url("retry-group"), title: "Retry" });
+  t.mock.method(f.api.tabs, "group", async () => { throw new Error("group denied"); });
+  const warnings = t.mock.method(console, "warn", () => {});
+  t.mock.method(console, "debug", () => {});
+  await f.inbound.reconcileFolder(f.folder());
+  assert.equal(f.state.tabs[200], undefined);
+  assert.equal(f.state.quietUntil[200], undefined);
+  assert.ok(!(await f.api.tabs.query({})).some(tab => tab.id === 200));
+  assert.ok(warnings.mock.calls.some(c => /^Foxy:/.test(c.arguments[0])));
+  f.ff.calls.length = 0;
+  await f.outbound.syncTab(200);
+  f.outbound.tabRemoved(200, { isWindowClosing: false });
+  await f.outbound.flush();
+  assert.deepEqual(bookmarkWrites(f.ff), []);
+  assert.equal((await f.api.bookmarks.get(b.id))[0].url, url("retry-group"));
+  f.api.tabs.group = group;
+  await f.inbound.reconcileFolder(f.folder());
+  assert.equal(f.state.tabs[201].bookmarkId, b.id);
+  await echoAndStable(f);
+});
+
 test("about:blank additions and URL changes are skipped and recorded once under the HTTP(S)-only ruling", async () => {
   const f = await fixture();
   await f.api.bookmarks.create({ parentId: f.folder(), index: 0, url: "about:blank", title: "Blank" });
@@ -110,20 +133,95 @@ test("removed bookmark closes only its mapped tab and deletes quiet bookkeeping"
 });
 
 for (const [id, index, layout] of [[30, 2, "| [7: 10 20 30] 99"], [20, 0, "| [7: 20 30 10] 99"]]) {
-  test(`bookmarkMoved reorders tab ${id} using the final index and does not move it twice`, async () => {
+  test(`bookmarkMoved sorts the folder for tab ${id} and repeated events are no-ops`, async () => {
     const f = await fixture(), bid = f.bookmark(id), folderId = f.folder();
     await f.api.bookmarks.move(bid, { index });
     f.ff.calls.length = 0;
     const info = { parentId: folderId, oldParentId: folderId, index };
     await f.inbound.bookmarkMoved(bid, info);
     assert.equal(f.ff.layout(1), layout);
-    assert.deepEqual(tabActions(f.ff).map(c => c.api), ["tabs.move"]);
+    const actions = tabActions(f.ff);
+    assert.ok(actions.length > 0 && actions.every(c => c.api === "tabs.move"));
+    assert.equal(new Set(actions.map(c => c.args[0])).size, actions.length, "each placed tab moves at most once");
     f.ff.calls.length = 0;
     await f.inbound.bookmarkMoved(bid, info);
     assert.deepEqual(mutations(f.ff), []);
     await echoAndStable(f);
   });
 }
+
+// Catch sequential neighbour placement that fails to sort a remote batch.
+for (const kind of ["group", "pins"]) {
+  for (const [direction, moves, expected] of [
+    ["front", [[3, 0], [2, 1]], [3, 2, 0, 1]],
+    ["back", [[0, 3], [1, 3]], [2, 3, 0, 1]],
+    ["mixed", [[3, 2], [0, 2]], [1, 3, 0, 2]],
+  ]) test(`batched ${kind} bookmark moves ${direction} converge without outbound echo`, async () => {
+    const f = await fixture();
+    let ids, folderId;
+    if (kind === "group") {
+      const tab = await f.api.tabs.create({ windowId: 1, url: url("fourth"), active: false });
+      await f.api.tabs.group({ groupId: 7, tabIds: [tab.id] });
+      await f.outbound.syncTab(tab.id);
+      ids = [30, 10, 20, tab.id];
+      folderId = f.folder();
+    } else {
+      ids = [];
+      for (let i = 0; i < 4; i++) {
+        const tab = await f.api.tabs.create({ windowId: 1, url: url(`batch-pin${i}`), pinned: true, active: false });
+        await f.outbound.syncTab(tab.id);
+        ids.push(tab.id);
+      }
+      // Another window's pin must never be included in this window's sort.
+      const other = await f.api.tabs.create({ windowId: 2, url: url("other-pin"), pinned: true, active: false });
+      await f.outbound.syncTab(other.id);
+      folderId = f.state.pinnedId;
+    }
+    for (const [i, index] of moves) await f.api.bookmarks.move(f.bookmark(ids[i]), { index });
+    for (const [i, index] of moves) {
+      await f.inbound.bookmarkMoved(f.bookmark(ids[i]), { oldParentId: folderId, parentId: folderId, index });
+    }
+    const tabs = await f.api.tabs.query({ windowId: 1, ...(kind === "group" ? { groupId: 7 } : { pinned: true }) });
+    assert.deepEqual(tabs.map(t => t.id), expected.map(i => ids[i]));
+    await echoAndStable(f);
+  });
+}
+
+test("steady-state reconcileAll reads a 30-tab group at most n plus constant times", async (t) => {
+  const f = await fixture();
+  for (let i = 3; i < 30; i++) {
+    const tab = await f.api.tabs.create({ windowId: 1, url: url(`member${i}`), active: false });
+    await f.api.tabs.group({ groupId: 7, tabIds: [tab.id] });
+    await f.outbound.syncTab(tab.id);
+  }
+  f.ff.calls.length = 0;
+  await f.inbound.reconcileAll();
+  const reads = f.ff.calls.filter(c => /^tabs\.(get|query)$/.test(c.api));
+  assert.ok(reads.length <= 40, `expected <= 40 tab reads, got ${reads.length}`);
+  t.diagnostic(`steady-state tab reads: ${reads.length}`);
+  assert.deepEqual(mutations(f.ff), []);
+  await echoAndStable(f);
+});
+
+test("reconciling two new bookmarks in a 30-tab group avoids neighbour tabs.get rereads", async (t) => {
+  const f = await fixture();
+  for (let i = 3; i < 30; i++) {
+    const tab = await f.api.tabs.create({ windowId: 1, url: url(`arrival-member${i}`), active: false });
+    await f.api.tabs.group({ groupId: 7, tabIds: [tab.id] });
+    await f.outbound.syncTab(tab.id);
+  }
+  await f.api.bookmarks.create({ parentId: f.folder(), index: 0, url: url("first-arrival"), title: "First" });
+  await f.api.bookmarks.create({ parentId: f.folder(), index: 17, url: url("middle-arrival"), title: "Middle" });
+  f.ff.calls.length = 0;
+  await f.inbound.reconcileFolder(f.folder());
+  const reads = f.ff.calls.filter(c => /^tabs\.(get|query)$/.test(c.api));
+  assert.ok(reads.length <= 40, `expected <= 40 tab reads, got ${reads.length}`);
+  t.diagnostic(`two-arrival tab reads: ${reads.length}`);
+  const tabs = await f.api.tabs.query({ groupId: 7 });
+  assert.deepEqual(tabs.slice(0, 4).map(tab => tab.id), [227, 30, 10, 20]);
+  assert.equal(tabs[17].id, 228);
+  await echoAndStable(f);
+});
 
 for (const targetFirst of [false, true]) test(`move between open groups preserves tab identity, target-first=${targetFirst}`, async () => {
   const f = await fixture(), bid = f.bookmark(10), source = f.folder(), target = f.folder(8);
@@ -181,6 +279,18 @@ test("pending local navigation is not reverted using the live tab URL as directi
   assert.deepEqual(tabActions(f.ff), []);
 });
 
+test("pending local tab order is not reverted by plain folder reconciliation", async () => {
+  const f = await fixture();
+  await f.api.tabs.move(30, { index: 2 });
+  f.ff.calls.length = 0;
+  await f.inbound.reconcileFolder(f.folder());
+  assert.equal(f.ff.layout(1), "| [7: 10 20 30] 99");
+  assert.deepEqual(tabActions(f.ff), []);
+  // Outbound owns this local edit, after which both directions must be stable.
+  await f.outbound.syncTab(30);
+  await echoAndStable(f);
+});
+
 test("remote folder rename/recolour trims names and leaves syncGroup with no echo", async () => {
   const f = await fixture();
   await f.api.bookmarks.update(f.folder(), { title: "  🩵 Projects  " });
@@ -226,6 +336,42 @@ test("deleted group folder ungroups tabs, preserves pages and clears all folder 
   assert.deepEqual(await loadState(f.api), f.state);
   await echoAndStable(f);
 });
+
+for (const message of ["bookmark backend unavailable", "Permission denied"]) {
+  test(`folder read failure ${message} logs and skips without ungrouping or deleting state`, async (t) => {
+    const f = await fixture(), get = f.api.bookmarks.get, folderId = f.folder();
+    const before = structuredClone(f.state), layout = f.ff.layout(1);
+    t.mock.method(f.api.bookmarks, "get", async id => {
+      if (id === folderId) throw new Error(message);
+      return get(id);
+    });
+    const warnings = t.mock.method(console, "warn", () => {});
+    f.ff.calls.length = 0;
+    await f.inbound.reconcileFolder(folderId);
+    assert.deepEqual(f.state, before);
+    assert.equal(f.ff.layout(1), layout);
+    assert.deepEqual(mutations(f.ff), []);
+    assert.ok(warnings.mock.calls.some(c => /^Foxy:/.test(c.arguments[0])));
+    f.api.bookmarks.get = get;
+    await echoAndStable(f);
+  });
+}
+
+for (const message of [null, "Bookmark not found"]) {
+  test(`not-found folder read cleans up a deleted folder (${message ?? "fake"})`, async (t) => {
+    t.mock.method(console, "warn", () => {});
+    const f = await fixture(), folderId = f.folder(), get = f.api.bookmarks.get;
+    await f.api.bookmarks.removeTree(folderId);
+    if (message) t.mock.method(f.api.bookmarks, "get", async id => {
+      if (id === folderId) throw new Error(message);
+      return get(id);
+    });
+    await f.inbound.reconcileFolder(folderId);
+    assert.equal(f.state.groups[7], undefined);
+    assert.equal(f.ff.layout(1), "| 30 10 20 99");
+    await echoAndStable(f);
+  });
+}
 
 test("root removal resets identities and stale folder bookkeeping without closing tabs", async () => {
   const f = await fixture(), before = [f.ff.layout(1), f.ff.layout(2)];
@@ -320,6 +466,21 @@ test("unopenable URLs are recorded once, with no illegal create or navigate", as
   assert.deepEqual(f.state.cantReopen[f.folder(8)], ["file:///mapped.txt"]);
   assert.equal((await f.api.tabs.get(50)).url, url("e"));
   assert.deepEqual(tabActions(f.ff), []);
+  assert.deepEqual(await loadState(f.api), f.state);
+  await echoAndStable(f);
+});
+
+for (const kind of ["group", "pins"]) test(`cantReopen is recomputed after ${kind} bookmarks are fixed or removed`, async () => {
+  const f = await fixture(), folderId = kind === "group" ? f.folder() : f.state.pinnedId;
+  const fixed = await f.api.bookmarks.create({ parentId: folderId, url: "about:config" });
+  const removed = await f.api.bookmarks.create({ parentId: folderId, url: "file:///removed.txt" });
+  await f.inbound.reconcileFolder(folderId);
+  assert.deepEqual(f.state.cantReopen[folderId], ["about:config", "file:///removed.txt"]);
+  await f.api.bookmarks.update(fixed.id, { url: url("fixed") });
+  await f.api.bookmarks.remove(removed.id);
+  await f.inbound.reconcileFolder(folderId);
+  assert.deepEqual(f.state.cantReopen[folderId] ?? [], []);
+  assert.ok(Object.values(f.state.tabs).some(entry => entry.bookmarkId === fixed.id));
   assert.deepEqual(await loadState(f.api), f.state);
   await echoAndStable(f);
 });
@@ -476,13 +637,68 @@ test("a group-to-pin bookmark move reconciles in one target-first full pass", as
   const f = await fixture(), bid = f.bookmark(10);
   await f.api.bookmarks.move(bid, { parentId: f.state.pinnedId });
   await f.inbound.reconcileAll();
-  assert.equal(f.state.tabs[10], undefined);
+  assert.equal(f.state.tabs[10]?.bookmarkId, bid);
   const pins = await f.api.tabs.query({ pinned: true });
   assert.equal(pins.length, 1);
-  assert.equal(f.state.tabs[pins[0].id].bookmarkId, bid);
-  assert.equal(f.state.tabs[pins[0].id].folderId, f.state.pinnedId);
+  assert.equal(pins[0].id, 10);
+  assert.equal(f.state.tabs[10].folderId, f.state.pinnedId);
   await echoAndStable(f);
 });
+
+for (const direction of ["group-to-pin", "pin-to-group"]) {
+  for (const targetFirst of [false, true]) test(`${direction} preserves the existing tab, target-first=${targetFirst}`, async (t) => {
+    const f = await fixture();
+    const warnings = t.mock.method(console, "warn", () => {});
+    await addPins(f);
+    const id = direction === "group-to-pin" ? 10 : 200, bid = f.bookmark(id);
+    const source = direction === "group-to-pin" ? f.folder() : f.state.pinnedId;
+    const target = direction === "group-to-pin" ? f.state.pinnedId : f.folder(8);
+    const index = direction === "group-to-pin" ? 0 : 1;
+    await f.api.bookmarks.move(bid, { parentId: target, index });
+    f.ff.calls.length = 0;
+    if (targetFirst) await f.inbound.reconcileFolder(target);
+    await f.inbound.bookmarkMoved(bid, { oldParentId: source, parentId: target, index });
+    assert.equal(f.state.tabs[id]?.bookmarkId, bid);
+    assert.equal(f.state.tabs[id]?.folderId, target);
+    const tab = await f.api.tabs.get(id);
+    assert.equal(tab.pinned, direction === "group-to-pin");
+    if (direction === "group-to-pin") {
+      assert.equal(tab.windowId, 1);
+      assert.equal(tab.groupId, -1);
+      assert.deepEqual((await f.api.tabs.query({ windowId: 1, pinned: true })).map(t => t.id), [10, 200]);
+    } else {
+      assert.equal(tab.windowId, 2);
+      assert.equal(tab.groupId, 8);
+      assert.deepEqual((await f.api.tabs.query({ groupId: 8 })).map(t => t.id), [40, 200, 50]);
+    }
+    assert.ok(!tabActions(f.ff).some(c => /tabs\.(create|remove)$/.test(c.api)));
+    assert.equal(warnings.mock.callCount(), 0, "transfer must succeed without a failed grouping attempt");
+    await echoAndStable(f);
+  });
+
+  test(`shown ${direction} is stored and retried without replacing the tab`, async () => {
+    const f = await fixture();
+    await addPins(f);
+    const id = direction === "group-to-pin" ? 10 : 200, bid = f.bookmark(id);
+    const source = direction === "group-to-pin" ? f.folder() : f.state.pinnedId;
+    const target = direction === "group-to-pin" ? f.state.pinnedId : f.folder(8);
+    await f.api.tabs.update(id, { active: true });
+    await f.api.bookmarks.move(bid, { parentId: target, index: 1 });
+    f.ff.calls.length = 0;
+    await f.inbound.bookmarkMoved(bid, { oldParentId: source, parentId: target, index: 1 });
+    assert.equal(f.state.tabs[id].folderId, source);
+    assert.ok(f.state.deferred.includes(source));
+    assert.ok(f.state.deferred.includes(target));
+    assert.deepEqual(tabActions(f.ff), []);
+    const resumed = await f.restart();
+    await f.api.tabs.update(99, { active: true });
+    await resumed.applyDeferred();
+    assert.equal(f.state.tabs[id]?.bookmarkId, bid);
+    assert.equal(f.state.tabs[id]?.folderId, target);
+    assert.deepEqual(f.state.deferred, []);
+    await echoAndStable(f);
+  });
+}
 
 for (const index of [0, 1]) test(`remote pin inserted at folder index ${index} precedes the target window's first pin without outbound echoes`, async () => {
   const f = await fixture();
