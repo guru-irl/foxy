@@ -31,12 +31,14 @@ function startClock(timeEl, dateEl) {
 async function startTabs(pinnedEl, groupsEl) {
   const self = await api.tabs.getCurrent();
   let queued = false;
+  let generation = 0;
 
   const pick = async (tabId) => {
     if (!(await activateTab(api, tabId, self.id))) schedule();
   };
 
   async function refresh() {
+    const mine = ++generation;
     const tabs = await api.tabs.query({ windowId: self.windowId });
     let groups = [];
     try {
@@ -44,6 +46,7 @@ async function startTabs(pinnedEl, groupsEl) {
     } catch (error) {
       console.error("Liquid Fox New Tab: could not read tab groups", error);
     }
+    if (mine !== generation) return;
     const model = buildModel(tabs, groups, self.id);
     renderPinned(pinnedEl, model.pinned, pick);
     renderGroups(groupsEl, model.groups, pick);
@@ -61,7 +64,6 @@ async function startTabs(pinnedEl, groupsEl) {
   const events = [
     api.tabs.onCreated,
     api.tabs.onRemoved,
-    api.tabs.onUpdated,
     api.tabs.onMoved,
     api.tabs.onAttached,
     api.tabs.onDetached,
@@ -71,6 +73,10 @@ async function startTabs(pinnedEl, groupsEl) {
     api.tabGroups?.onRemoved,
   ];
   for (const event of events) event?.addListener(schedule);
+  api.tabs.onUpdated.addListener(schedule, {
+    windowId: self.windowId,
+    properties: ["favIconUrl", "groupId", "hidden", "pinned", "title"],
+  });
 
   await refresh();
 }

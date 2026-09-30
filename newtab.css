@@ -218,11 +218,11 @@ button:focus-visible {
 .card[data-color="pink"] { --g1: oklch(0.90 0.09 355); --g2: oklch(0.74 0.17 5); }
 .card[data-color="gray"] { --g1: oklch(0.93 0.01 250); --g2: oklch(0.72 0.02 250); }
 
-/* Eight rows, then the list scrolls inside the card. */
+/* Eight and a half rows, then the list scrolls inside the card; the cut-off half row shows there is more. */
 .card-tabs {
   display: flex;
   flex-direction: column;
-  max-height: calc(8 * var(--row));
+  max-height: calc(8.5 * var(--row));
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--thumb) transparent;

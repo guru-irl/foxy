@@ -7,14 +7,16 @@
  * @param {(tabId: number) => void} onPick
  */
 export function renderPinned(root, pinned, onPick) {
-  root.hidden = pinned.length === 0;
-  root.replaceChildren(
-    ...pinned.map((tab) => {
-      const button = tabButton("pin", tab, onPick);
-      button.append(icon(tab.icon));
-      return button;
-    }),
-  );
+  keepFocus(root, () => {
+    root.hidden = pinned.length === 0;
+    root.replaceChildren(
+      ...pinned.map((tab) => {
+        const button = tabButton("pin", tab, onPick);
+        button.append(icon(tab.icon));
+        return button;
+      }),
+    );
+  });
 }
 
 /**
@@ -24,14 +26,27 @@ export function renderPinned(root, pinned, onPick) {
  * @param {(tabId: number) => void} onPick
  */
 export function renderGroups(root, groups, onPick) {
-  const scroll = new Map();
-  for (const list of root.querySelectorAll(".card-tabs")) {
-    scroll.set(list.dataset.groupId, list.scrollTop);
-  }
-  root.hidden = groups.length === 0;
-  root.replaceChildren(...groups.map((group) => card(group, onPick)));
-  for (const list of root.querySelectorAll(".card-tabs")) {
-    list.scrollTop = scroll.get(list.dataset.groupId) ?? 0;
+  keepFocus(root, () => {
+    const scroll = new Map();
+    for (const list of root.querySelectorAll(".card-tabs")) {
+      scroll.set(list.dataset.groupId, list.scrollTop);
+    }
+    root.hidden = groups.length === 0;
+    root.replaceChildren(...groups.map((group) => card(group, onPick)));
+    for (const list of root.querySelectorAll(".card-tabs")) {
+      list.scrollTop = scroll.get(list.dataset.groupId) ?? 0;
+    }
+  });
+}
+
+function keepFocus(root, rebuild) {
+  const active = document.activeElement;
+  const tabId = root.contains(active) ? active?.dataset?.tabId : undefined;
+  rebuild();
+  if (tabId !== undefined) {
+    const button = [...root.querySelectorAll("button[data-tab-id]")]
+      .find((candidate) => candidate.dataset.tabId === tabId);
+    button?.focus({ preventScroll: true });
   }
 }
 
@@ -62,12 +77,15 @@ function tabButton(className, tab, onPick) {
   const button = el("button", className);
   button.type = "button";
   button.title = tab.title;
-  button.addEventListener("click", () => onPick(tab.id));
+  button.dataset.tabId = String(tab.id);
+  button.addEventListener("click", (event) => {
+    if (event.button !== 0 || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+    onPick(tab.id);
+  });
   return button;
 }
 
-// A favicon, or the neutral globe when there is none or it fails to load
-// (for example chrome:// icons, which an add-on page can't load).
+// Show the favicon, or the neutral globe when there is none or it fails to load.
 function icon(url) {
   if (!url) return el("span", "icon icon-none");
   const img = el("img", "icon");
