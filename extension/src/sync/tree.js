@@ -2,8 +2,10 @@ import { ROOT_TITLE, PINNED_TITLE, decodeFolderTitle, isPinnedFolderTitle } from
 
 export const OTHER_BOOKMARKS = "unfiled_____";
 
-/** Prefer stored identity, then the oldest direct Foxy folder, then append one. */
+/** Prefer the oldest direct Foxy folder, then stored identity, then append one. */
 export async function findOrCreateRoot(api, knownRootId) {
+  const [root] = await directRoots(api);
+  if (root) return root.id;
   if (knownRootId) {
     try {
       const [known] = await api.bookmarks.get(knownRootId);
@@ -12,13 +14,20 @@ export async function findOrCreateRoot(api, knownRootId) {
       console.warn("Foxy: could not read stored bookmark root", knownRootId, error);
     }
   }
-  const children = await api.bookmarks.getChildren(OTHER_BOOKMARKS);
-  const [root] = children
-    .filter(node => node.type === "folder" && node.title === ROOT_TITLE)
-    .sort((a, b) => a.dateAdded - b.dateAdded || a.index - b.index);
-  if (root) return root.id;
   const created = await api.bookmarks.create({ parentId: OTHER_BOOKMARKS, title: ROOT_TITLE });
   return created.id;
+}
+
+/** Report duplicate roots without merging or mutating them. */
+export async function findExtraRoots(api, rootId) {
+  return (await directRoots(api)).filter(node => node.id !== rootId).map(node => node.id);
+}
+
+async function directRoots(api) {
+  const children = await api.bookmarks.getChildren(OTHER_BOOKMARKS);
+  return children
+    .filter(node => node.type === "folder" && node.title === ROOT_TITLE)
+    .sort((a, b) => a.dateAdded - b.dateAdded || a.index - b.index);
 }
 
 /** Reserve the first matching child folder for pins; new pins go at index zero. */
@@ -33,11 +42,13 @@ export async function ensurePinnedFolder(api, rootId) {
 /** Read a snapshot without creating folders or descending into nested groups. */
 export async function readTree(api, rootId) {
   const [root] = await api.bookmarks.getSubTree(rootId);
-  const children = root.children.filter(node => node.type === "folder");
-  const pinned = children.find(node => isPinnedFolderTitle(node.title));
+  const children = root.children.filter(node => node.type === "folder")
+    .sort((a, b) => a.index - b.index);
+  const [pinned, ...extraPinned] = children.filter(node => isPinnedFolderTitle(node.title));
   return {
     pinned: pinned ? folderInfo(pinned) : null,
-    folders: children.filter(node => node !== pinned).map(folderInfo),
+    extraPinned: extraPinned.map(folderInfo),
+    folders: children.filter(node => !isPinnedFolderTitle(node.title)).map(folderInfo),
   };
 }
 
