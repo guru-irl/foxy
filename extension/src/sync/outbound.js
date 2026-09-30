@@ -108,6 +108,12 @@ export function createOutbound({
       return;
     }
     if (bookmark.parentId !== folderId || bookmark.index !== index) {
+      const at = now(), expected = state.expectedMoves ??= {};
+      for (const [id, move] of Object.entries(expected)) {
+        if (at - move.at > 60000) delete expected[id];
+      }
+      expected[entry.bookmarkId] = { parentId: folderId, index, at };
+      await save();
       await api.bookmarks.move(entry.bookmarkId, { parentId: folderId, index });
     }
     if (entry.folderId !== folderId) {

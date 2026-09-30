@@ -73,27 +73,45 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
   async function transfer(tabId, entry, folderId, group) {
     const tab = await api.tabs.get(tabId);
     if (await isShown(tab)) { defer(entry.folderId, folderId); return false; }
-    if (folderId === getState().pinnedId) {
-      if (tab.groupId != null && tab.groupId !== -1) await api.tabs.ungroup([tabId]);
-      if (!tab.pinned) await api.tabs.update(tabId, { pinned: true });
+    let changed = false;
+    try {
+      if (folderId === getState().pinnedId) {
+        if (tab.groupId != null && tab.groupId !== -1) {
+          await api.tabs.ungroup([tabId]);
+          changed = true;
+        }
+        if (!tab.pinned) {
+          await api.tabs.update(tabId, { pinned: true });
+          changed = true;
+        }
+      } else {
+        // A pin cannot be moved to an unpinned group index. Unpin first, before
+        // attaching it to the destination window or calling tabs.group.
+        if (tab.pinned) {
+          await api.tabs.update(tabId, { pinned: false });
+          changed = true;
+        }
+        if (tab.windowId !== group.windowId) {
+          // Firefox 157 grouping a tab before a group in another window is
+          // undefined. Attach at the target group's end before assigning it.
+          const members = await api.tabs.query({ windowId: group.windowId, groupId: group.id });
+          const last = members.sort((a, b) => a.index - b.index).at(-1);
+          await api.tabs.move(tabId, { windowId: group.windowId, index: last.index + 1 });
+          changed = true;
+        }
+        await api.tabs.group({ groupId: group.id, tabIds: [tabId] });
+        changed = true;
+      }
       entry.folderId = folderId;
       await positionTab(tabId, folderId, await bookmarks(folderId));
       return true;
+    } catch (error) {
+      // Outbound must not interpret a half-transferred tab as a local departure
+      // and remove the bookmark that already lives in the destination folder.
+      if (changed) { forgetTab(tabId); defer(folderId); }
+      warn(error);
+      return false;
     }
-    // A pin cannot be moved to an unpinned group index. Unpin first, before
-    // attaching it to the destination window or calling tabs.group.
-    if (tab.pinned) await api.tabs.update(tabId, { pinned: false });
-    if (tab.windowId !== group.windowId) {
-      // Firefox 157 grouping a tab before a group in another window is
-      // undefined. Attach at the target group's end before assigning it.
-      const members = await api.tabs.query({ windowId: group.windowId, groupId: group.id });
-      const last = members.sort((a, b) => a.index - b.index).at(-1);
-      await api.tabs.move(tabId, { windowId: group.windowId, index: last.index + 1 });
-    }
-    await api.tabs.group({ groupId: group.id, tabIds: [tabId] });
-    entry.folderId = folderId;
-    await positionTab(tabId, folderId, await bookmarks(folderId));
-    return true;
   }
 
   async function departure(tabId, entry) {
@@ -310,6 +328,11 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
   }
 
   async function bookmarkMoved(id, moveInfo) {
+    const expected = getState().expectedMoves?.[id];
+    if (expected) {
+      delete getState().expectedMoves[id];
+      if (expected.parentId === moveInfo.parentId && expected.index === moveInfo.index) return;
+    }
     if (moveInfo.parentId !== moveInfo.oldParentId) {
       await reconcileFolder(moveInfo.oldParentId, true);
       await reconcileFolder(moveInfo.parentId, true);

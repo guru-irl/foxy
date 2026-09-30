@@ -96,6 +96,42 @@ for (const [name, id, index, order] of [
   assert.deepEqual(writes(f.ff).map(call => call.api), ["bookmarks.move"]);
 });
 
+test("outbound records each move before writing and preserves it through loadState", async (t) => {
+  const f = await synced(), bid = f.state.tabs[20].bookmarkId, move = f.api.bookmarks.move;
+  assert.equal(f.state.expectedMoves, undefined, "legacy state starts without expectedMoves");
+  t.mock.method(f.api.bookmarks, "move", async (id, info) => {
+    assert.equal(id, bid);
+    assert.deepEqual(f.state.expectedMoves?.[id], { parentId: f.folder(), index: 0, at: 100 });
+    assert.deepEqual((await loadState(f.api)).expectedMoves, f.state.expectedMoves);
+    return move(id, info);
+  });
+  const warn = t.mock.method(console, "warn", () => {});
+  await f.api.tabs.move(20, { index: 0 });
+  await f.outbound.syncTab(20);
+  assert.equal(warn.mock.callCount(), 0);
+  assert.deepEqual(await f.pages(), [abc[2], abc[0], abc[1]]);
+  assert.deepEqual(f.state.expectedMoves, { [bid]: { parentId: f.folder(), index: 0, at: 100 } });
+  assert.deepEqual(await loadState(f.api), f.state);
+});
+
+test("adding an expected move prunes records older than 60 seconds only", async () => {
+  const f = await synced(), bid = f.state.tabs[20].bookmarkId;
+  f.state.expectedMoves = {
+    expired: { parentId: f.folder(), index: 0, at: 99 },
+    boundary: { parentId: f.folder(), index: 1, at: 100 },
+    recent: { parentId: f.folder(), index: 2, at: 101 },
+  };
+  f.tick(60000);
+  await f.api.tabs.move(20, { index: 0 });
+  await f.outbound.syncTab(20);
+  assert.deepEqual(f.state.expectedMoves, {
+    boundary: { parentId: f.folder(), index: 1, at: 100 },
+    recent: { parentId: f.folder(), index: 2, at: 101 },
+    [bid]: { parentId: f.folder(), index: 0, at: 60100 },
+  });
+  assert.deepEqual(await loadState(f.api), f.state);
+});
+
 test("tab leaving for another group moves the same bookmark without rewriting either folder", async () => {
   const f = await synced(), bookmarkId = f.state.tabs[10].bookmarkId;
   const newGroup = await f.api.tabs.group({ tabIds: [99] });

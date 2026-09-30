@@ -15,7 +15,7 @@ async function fixture(options = {}) {
     windows: [{ id: 1, focused: true }, { id: 2 }],
     groups: [{ id: 7, windowId: 1, title: "  Work  ", color: "red" },
       { id: 8, windowId: 2, title: "Play", color: "blue" }],
-    tabs: [
+    tabs: options.initialTabs ?? [
       { id: 30, windowId: 1, groupId: 7, url: url("a"), title: "A" },
       { id: 10, windowId: 1, groupId: 7, url: url("b"), title: "B" },
       { id: 20, windowId: 1, groupId: 7, url: url("c"), title: "C" },
@@ -146,6 +146,62 @@ for (const [id, index, layout] of [[30, 2, "| [7: 10 20 30] 99"], [20, 0, "| [7:
     f.ff.calls.length = 0;
     await f.inbound.bookmarkMoved(bid, info);
     assert.deepEqual(mutations(f.ff), []);
+    await echoAndStable(f);
+  });
+}
+
+async function localDragFixture() {
+  return fixture({ initialTabs: [
+    ...[10, 11, 12, 13, 14, 15].map(id => ({ id, windowId: 1, groupId: 7,
+      url: url(`drag${id}`), title: `Drag ${id}` })),
+    { id: 99, windowId: 1, url: url("loose"), active: true },
+    { id: 40, windowId: 2, groupId: 8, url: url("other"), active: true },
+  ] });
+}
+
+for (const twoDrags of [false, true]) test(`outbound move echoes preserve ${twoDrags ? "two local drags" : "a local drag with lagged syncTab"}`, async () => {
+  const f = await localDragFixture(), echoes = [], queue = createQueue();
+  f.api.bookmarks.onMoved.addListener((id, info) => { echoes.push([id, info]); });
+  await f.api.tabs.move(14, { index: 2 });
+  await queue.run(() => f.outbound.syncTab(12));
+  await queue.run(() => f.outbound.syncTab(14));
+  if (twoDrags) {
+    await f.api.tabs.move(15, { index: 1 });
+    await queue.run(() => f.outbound.syncTab(11));
+    await queue.run(() => f.outbound.syncTab(15));
+  }
+  const expected = twoDrags ? [10, 15, 11, 14, 12, 13] : [10, 11, 14, 12, 13, 15];
+  const localIds = async () => (await f.api.tabs.query({ groupId: 7 })).map(tab => tab.id);
+  await f.ff.settle();
+  assert.ok(echoes.length > 0, "the lagged outbound job must write a move");
+  f.ff.calls.length = 0;
+  for (const [id, info] of echoes.splice(0)) await queue.run(() => f.inbound.bookmarkMoved(id, info));
+  assert.deepEqual(await localIds(), expected, "outbound's own moves must not sort the local strip");
+  assert.deepEqual(tabActions(f.ff), []);
+  // Outbound's existing convergence algorithm must finish publishing local order.
+  for (let pass = 0; pass < 5; pass++) {
+    for (const id of expected) await queue.run(() => f.outbound.syncTab(id));
+    await f.ff.settle();
+    for (const [id, info] of echoes.splice(0)) await queue.run(() => f.inbound.bookmarkMoved(id, info));
+    assert.deepEqual(await localIds(), expected);
+  }
+  assert.deepEqual((await f.api.bookmarks.getChildren(f.folder())).map(node => node.title),
+    expected.map(id => `Drag ${id}`));
+  assert.deepEqual(f.state.expectedMoves, {});
+  await echoAndStable(f);
+});
+
+for (const record of ["none", "different parent", "different index"]) {
+  test(`genuine remote bookmark move still sorts with ${record} expected move`, async () => {
+    const f = await fixture(), bid = f.bookmark(20), folderId = f.folder();
+    if (record !== "none") f.state.expectedMoves = { [bid]: {
+      parentId: record === "different parent" ? f.folder(8) : folderId,
+      index: record === "different index" ? 1 : 0, at: 100,
+    } };
+    await f.api.bookmarks.move(bid, { index: 0 });
+    await f.inbound.bookmarkMoved(bid, { oldParentId: folderId, parentId: folderId, index: 0 });
+    assert.equal(f.ff.layout(1), "| [7: 20 30 10] 99");
+    assert.equal(f.state.expectedMoves?.[bid], undefined, "a mismatch must consume the obsolete record");
     await echoAndStable(f);
   });
 }
@@ -644,6 +700,51 @@ test("a group-to-pin bookmark move reconciles in one target-first full pass", as
   assert.equal(f.state.tabs[10].folderId, f.state.pinnedId);
   await echoAndStable(f);
 });
+
+for (const direction of ["pin-to-group", "group-to-pin", "cross-window group-to-group"]) {
+  test(`failed ${direction} transfer leaves the tab unmapped and outbound cannot delete the remote bookmark`, async (t) => {
+    const f = await fixture();
+    await addPins(f);
+    const id = direction === "pin-to-group" ? 200 : 10, bid = f.bookmark(id);
+    const source = direction === "pin-to-group" ? f.state.pinnedId : f.folder();
+    const target = direction === "group-to-pin" ? f.state.pinnedId : f.folder(8);
+    const warnings = t.mock.method(console, "warn", () => {});
+    const group = f.api.tabs.group, update = f.api.tabs.update;
+    if (direction === "group-to-pin") {
+      t.mock.method(f.api.tabs, "update", async (tabId, props) => {
+        if (tabId === id && props.pinned === true) throw new Error("pin denied");
+        return update(tabId, props);
+      });
+    } else t.mock.method(f.api.tabs, "group", async () => { throw new Error("group denied"); });
+    f.state.quietUntil[id] = 999;
+    await f.api.bookmarks.move(bid, { parentId: target, index: 1 });
+    await f.inbound.reconcileFolder(source);
+    const tab = await f.api.tabs.get(id);
+    assert.equal(tab.pinned, false, "the first step already changed the tab");
+    assert.equal(tab.groupId, -1);
+    assert.equal(tab.windowId, direction === "group-to-pin" ? 1 : 2);
+    assert.ok(warnings.mock.calls.some(c => /^Foxy:/.test(c.arguments[0])));
+    f.ff.calls.length = 0;
+    await f.outbound.syncTab(id);
+    await f.outbound.flush();
+    assert.deepEqual(bookmarkWrites(f.ff), [], "a partially transferred tab must not remove its destination bookmark");
+    assert.equal((await f.api.bookmarks.get(bid))[0].parentId, target);
+    assert.equal(f.state.tabs[id], undefined);
+    assert.equal(f.state.quietUntil[id], undefined);
+    assert.ok(f.state.deferred.includes(target));
+    assert.deepEqual(await loadState(f.api), f.state);
+    // A durable retry opens/maps the destination without closing the failed tab.
+    f.api.tabs.group = group;
+    f.api.tabs.update = update;
+    const resumed = await f.restart();
+    await resumed.applyDeferred();
+    assert.equal((await f.api.tabs.get(id)).url, direction === "pin-to-group" ? url("pin1") : url("b"));
+    assert.equal(f.state.tabs[id], undefined);
+    assert.ok(Object.values(f.state.tabs).some(entry => entry.bookmarkId === bid && entry.folderId === target));
+    assert.deepEqual(f.state.deferred, []);
+    await echoAndStable(f);
+  });
+}
 
 for (const direction of ["group-to-pin", "pin-to-group"]) {
   for (const targetFirst of [false, true]) test(`${direction} preserves the existing tab, target-first=${targetFirst}`, async (t) => {
