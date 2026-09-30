@@ -22,7 +22,7 @@
 ## Review Focus
 
 1. Index bookkeeping after cross-window moves: both windows' `index` values must be 0..n-1 with pinned tabs first and each group's tabs contiguous, after every operation.
-2. Group membership after `tabs.move`: a tab moved strictly between two tabs of one group joins it; a grouped tab moved away from its group leaves it; empty groups disappear with `tabGroups.onRemoved`.
+2. Group membership after `tabs.move`: the moved tab takes the group of the neighbour it is inserted next to (before it when moving backwards, after it when moving forwards), exactly as Firefox 157 does; a grouped tab moved next to an ungrouped tab leaves its group; empty groups disappear with `tabGroups.onRemoved`. Illegal pinned/unpinned positions are ignored without an error.
 3. Event ordering and timing: listeners must never run synchronously inside the API call (real Firefox is async), and `settle()` must also deliver events queued by listeners.
 4. Returned objects are copies: mutating a returned tab or bookmark must not change fake state.
 5. Window-closing semantics: `closeWindow()` reports `isWindowClosing: true` on both `tabs.onRemoved` and `tabGroups.onRemoved`.
@@ -72,14 +72,18 @@ Rules the fake implements (Firefox 157 behaviour; each needs a test):
 - `tabs.get(id)` rejects with `Error("Invalid tab ID: <id>")` for unknown ids. `tabs.getCurrent()` returns the `selfTabId` tab (undefined when not set).
 - `tabs.create({ windowId, url, index, pinned, active, discarded, title })`: default window = current window; default index = end (pinned: end of pinned range); `active` defaults to true unless `discarded`; `discarded: true` with `active: true` rejects; `title` only honoured when discarded. URL check shared with `tabs.update`: allowed are `http:`, `https:`, `about:blank`, and `moz-extension:`; anything else (`about:config`, `file:`, `chrome:`, `data:`, `javascript:`) rejects with `Error("Illegal URL: <url>")`. A tab created between two tabs of one group joins it.
 - `tabs.update(id, { active, pinned, url, muted })`: `active: true` deactivates the others in that window and bumps `lastAccessed`; `pinned: true` leaves any group and moves to the end of the pinned range; `pinned: false` moves to the first unpinned position; `url` passes the URL check, sets `url`, sets `discarded: false`.
-- `tabs.move(ids, { windowId, index })` (ids: number or array): default window = the tab's window; `index: -1` = end. The index is clamped: pinned tabs to `[0, pinnedCount]`, unpinned to `[pinnedCount, length]` (counts taken without the moving tab). Membership after inserting: a grouped tab stays in its group only if a neighbour is in the same group, otherwise it becomes ungrouped; an ungrouped tab landing strictly between two tabs of the same group joins it. A move to another window keeps `pinned`, emits `tabs.onDetached` then `tabs.onAttached`, and closes the source window if it becomes empty (`windows.onRemoved`). Same-window moves emit `tabs.onMoved(id, { windowId, fromIndex, toIndex })`. A group left empty is removed (`tabGroups.onRemoved(group, { isWindowClosing: false })`). Returns the moved tabs.
+- `tabs.move(ids, { windowId, index })` (ids: number or array; several ids go to consecutive positions): default window = the tab's window; `index: -1` = end; an index above the maximum is lowered to it (maximum = number of tabs in the target window, minus one for a same-window move). This mirrors Firefox 157 (`ext-tabs.js` `move`, `Tabbrowser.moveTabTo`, `tabs.js insertBefore`), including its group behaviour:
+  - **Illegal positions are ignored silently**: a pinned tab whose index is above the target window's pinned count, or an unpinned tab whose index is below it, is not moved, with no error (it is left out of the returned list).
+  - **Same window**: let `neighbor` = the tab currently at `index`. Moving backwards (index < current index), the tab is inserted *before* `neighbor`; moving forwards, *after* `neighbor`. The tab then takes `neighbor`'s group: it joins that group if `neighbor` is grouped, and is ungrouped if `neighbor` is not. Moving a tab to its own index is a no-op.
+  - **Another window** (adoption): the tab is inserted before the target window's tab at `index` and takes that tab's group the same way; at the end (`-1` or the maximum) it is inserted after the last tab, ungrouped. It keeps `pinned`. Emits `tabs.onDetached(id, { oldWindowId, oldPosition })` then `tabs.onAttached(id, { newWindowId, newPosition })`, and closes the source window if it becomes empty (`windows.onRemoved`).
+  - Same-window moves emit `tabs.onMoved(id, { windowId, fromIndex, toIndex })`. A group change also emits `tabs.onUpdated(id, { groupId }, tab)`. A group left empty is removed (`tabGroups.onRemoved(group, { isWindowClosing: false })`). Returns the moved tabs.
 - `tabs.group({ tabIds, groupId, createProperties: { windowId } })`: with `groupId`, the group may be in any window. Tabs are unpinned if pinned, adopted into the group's window, and appended after the group's last tab, in `tabIds` order. Without `groupId`, a new group is created in `createProperties.windowId` (default: the first tab's window). It takes the next colour from `["blue","purple","cyan","orange","yellow","pink","green","grey","red"]` (cycling) with title `""`. If the first tab is already in that window, the group forms at the first tab's position; otherwise it goes at the end of the window. Emits `tabGroups.onCreated`. Also emits `tabs.onUpdated(id, { groupId }, tab)` per changed tab. Returns the group id.
 - `tabs.ungroup(ids)`: each tab leaves its group and is placed right after that group's remaining tabs; emits `tabs.onUpdated(id, { groupId: -1 }, tab)`; empty groups are removed.
 - `tabs.remove(ids)`: emits `tabs.onRemoved(id, { windowId, isWindowClosing: false })`; empty groups removed; empty windows closed.
 - `tabs.discard(ids)`: sets `discarded: true` (active tabs are not discarded).
 - `tabs.onUpdated` fires on url/title/pinned/groupId/discarded changes with a `changeInfo` holding only the changed keys, plus the tab.
 - `tabGroups.get(id)`, `tabGroups.query({ windowId })` (groups in tab-strip order), `tabGroups.update(id, { title, color, collapsed })` → `tabGroups.onUpdated(group)`.
-- `tabGroups.move(id, { windowId, index })`: moves the whole block; `index: -1` = end. Rejects with `Error("Cannot move the group to an index that is in the middle of another group")` if the index would split another group. Across windows the group keeps its id and emits `tabGroups.onMoved(group)`.
+- `tabGroups.move(id, { windowId, index })`: moves the whole block so that its first tab ends up at `index` (Firefox 157 `ext-tabGroups.js`: `index: -1` = end, larger indexes are lowered to the end). Within the same window, when moving forwards, Firefox validates against `index + groupSize`. It rejects with `Error("Cannot move the group to an index that is in the middle of pinned tabs.")` if the tab at the validated position is pinned. It rejects with `Error("Cannot move the group to an index that is in the middle of another group.")` if the tabs just before and at the validated position belong to the same other group. Across windows the group keeps its id and title/colour (adoption), and `tabGroups.onMoved(group)` is emitted.
 - Group objects: `{ id, windowId, title, color, collapsed }`.
 - `windows.getAll({ populate, windowTypes })` → `{ id, focused, type: "normal", incognito: false, tabs? }` in setup order; `windows.getCurrent()`, `windows.getLastFocused()`, `windows.update(id, { focused: true })` (emits `windows.onFocusChanged(id)`). `windows.WINDOW_ID_NONE = -1`.
 - `closeWindow(id)`: emits `tabs.onRemoved(id, { windowId, isWindowClosing: true })` for each tab, `tabGroups.onRemoved(group, { isWindowClosing: true })` for each group, then `windows.onRemoved(id)`.
@@ -100,10 +104,14 @@ const ff = createFirefox({
     { id: 3, windowId: 1, groupId: 101 }, { id: 4, windowId: 1, groupId: 101 }, { id: 5, windowId: 1 },
   ],
 });
-await ff.browser.tabs.move(2, { index: 3 });          // strictly between 3 and 4
+await ff.browser.tabs.move(2, { index: 2 });          // forwards: after tab 3 (index 2), joins 101
 assert.equal(ff.layout(1), "P1 | [101: 3 2 4] 5");
-await ff.browser.tabs.move(3, { index: -1 });         // away from its group
+await ff.browser.tabs.move(3, { index: -1 });         // forwards to the end: after 5, leaves 101
 assert.equal(ff.layout(1), "P1 | [101: 2 4] 5 3");
+await ff.browser.tabs.move(3, { index: 1 });          // backwards: before tab 2, joins 101
+assert.equal(ff.layout(1), "P1 | [101: 3 2 4] 5");
+await ff.browser.tabs.move(1, { index: 3 });          // pinned tab past the pinned range: ignored
+assert.equal(ff.layout(1), "P1 | [101: 3 2 4] 5");
 ```
 
   The tests must also cover the cross-window rules (`tabs.group` adopting across windows, `tabGroups.move` into another window, an emptied window closing) with `layout()` of both windows. They must cover event order and asynchrony: nothing is delivered before `await ff.settle()`, and events queued by listeners are delivered too. Also cover the bookmark ops and their events, `storage.local` defaults, `runtime.sendMessage`, and the URL checks.
