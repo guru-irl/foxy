@@ -135,8 +135,19 @@ test("empty board still offers fixed columns and new group", async () => {
   assert.deepEqual([...node.querySelectorAll(".column")].map(el => el.dataset.zone), ["pinned", "new-group", "tabs"]);
 });
 
+// The shared fake does not implement Firefox's optional onUpdated filter.
+// Preserve its queued delivery, adding only the filter at this API boundary.
+function filteredTabUpdates(ff) {
+  const event = ff.browser.tabs.onUpdated;
+  const add = event.addListener;
+  event.addListener = (listener, filter) => add((id, changes, tab) => {
+    if (!filter?.properties || filter.properties.some(key => key in changes)) listener(id, changes, tab);
+  });
+}
+
 async function controller(set = setup()) {
   const ff = createFirefox(set);
+  filteredTabUpdates(ff);
   const node = await root();
   const { createController } = await import("../../extension/src/main.js");
   const control = createController(node, ff.browser);
@@ -148,6 +159,79 @@ async function flush(ff) {
   await nextFrame();
   await nextFrame();
 }
+
+function countRebuilds(node) {
+  let count = 0;
+  const replace = node.replaceChildren.bind(node);
+  node.replaceChildren = (...children) => { count++; replace(...children); };
+  return () => count;
+}
+
+test("review important 1: status-only tab update bursts do not read or redraw", async () => {
+  const { ff, node } = await controller();
+  const rebuilds = countRebuilds(node);
+  ff.calls.length = 0;
+  for (let i = 0; i < 30; i++) ff.fire("tabs.onUpdated", 23, { status: i % 2 ? "complete" : "loading" });
+  await flush(ff);
+  assert.equal(rebuilds(), 0, "status updates must not rebuild the board");
+  assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 0, "filtered events must not read");
+});
+
+test("review important 1: unchanged board events keep existing row nodes", async () => {
+  const { ff, node } = await controller();
+  const row = node.querySelector('[data-tab-id="23"]');
+  const rebuilds = countRebuilds(node);
+  ff.fire("tabs.onMoved", 23, { windowId: 2, fromIndex: 3, toIndex: 3 });
+  await flush(ff);
+  assert.equal(node.querySelector('[data-tab-id="23"]'), row, "an identical model must retain node identity");
+  assert.equal(rebuilds(), 0);
+});
+
+test("review important 1: unsupported update filter falls back and keeps irrelevant nodes", async () => {
+  const ff = createFirefox(setup());
+  const event = ff.browser.tabs.onUpdated, add = event.addListener;
+  let rejectedFilter;
+  event.addListener = (listener, filter) => {
+    if (filter) { rejectedFilter = filter; throw new Error("Filter unavailable"); }
+    add(listener);
+  };
+  const node = await root();
+  const { createController } = await import("../../extension/src/main.js");
+  const warnings = [], warn = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  try {
+    const control = createController(node, ff.browser);
+    await control.refresh();
+    await flush(ff);
+    assert.deepEqual(rejectedFilter, { properties: ["favIconUrl", "groupId", "hidden", "pinned", "title", "url"] });
+    assert.ok(warnings.some(args => args[0].startsWith("Foxy:")));
+    await ff.browser.tabs.update(23, { url: "https://example.com/unfiltered" });
+    await flush(ff);
+    const row = node.querySelector('[data-tab-id="23"]');
+    assert.equal(row.querySelector(".row-label").textContent, "https://example.com/unfiltered");
+    const rebuilds = countRebuilds(node);
+    for (let i = 0; i < 30; i++) ff.fire("tabs.onUpdated", 23, { status: "loading", audible: true });
+    await flush(ff);
+    assert.equal(rebuilds(), 0);
+    assert.equal(node.querySelector('[data-tab-id="23"]'), row);
+  } finally { console.warn = warn; }
+});
+
+test("review important 1: failed fallback registration is caught, logged and re-read", async () => {
+  const ff = createFirefox(setup());
+  ff.browser.tabs.onUpdated.addListener = () => { throw new Error("Event unavailable"); };
+  const node = await root();
+  const { createController } = await import("../../extension/src/main.js");
+  const warnings = [], warn = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  try {
+    createController(node, ff.browser);
+    await flush(ff);
+    assert.ok(warnings.length >= 2);
+    assert.ok(warnings.every(args => args[0].startsWith("Foxy:")));
+    assert.ok(node.querySelector('[data-tab-id="23"]'), "re-read after subscription failure");
+  } finally { console.warn = warn; }
+});
 
 test("controller batches remote tab, group, window and activation events per frame", async () => {
   const { ff, node } = await controller();
@@ -171,15 +255,99 @@ test("controller retains horizontal and vertical scroll and focus through rebuil
   row.focus({ preventScroll: true });
   node.querySelector('.rows[data-group-id="101"]').scrollTop = 120;
   node.querySelector(".strip").scrollLeft = 90;
+  await ff.browser.tabGroups.update(201, { title: "Rebuild while a row is focused" });
   await control.refresh();
+  assert.ok(node.querySelector('[data-tab-id="1000"]') !== row, "exercise a real rebuild");
   assert.equal(node.querySelector(".strip").scrollLeft, 90);
   assert.equal(node.querySelector('.rows[data-group-id="101"]').scrollTop, 120);
   assert.equal(document.activeElement.dataset.tabId, "1000");
-  node.querySelector('[data-group-id="101"] .column-close').focus({ preventScroll: true });
+  const close = node.querySelector('[data-group-id="101"] .column-close');
+  close.focus({ preventScroll: true });
+  await ff.browser.tabGroups.update(201, { title: "Rebuild while a group control is focused" });
   await control.refresh();
+  assert.ok(node.querySelector('[data-group-id="101"] .column-close') !== close);
   assert.equal(document.activeElement.className, "column-close");
   await flush(ff);
 });
+
+test("review important 2: multi-step drop renders once after dragend and completion", async () => {
+  const { ff, node, control } = await controller();
+  const rebuilds = countRebuilds(node);
+  const intermediate = [];
+  const move = ff.browser.tabs.move, group = ff.browser.tabs.group;
+  for (const [name, api] of [["move", move], ["group", group]]) {
+    ff.browser.tabs[name] = async (...args) => {
+      const result = await api(...args);
+      await flush(ff);
+      intermediate.push(rebuilds());
+      return result;
+    };
+  }
+  control.handlers.onDragState(true);
+  const dropping = control.handlers.onTabDrop(21, { zone: "group", groupId: 101, slot: 0 });
+  control.handlers.onDragState(false);
+  try {
+    await dropping;
+    await flush(ff);
+    assert.ok(intermediate.length >= 2, "exercise separate adoption and grouping calls");
+    assert.ok(intermediate.every(count => count === 0), `intermediate rebuilds: ${intermediate}`);
+    assert.equal(rebuilds(), 1, "only the final board should render");
+    assert.ok(node.querySelector('.column[data-group-id="101"] [data-tab-id="21"]'));
+  } finally { ff.browser.tabs.move = move; ff.browser.tabs.group = group; }
+});
+
+test("review important 2: overlapping actions remain held until the last action settles", async () => {
+  const { ff, node, control } = await controller();
+  const rebuilds = countRebuilds(node);
+  const update = ff.browser.tabGroups.update;
+  let release;
+  ff.browser.tabGroups.update = async (...args) => {
+    const result = await update(...args);
+    await new Promise(resolve => { release = resolve; });
+    return result;
+  };
+  const renaming = control.handlers.onRename(101, "Changed while held");
+  await Promise.resolve(); await Promise.resolve();
+  try {
+    await control.handlers.onCloseTab(14);
+    await flush(ff);
+    assert.equal(rebuilds(), 0, "the shorter action must not release the longer one");
+  } finally { release(); await renaming; ff.browser.tabGroups.update = update; }
+  await flush(ff);
+  assert.equal(rebuilds(), 1);
+  assert.equal(node.querySelector('[data-tab-id="14"]'), null);
+  assert.equal(node.querySelector('[data-group-id="101"] .group-name').textContent, "Changed while held");
+});
+
+for (const [tabId, nextId, child] of [[23, 32, false], [32, 23, false], [11, 21, true], [12, 15, false]]) {
+  test(`review minor 3: disappearing row ${tabId} focuses its zone neighbour ${nextId}`, async () => {
+    const set = setup();
+    set.tabs.splice(2, 0, { id: 15, windowId: 1, groupId: 101, title: "Next group member" });
+    for (const tab of set.tabs) tab.lastAccessed = 1000 / tab.windowId;
+    const { ff, node } = await controller(set);
+    const row = node.querySelector(`[data-tab-id="${tabId}"]`);
+    const target = child ? row.querySelector(".row-close") : row;
+    target.focus({ preventScroll: true });
+    assert.equal(document.activeElement, target, "focus the original row/control before removal");
+    await ff.browser.tabs.remove(tabId);
+    await flush(ff);
+    assert.equal(document.activeElement, node.querySelector(`[data-tab-id="${nextId}"]`),
+      `focus the same-zone neighbour; active=${document.activeElement.className}:${document.activeElement.dataset.tabId}`);
+  });
+}
+
+for (const selector of [".strip", '.fixed .rows[data-zone="pinned"]', '.fixed .rows[data-zone="tabs"]']) {
+  test(`review minor 3: focused scroll container ${selector} survives a rebuild`, async () => {
+    const { ff, node } = await controller();
+    const original = node.querySelector(selector);
+    original.focus({ preventScroll: true });
+    assert.equal(document.activeElement, original);
+    await ff.browser.tabGroups.update(201, { title: "Force a real rebuild" });
+    await flush(ff);
+    assert.ok(node.querySelector(selector) !== original);
+    assert.equal(document.activeElement, node.querySelector(selector), "restore the focused scroll container");
+  });
+}
 
 test("controller holds updates during drag and edit including in-flight reads", async () => {
   const { ff, node, control } = await controller();
@@ -244,6 +412,30 @@ test("controller routes drops through target resolvers and requests a new group'
   await flush(ff);
 });
 
+test("review important 3: new-group edit ID holds refreshes until onEditEnd", async () => {
+  const { ff, node, control } = await controller();
+  await control.handlers.onTabDrop(23, { zone: "new-group" });
+  await flush(ff);
+  assert.ok(control.ui.editGroupId != null);
+  assert.ok(node.querySelector(`.column[data-group-id="${control.ui.editGroupId}"]`), "introduce the new column before holding its editor");
+  const row = node.querySelector('[data-tab-id="14"]');
+  const rebuilds = countRebuilds(node);
+  ff.calls.length = 0;
+  await ff.browser.tabs.update(14, { url: "https://example.com/during-new-group-edit" });
+  await flush(ff);
+  await control.refresh();
+  assert.equal(node.querySelector('[data-tab-id="14"]'), row, "editGroupId alone must preserve the editor DOM");
+  assert.equal(rebuilds(), 0);
+  assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 0);
+  control.handlers.onEditState(true);
+  control.handlers.onEditEnd();
+  await flush(ff);
+  assert.equal(control.ui.editGroupId, null);
+  assert.equal(control.ui.editing, false);
+  assert.equal(rebuilds(), 1, "release coalesced editor updates once");
+  assert.equal(node.querySelector('[data-tab-id="14"] .row-label').textContent, "https://example.com/during-new-group-edit");
+});
+
 test("controller catches failed reads, logs Foxy and re-reads once", async () => {
   const ff = createFirefox(setup());
   const node = await root();
@@ -279,12 +471,19 @@ test("a short interaction invalidates an in-flight read and schedules its replac
   const old = node.querySelector('[data-tab-id="23"]');
   const reading = control.refresh();
   await Promise.resolve(); await Promise.resolve();
+  // Change the live state without delivering its event: the release itself
+  // must request a new read rather than allowing the old snapshot to render.
+  await ff.browser.tabs.update(23, { url: "https://example.com/short-edit" });
+  ff.calls.length = 0;
   control.handlers.onEditState(true);
   control.handlers.onEditEnd();
   release(); await reading;
   await nextFrame(); await nextFrame();
-  assert.ok(node.querySelector('[data-tab-id="23"]') !== old, "invalidated read needs a replacement even without events");
+  assert.ok(node.querySelector('[data-tab-id="23"]') !== old, "changed snapshot needs a replacement even without events");
+  assert.equal(node.querySelector('[data-tab-id="23"] .row-label').textContent, "https://example.com/short-edit");
+  assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
   ff.browser.tabs.query = query;
+  await flush(ff);
 });
 
 test("missing and broken favicons use the globe at the same 16px size", async () => {
@@ -301,6 +500,36 @@ test("missing and broken favicons use the globe at the same 16px size", async ()
   await new Promise(resolve => image.addEventListener("error", resolve, { once: true }));
   assert.ok(node.querySelector('[data-tab-id="12"] .icon-none'));
 });
+
+for (const closingGroup of [false, true]) {
+  test(`review minor 1: ${closingGroup ? "close group" : "close tab"} preserves cached self when getCurrent is unavailable`, async () => {
+    const set = setup();
+    if (closingGroup) set.tabs.find(tab => tab.id === 99).groupId = 101;
+    const { ff, control } = await controller(set);
+    const getCurrent = ff.browser.tabs.getCurrent, warn = console.warn;
+    const warnings = [];
+    ff.browser.tabs.getCurrent = async () => undefined;
+    console.warn = (...args) => warnings.push(args);
+    try {
+      if (closingGroup) await control.handlers.onCloseGroup(101);
+      else await control.handlers.onCloseTab(99);
+      const tabs = await ff.browser.tabs.query({});
+      assert.ok(tabs.some(tab => tab.id === 99), "the cached page must never be removed by a close handler");
+      if (closingGroup) {
+        assert.equal(tabs.find(tab => tab.id === 99).groupId, -1);
+        assert.equal(tabs.some(tab => tab.id === 12), false, "close the other group members");
+      }
+      await control.handlers.onCloseTab(99);
+      assert.ok((await ff.browser.tabs.query({})).some(tab => tab.id === 99),
+        "a failed refresh must not discard the known self ID for the next close");
+      assert.ok(warnings.every(args => args[0].startsWith("Foxy:")));
+    } finally {
+      ff.browser.tabs.getCurrent = getCurrent;
+      await flush(ff);
+      console.warn = warn;
+    }
+  });
+}
 
 test("stale row actions warn and re-read instead of throwing or closing the page", async () => {
   const { ff, node, control } = await controller();

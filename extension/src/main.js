@@ -36,7 +36,10 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let queued = false;
   let pending = false;
   let retryQueued = true;
-  const held = () => ui.dragging || ui.editing;
+  let lastRenderedKey;
+  let actionsInFlight = 0;
+  let requestedEditGroupId = null;
+  const held = () => actionsInFlight > 0 || ui.dragging || ui.editing || ui.editGroupId != null;
 
   async function refresh(retry = true) {
     if (held()) { pending = true; return; }
@@ -48,12 +51,23 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       ]);
       if (held()) { pending = true; return; }
       if (mine !== generation) return;
+      const nextBoard = buildBoard({ windows, tabs, groups, currentWindowId: current.windowId,
+        selfTabId: current.id, selfUrl: location.origin + location.pathname });
       self = current;
-      board = buildBoard({ windows, tabs, groups, currentWindowId: self.windowId,
-        selfTabId: self.id, selfUrl: location.origin + location.pathname });
-      const saved = captureView(root);
-      renderBoard(root, board, ui, handlers);
-      restoreView(root, saved);
+      board = nextBoard;
+      // Introduce a newly created column/editor in the final action snapshot.
+      // Once published, editGroupId holds every subsequent refresh.
+      if (requestedEditGroupId != null) {
+        ui.editGroupId = requestedEditGroupId;
+        requestedEditGroupId = null;
+      }
+      const key = JSON.stringify({ board, ui });
+      if (key !== lastRenderedKey) {
+        const saved = captureView(root);
+        renderBoard(root, board, ui, handlers);
+        restoreView(root, saved);
+        lastRenderedKey = key;
+      }
       pending = false;
     } catch (error) {
       console.warn("Foxy: could not refresh board", error);
@@ -71,7 +85,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     retryQueued = retry;
     requestAnimationFrame(() => {
       queued = false;
-      if (held()) return;
+      if (held() || !pending) return;
       refresh(retryQueued);
     });
   }
@@ -83,22 +97,27 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   }
 
   async function action(run) {
+    ++actionsInFlight;
+    ++generation;
+    pending = true;
     try { return await run(); }
     catch (error) { console.warn("Foxy: board action failed", error); }
-    finally { await refresh(); }
+    finally {
+      if (--actionsInFlight === 0) await refresh();
+    }
   }
 
   const handlers = {
     onOpen: row => action(() => openTab(api, row, self, { close: history.length === 1 })),
-    onCloseTab: tabId => action(() => closeTabs(api, [tabId])),
-    onCloseGroup: groupId => action(() => closeGroup(api, groupId)),
+    onCloseTab: tabId => action(() => closeTabs(api, [tabId], self?.id)),
+    onCloseGroup: groupId => action(() => closeGroup(api, groupId, self?.id)),
     onBringHere: groupId => action(() => bringGroupHere(api, groupId, self.windowId)),
     onRename: (groupId, title) => action(() => renameGroup(api, groupId, title)),
     onRecolor: (groupId, color) => action(() => recolorGroup(api, groupId, color)),
     onTabDrop: (tabId, drop) => action(async () => {
       const target = resolveTabTarget(board, { ...drop, tabId }, self.windowId);
       const result = await dropTab(api, tabId, target);
-      if (result.ok && result.groupId != null) ui.editGroupId = result.groupId;
+      if (result.ok && result.groupId != null) requestedEditGroupId = result.groupId;
       return result;
     }),
     onGroupDrop: (groupId, slot) => action(() =>
@@ -107,12 +126,23 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     onEditState: editing => interaction("editing", editing),
     onEditEnd: () => {
       ui.editGroupId = null;
+      pending = true;
       interaction("editing", false);
     },
   };
 
   const onChange = () => schedule();
-  for (const event of [api.tabs.onCreated, api.tabs.onRemoved, api.tabs.onUpdated,
+  try {
+    api.tabs.onUpdated.addListener(onChange, {
+      properties: ["favIconUrl", "groupId", "hidden", "pinned", "title", "url"],
+    });
+  } catch (error) {
+    console.warn("Foxy: filtered tab updates unavailable, listening to all updates", error);
+    try { api.tabs.onUpdated.addListener(onChange); }
+    catch (fallbackError) { console.warn("Foxy: could not listen to tab updates", fallbackError); }
+    schedule();
+  }
+  for (const event of [api.tabs.onCreated, api.tabs.onRemoved,
     api.tabs.onMoved, api.tabs.onAttached, api.tabs.onDetached, api.tabs.onActivated,
     api.tabGroups.onCreated, api.tabGroups.onUpdated, api.tabGroups.onMoved, api.tabGroups.onRemoved,
     api.windows.onCreated, api.windows.onRemoved, api.windows.onFocusChanged]) {
@@ -131,7 +161,12 @@ function captureView(root) {
   if (root.contains(active)) {
     const row = active.closest("[data-tab-id]");
     const group = active.closest(".column[data-group-id]");
-    if (row) focus = { tabId: row.dataset.tabId, className: active.className };
+    if (row) {
+      const list = row.closest(".rows");
+      focus = { tabId: row.dataset.tabId, className: active.className,
+        rowsKey: rowsKey(list), index: [...list.querySelectorAll(".row")].indexOf(row) };
+    } else if (active.matches(".rows")) focus = { rowsKey: rowsKey(active) };
+    else if (active.matches(".strip")) focus = { strip: true };
     else if (group) focus = { groupId: group.dataset.groupId, className: active.className };
   }
   return { focus, left: root.querySelector(".strip")?.scrollLeft ?? 0,
@@ -140,11 +175,21 @@ function captureView(root) {
 
 function restoreView(root, { focus, left, tops }) {
   if (focus) {
-    const container = focus.tabId !== undefined
-      ? [...root.querySelectorAll("[data-tab-id]")].find(row => row.dataset.tabId === focus.tabId)
-      : [...root.querySelectorAll(".column[data-group-id]")].find(col => col.dataset.groupId === focus.groupId);
-    const active = container?.className === focus.className ? container
-      : [...(container?.querySelectorAll("*") ?? [])].find(el => el.className === focus.className);
+    let active;
+    const list = [...root.querySelectorAll(".rows")].find(list => rowsKey(list) === focus.rowsKey);
+    if (focus.strip) active = root.querySelector(".strip");
+    else if (focus.tabId === undefined && focus.rowsKey !== undefined) active = list;
+    else {
+      const container = focus.tabId !== undefined
+        ? [...root.querySelectorAll("[data-tab-id]")].find(row => row.dataset.tabId === focus.tabId)
+        : [...root.querySelectorAll(".column[data-group-id]")].find(col => col.dataset.groupId === focus.groupId);
+      active = container?.className === focus.className ? container
+        : [...(container?.querySelectorAll("*") ?? [])].find(el => el.className === focus.className);
+      if (!container && focus.tabId !== undefined) {
+        const rows = [...(list?.querySelectorAll(".row") ?? [])];
+        active = rows[Math.min(focus.index, rows.length - 1)] ?? list ?? root.querySelector(".strip");
+      }
+    }
     active?.focus({ preventScroll: true });
   }
   root.querySelector(".strip").scrollLeft = left;
