@@ -37,7 +37,7 @@ is transparent and the window's glass shows through.
 | Search | No search box in the page. The address bar comes back on new tabs |
 | Top of page | 24-hour clock without seconds in Danfo; date in Bebas Neue below it |
 | Tabs shown | Current window only: pinned tabs, then tab groups. Ungrouped tabs are not shown |
-| Click | Switch to the tab, then close the new tab page |
+| Click | Switch to the tab, then blank and close the new tab page |
 | Group card | Header (color dot + name) and one row per tab (icon + title); scrolls after 8 rows |
 | Home page | The add-on also replaces the home page, so new windows show the same page |
 | Code | Plain HTML/CSS/JS modules, no framework, no build step |
@@ -48,15 +48,15 @@ Repo: `~/src/liquidfox-newtab/` (local git only).
 
 | File | Responsibility |
 |---|---|
-| `manifest.json` | MV3 manifest: new tab + home page override, permissions `tabs`, `tabGroups` and `sessions`, module background script, gecko id, `strict_min_version` 140.0, `data_collection_permissions.required = ["none"]` |
+| `manifest.json` | MV3 manifest: new tab + home page override, permissions `tabs` and `tabGroups`, module background script, gecko id, `strict_min_version` 140.0, `data_collection_permissions.required = ["none"]` |
 | `newtab.html` | Page skeleton: clock, date, pinned strip, groups grid |
 | `newtab.css` | All page styling |
 | `src/model.js` | Pure functions: sort tabs into pinned + groups, group color key, time text, date text, delay to next minute |
-| `src/actions.js` | `activateTab`: switch, then close the page; stays open if the switch fails |
+| `src/actions.js` | `activateTab`: switch, then request blank-and-close; stays open if the switch fails |
 | `src/render.js` | DOM building for the pinned strip and the group cards (text only, no HTML strings) |
 | `src/main.js` | Wires the browser API: reads tabs, listens for changes, runs the clock |
-| `background.js` | Module event page: listens for session changes and runs the forgetter |
-| `src/forget.js` | Matches and forgets recently closed entries containing only this page |
+| `background.js` | Module event page: listens for blank-and-close requests from the page |
+| `src/close.js` | Blanks the requesting tab's history entry before closing it |
 | `fonts/` | Danfo (variable, ELSH axis) and Bebas Neue, both OFL, with licence files |
 | `icons/globe.svg` | Fallback icon for tabs without a usable favicon |
 | `preview/` | Fake `browser` API + fixtures, for headless screenshots |
@@ -64,9 +64,11 @@ Repo: `~/src/liquidfox-newtab/` (local git only).
 | `scripts/build.py` | Zips only the add-on files into `dist/liquidfox-newtab-<version>.zip` |
 | `scripts/sign.py` | AMO v5 signing: upload, wait for validation, create/update, wait for signing, download |
 
-The page reads the tabs itself while it is open. A small background event page (`background.js`, `src/forget.js`)
-only removes this page from Recently Closed Tabs, matching Firefox's own new tab
-page (added 2026-09-30 after the final review).
+The page reads the tabs itself while it is open. The module background event page
+(`background.js`, `src/close.js`) only blanks and closes the page on request after a
+click. A tab whose only history entry is about:blank stays out of Recently Closed Tabs.
+Closing the page with Cmd+W still adds a "New Tab" entry; no other closed entries are
+forgotten.
 
 ## Behavior
 
@@ -81,7 +83,9 @@ page (added 2026-09-30 after the final review).
 - Re-render keeps each card's scroll position (keyed by group id).
 - Titles and names are set with `textContent`; nothing is parsed as HTML.
 - Click (or Enter/Space on the focused button): `tabs.update(id, {active: true})`, then
-  `tabs.remove(ownTabId)`. If the update rejects (tab gone), the page stays open and redraws.
+  ask the background to replace this page's history entry with about:blank and close it.
+  If the update rejects (tab gone), the page stays open and redraws. When this page has
+  Back history (Home button), it switches without closing.
 - Tab title fallback: the URL, then an empty string.
 - Group name fallback: `Unnamed group` (shown in capitals by Bebas Neue).
 - Group color: API `grey` maps to the sidebar's `gray`; unknown colors fall back to `gray`.
@@ -152,8 +156,8 @@ page (added 2026-09-30 after the final review).
 ## Testing
 
 1. `node --test`: model (sorting, exclusions, fallbacks, colors, time incl. `00:00`, date,
-   next-minute delay), actions (switch then close; stays open on failure), manifest (fields
-   and that every referenced file exists).
+   next-minute delay), actions (switch then request blank-and-close; stays open on failure),
+   background close flow, manifest (fields and that every referenced file exists).
 2. `python3 -m unittest`: JWT creation, credentials parsing, multipart encoding, build
    contents.
 3. Headless screenshots of fixture scenarios (clock only; 1, 2, 3 and 5 groups; long group;

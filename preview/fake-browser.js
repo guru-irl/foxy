@@ -17,6 +17,9 @@ const self = { id: 999, index: 999, windowId: 1, pinned: false, hidden: false, g
 const event = () => ({ addListener() {} });
 
 globalThis.browser = {
+  runtime: {
+    sendMessage: async () => undefined,
+  },
   tabs: {
     getCurrent: async () => self,
     query: async () => [...scenario.tabs, self],

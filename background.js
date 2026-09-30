@@ -1,12 +1,11 @@
-// Event page. Keeps this add-on's new tab page out of Recently Closed Tabs,
-// the way Firefox leaves out its own. Listeners are registered at the top
-// level so Firefox can wake the page for them.
-import { createForgetter } from "./src/forget.js";
+// Event page. When the new tab page closes itself after a click, it asks for
+// this: the tab is switched to about:blank first (Firefox leaves a tab whose
+// only page is about:blank out of Recently Closed Tabs), then closed. The
+// listener is registered at the top level so Firefox can wake the page for it.
+import { handleMessage } from "./src/close.js";
 
 const api = globalThis.browser;
-const forget = createForgetter(api, api.runtime.getURL("newtab.html"));
 
-api.sessions.onChanged.addListener(() => {
-  forget();
+api.runtime.onMessage.addListener((message, sender) => {
+  handleMessage(api, message, sender);
 });
-forget();

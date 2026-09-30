@@ -16,7 +16,7 @@ class BuildTest(unittest.TestCase):
         names = build.package_files()
         for required in [
             "manifest.json", "newtab.html", "newtab.css", "background.js",
-            "src/forget.js", "src/main.js", "src/model.js", "src/actions.js", "src/render.js",
+            "src/close.js", "src/main.js", "src/model.js", "src/actions.js", "src/render.js",
             "fonts/Danfo.ttf", "fonts/Danfo-OFL.txt",
             "fonts/BebasNeue-Regular.ttf", "fonts/BebasNeue-OFL.txt",
             "icons/globe.svg",

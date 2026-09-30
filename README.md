@@ -4,9 +4,11 @@ A private Firefox add-on for the Liquid Fox theme. It replaces the new tab page 
 the home page with a clock (Danfo), the date (Bebas Neue), this window's pinned tabs
 and its tab groups. Clicking a tab switches to it and closes the new tab page.
 
-The add-on asks for "Access recently closed tabs" (`sessions`) only to remove its own
-new tab page from Recently Closed Tabs, as Firefox does for its built-in page. It keeps
-nothing and sends nothing.
+After a click, the page switches to the tab, blanks its own tab and closes it, so it
+stays out of Recently Closed Tabs (as Firefox's own new tab page does). Closing the page
+with Cmd+W still adds a "New Tab" entry. When the page has Back history (for example,
+after using the Home button), it switches without closing. No `sessions` permission is
+needed; the add-on keeps nothing and sends nothing.
 
 Design: `docs/superpowers/specs/2026-09-30-newtab-design.md`.
 
