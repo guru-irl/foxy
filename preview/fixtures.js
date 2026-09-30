@@ -25,8 +25,8 @@ const icon = (i) =>
 
 // Tabs in window order: pinned tabs, one ungrouped tab (must not show), then
 // each group's tabs. Groups are returned in reverse so the page has to order
-// them by their tabs. With brokenIcons, a group's 2nd tab has a chrome:// icon
-// (an add-on can't load it) and its 3rd has none; both must show the globe.
+// them by their tabs. With brokenIcons, a group's 2nd tab has an icon
+// that fails to load and its 3rd has none; both must show the globe.
 function scenario(pinnedCount, specs) {
   const tabs = [];
   const groups = [];
@@ -43,7 +43,7 @@ function scenario(pinnedCount, specs) {
     groups.push({ id: groupId, windowId: 1, title: spec.title, color: spec.color, collapsed: false });
     for (let i = 0; i < spec.count; i++) {
       let favIconUrl = icon(g + i);
-      if (spec.brokenIcons && i === 1) favIconUrl = "chrome://global/skin/icons/settings.svg";
+      if (spec.brokenIcons && i === 1) favIconUrl = "data:image/png;base64,AAAA";
       if (spec.brokenIcons && i === 2) favIconUrl = undefined;
       add({ pinned: false, groupId, title: TITLES[(g * 3 + i) % TITLES.length], url: `https://example.com/${groupId}/${i}`, favIconUrl });
     }

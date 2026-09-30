@@ -19,6 +19,13 @@
   --text: light-dark(rgba(0, 0, 0, 0.85), rgba(255, 255, 255, 0.92));
   --text-muted: light-dark(rgba(0, 0, 0, 0.55), rgba(255, 255, 255, 0.6));
   --gap: 12px;
+  --strip: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.06));
+  --card: light-dark(rgba(246, 246, 247, 0.85), rgba(22, 22, 24, 0.78));
+  --label: light-dark(rgba(0, 0, 0, 0.62), rgba(255, 255, 255, 0.68));
+  --hover: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.08));
+  --pressed: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.12));
+  --thumb: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.18));
+  --row: 32px;
 }
 
 [hidden] {
@@ -62,4 +69,180 @@ body {
   letter-spacing: 0.12em;
   text-indent: 0.12em;
   color: var(--text-muted);
+}
+/* --- Buttons and icons -------------------------------------------------- */
+
+/* No native look. Hover, pressed and keyboard focus are fills, not outlines. */
+button {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--hover);
+}
+
+button:active,
+button:focus-visible {
+  background: var(--pressed);
+  outline: none;
+}
+
+.icon {
+  display: block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+
+.icon-none {
+  background-color: var(--text-muted);
+  mask: url("icons/globe.svg") center / contain no-repeat;
+}
+
+/* --- Pinned tabs --------------------------------------------------------- */
+
+.pinned {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 40px;
+  padding: 8px;
+  border-radius: 20px;
+  background: var(--strip);
+}
+
+.pin {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+
+.pin .icon {
+  width: 20px;
+  height: 20px;
+}
+
+/* --- Tab groups ------------------------------------------------------------ */
+
+/* Cards are always a third of the column wide, so a row with one or two cards
+   is centered rather than stretched; cards in a row share the tallest height. */
+.groups {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--gap);
+  margin-top: var(--gap);
+}
+
+.pinned[hidden] + .groups {
+  margin-top: 40px;
+}
+
+.card {
+  --g1: oklch(0.93 0.01 250);
+  --g2: oklch(0.72 0.02 250);
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 calc((100% - 2 * var(--gap)) / 3);
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--card);
+}
+
+@container (width < 640px) {
+  .card {
+    flex-basis: calc((100% - var(--gap)) / 2);
+  }
+}
+
+@container (width < 420px) {
+  .card {
+    flex-basis: 100%;
+  }
+}
+
+/* The dot's center lines up with the row icons below it: 10px + 6px here,
+   8px + 8px in the rows. */
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--row);
+  margin: 0;
+  padding-inline: 10px 8px;
+  font: normal 15px / 1 "LF Bebas", sans-serif;
+  letter-spacing: 0.06em;
+  color: var(--label);
+}
+
+/* Bebas capitals sit 0.05em above the middle of the line box. */
+.card-name {
+  position: relative;
+  top: 0.05em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Same dot as the sidebar's tab group labels. */
+.dot {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-image: linear-gradient(135deg, color-mix(in oklab, var(--g1) 75%, transparent), var(--g2));
+  box-shadow: 0 0 6px color-mix(in oklab, var(--g2) 50%, transparent);
+}
+
+.card[data-color="red"] { --g1: oklch(0.86 0.10 45); --g2: oklch(0.72 0.17 18); }
+.card[data-color="orange"] { --g1: oklch(0.90 0.10 80); --g2: oklch(0.77 0.16 52); }
+.card[data-color="yellow"] { --g1: oklch(0.96 0.11 108); --g2: oklch(0.87 0.15 85); }
+.card[data-color="green"] { --g1: oklch(0.91 0.13 135); --g2: oklch(0.76 0.16 158); }
+.card[data-color="cyan"] { --g1: oklch(0.92 0.09 185); --g2: oklch(0.77 0.13 220); }
+.card[data-color="blue"] { --g1: oklch(0.88 0.09 228); --g2: oklch(0.70 0.16 258); }
+.card[data-color="purple"] { --g1: oklch(0.87 0.10 325); --g2: oklch(0.71 0.17 295); }
+.card[data-color="pink"] { --g1: oklch(0.90 0.09 355); --g2: oklch(0.74 0.17 5); }
+.card[data-color="gray"] { --g1: oklch(0.93 0.01 250); --g2: oklch(0.72 0.02 250); }
+
+/* Eight rows, then the list scrolls inside the card. */
+.card-tabs {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(8 * var(--row));
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--thumb) transparent;
+}
+
+.row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: var(--row);
+  padding-inline: 8px;
+  border-radius: 8px;
+  text-align: start;
+}
+
+.row-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
