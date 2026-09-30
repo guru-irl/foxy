@@ -168,6 +168,20 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     const group = pinned ? null : await attempt(() => api.tabGroups.get(groupId));
     if (!pinned && !group) return; // A missing group at startup is not deletion.
     const nodes = await bookmarks(folderId), ids = new Set(nodes.map(n => n.id));
+    if (group) {
+      const members = await api.tabs.query({ windowId: group.windowId, groupId });
+      const allDeparting = members.length && members.every(tab => {
+        const entry = state.tabs[tab.id];
+        return entry?.folderId === folderId && !ids.has(entry.bookmarkId);
+      });
+      // Firefox deletes a group as soon as its last tab leaves. A batch can
+      // replace all bookmarks, so open its new members before emptying it.
+      if (allDeparting) {
+        for (const node of nodes) {
+          if (!mapped(node.id) && isOpenableUrl(node.url)) await attempt(() => openBookmark(node, folderId, group));
+        }
+      }
+    }
     for (const [tabId, entry] of tabsInFolder(state, folderId)) {
       if (!ids.has(entry.bookmarkId)) await attempt(() => departure(tabId, entry));
     }

@@ -498,3 +498,18 @@ for (const index of [0, 1]) test(`remote pin inserted at folder index ${index} p
   assert.equal(f.state.tabs[202].bookmarkId, b.id);
   await echoAndStable(f);
 });
+
+
+test("replacing every bookmark in an open group preserves the group while opening the new unloaded tab", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const f = await fixture(), folderId = f.folder();
+  for (const id of [30, 10, 20]) await f.api.bookmarks.remove(f.bookmark(id));
+  const b = await f.api.bookmarks.create({ parentId: folderId, url: url("replacement"), title: "Replacement" });
+  await f.inbound.reconcileFolder(folderId);
+  assert.equal(f.ff.layout(1), "| [7: 200] 99");
+  assert.equal((await f.api.tabs.get(200)).discarded, true);
+  assert.equal(f.state.tabs[200].bookmarkId, b.id);
+  assert.equal((await f.api.tabGroups.get(7)).title.trim(), "Work");
+  for (const id of [30, 10, 20]) assert.equal(f.state.tabs[id], undefined);
+  await echoAndStable(f);
+});
