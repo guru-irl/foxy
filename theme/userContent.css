@@ -47,9 +47,12 @@
 
   /* Condensed upright "SEARCH" instead of the long prompt. The original
      text stays in place but invisible, keeping Firefox's caret position.
-     With line-height 1, Google Sans Flex's capital centre is 0.482em from
-     the line top: (1 + 0.966 ascent - 0.286 descent - 0.716 cap height) / 2.
-     Move it up by 48.2% of its own height to centre it on the box. */
+     With line-height 1, nominal Google Sans Flex metrics estimate the
+     capital centre at 0.482em from the line top:
+     (1 + 0.966 ascent - 0.286 descent - 0.716 nominal cap height) / 2.
+     Retain the 48.2% translation as an estimate, not the 16px sidebar
+     labels' 0.75em raster calibration; ink edges vary with size, axes
+     and pixel snapping. */
   .fake-textbox {
     visibility: hidden !important;
   }

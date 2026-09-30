@@ -132,6 +132,16 @@ class ThemeTypographyTest(unittest.TestCase):
                 self.assertEqual(rule["font-variant-ligatures"], "none !important")
                 self.assertEqual(rule["font-feature-settings"], '"calt" 0, "liga" 0 !important')
 
+    def test_highlighted_url_descendants_override_default_sans(self):
+        # Firefox wraps typed-match segments in strong elements. The global
+        # :where(*) rule styles those directly, so inheriting mono is not enough.
+        for selector in (".urlbarView-url *", ".urlbarView-title[is-url] *"):
+            with self.subTest(selector=selector):
+                rule = matching_rule(self.chrome, selector)
+                self.assertEqual(rule["font-family"], MONO + " !important")
+                self.assertEqual(rule["font-variant-ligatures"], "none !important")
+                self.assertEqual(rule["font-feature-settings"], '"calt" 0, "liga" 0 !important')
+
     def assert_condensed_role(self, rule, style):
         for key, value in {
             "font-family": SANS, "font-weight": "800", "font-stretch": "50%",

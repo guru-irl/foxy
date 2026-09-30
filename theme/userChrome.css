@@ -794,8 +794,11 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
 }
 
 /* Placeholder: condensed upright "SEARCH" instead of the long prompt.
-   With line-height 1, the capital centre is 0.482em below the line top:
-   (1 + 0.966 ascent - 0.286 descent - 0.716 cap height) / 2. */
+   Nominal font metrics estimate the capital centre at 0.482em below
+   the line top with line-height 1:
+   (1 + 0.966 ascent - 0.286 descent - 0.716 nominal cap height) / 2.
+   Keep this estimate for SEARCH, not the 16px labels' 0.75em raster
+   calibration; actual ink edges depend on size, axes and pixel snapping. */
 #urlbar .urlbar-input::placeholder {
   color: transparent !important;
 }
@@ -819,16 +822,20 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
   pointer-events: none;
 }
 
-/* The page's URL in bundled Cascadia Mono, with programming ligatures
-   off so "//", "==" or "&&" stay separate characters. Only while the bar shows the current page's address
-   (pageproxystate="valid"); typed text and searches keep the normal font,
-   and it switches back on the first keystroke. The dropdown's URLs (the
-   grey address after a title, and rows whose title is an address, e.g.
-   "Visit") and the link status line use it too; titles and search
-   suggestions don't. */
+/* The page's URL in bundled Cascadia Mono, which has no programming
+   ligatures. The ligature-off declarations guard fallback fonts so
+   "//", "==" and "&&" stay separate characters. Only while the bar shows
+   the current page's address (pageproxystate="valid"); typed text and
+   searches keep the normal font, switching back on the first keystroke.
+   Dropdown URLs (the grey address after a title, and address-title rows
+   such as "Visit") and the link status line use it too; ordinary titles
+   and search suggestions don't. Style URL highlight children directly:
+   :where(*) otherwise gives them sans instead of inherited monospace. */
 #urlbar[pageproxystate="valid"]:not([usertyping]) .urlbar-input:not(:placeholder-shown),
 .urlbarView-url,
+.urlbarView-url *,
 .urlbarView-title[is-url],
+.urlbarView-title[is-url] *,
 #statuspanel-label {
   font-family: "Foxy Mono", "Cascadia Mono", ui-monospace, monospace !important;
   font-variant-ligatures: none !important;
@@ -1087,11 +1094,11 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
    YouTube", "... - Gmail"); the title is shrunk to nothing and the name
    drawn in its place. Other pinned sites show their title in the same
    font. To add a site, add it to both lists below.
-   No top nudge with the new font: its rasterised capitals are centred
-   like the group labels. */
+   The same 0.5px top nudge as the group labels keeps the flat capitals
+   centred at 1x and 2x (see the calibration in section 8). */
 :root:not(#lf) #pinned-tabs-container[orient="vertical"] .tabbrowser-tab .tab-label {
   position: relative !important;
-  top: 0px !important;
+  top: 0.5px !important;
   color: light-dark(rgba(0, 0, 0, 0.62), rgba(255, 255, 255, 0.68)) !important;
   font-family: "Foxy Sans", system-ui, sans-serif !important;
   font-size: var(--lf-label-size) !important;
@@ -1305,10 +1312,13 @@ toolbarseparator.proton-zap::before {
    Vertical: the dot hangs off the text baseline (vertical-align) at
    half the measured cap height minus half the dot. Ascent 0.966em and
    descent 0.286em round up to 16px and 5px at this size, placing the
-   baseline at (32 + 16 - 5) / 2 = 21.5px. Raster snapping to 22px
-   puts the capitals and dot at rows 10..21, centred at 16px in the
-   32px row. No top nudge is needed. Rounded letters have the font's
-   normal faint antialiased overshoot beyond the flat capital edges.
+   nominal baseline at (32 + 16 - 5) / 2 = 21.5px. At 1x, top 0px
+   and 0.5px both rasterise the flat capitals and dot at rows 10..21,
+   centred at 16px in the 32px row. At 2x, top 0px gives device rows
+   19..42 (0.5 CSS px high); top 0.5px gives matching rows 20..43,
+   centred exactly. Use 0.5px for group and pinned labels. At 2x the
+   flat caps' first row is antialiased; half-intensity bounds omit it.
+   Rounded letters have normal overshoot beyond the flat capital edges.
    The closed sidebar hides the name without changing the font (see the
    end of this section), so the dot stays put when it opens.
    Horizontal: the label starts 4px in from the tab edge (group padding), so
@@ -1324,7 +1334,7 @@ toolbarseparator.proton-zap::before {
 :root:not(#lf) #tabbrowser-tabs .tab-group-label {
   display: block !important;
   position: relative !important;
-  top: 0px !important;
+  top: 0.5px !important;
   padding-inline: calc(var(--tab-collapsed-width) / 2 - 4px - var(--lf-group-dot) / 2) 8px !important;
   color: light-dark(rgba(0, 0, 0, 0.62), rgba(255, 255, 255, 0.68)) !important;
   font-family: "Foxy Sans", system-ui, sans-serif !important;
