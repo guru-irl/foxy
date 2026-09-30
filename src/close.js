@@ -15,7 +15,7 @@ export async function blankAndClose(api, tabId, { timeoutMs = 2000 } = {}) {
       await api.tabs.update(tabId, { url: "about:blank", loadReplace: true });
     } catch (error) {
       blanked = false;
-      console.warn("Liquid Fox New Tab: could not blank the page before closing it", tabId, error);
+      console.warn("Default New Tab: could not blank the page before closing it", tabId, error);
       finish();
     }
     await completed;
@@ -28,13 +28,13 @@ export async function blankAndClose(api, tabId, { timeoutMs = 2000 } = {}) {
     try {
       await api.tabs.discard(tabId);
     } catch (error) {
-      console.warn("Liquid Fox New Tab: could not flush the page's state before closing it", tabId, error);
+      console.warn("Default New Tab: could not flush the page's state before closing it", tabId, error);
     }
   }
   try {
     await api.tabs.remove(tabId);
   } catch (error) {
-    console.warn("Liquid Fox New Tab: could not close the new tab page", tabId, error);
+    console.warn("Default New Tab: could not close the new tab page", tabId, error);
   }
 }
 

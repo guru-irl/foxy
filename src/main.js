@@ -6,7 +6,7 @@ const api = globalThis.browser;
 
 startClock(document.getElementById("time"), document.getElementById("date"));
 startTabs(document.getElementById("pinned"), document.getElementById("groups")).catch((error) => {
-  console.error("Liquid Fox New Tab: could not show tabs", error);
+  console.error("Default New Tab: could not show tabs", error);
 });
 
 // Updates on each minute boundary, and again whenever the page becomes visible,
@@ -46,7 +46,7 @@ async function startTabs(pinnedEl, groupsEl) {
     try {
       groups = await api.tabGroups.query({ windowId: self.windowId });
     } catch (error) {
-      console.error("Liquid Fox New Tab: could not read tab groups", error);
+      console.error("Default New Tab: could not read tab groups", error);
     }
     if (mine !== generation) return;
     const model = buildModel(tabs, groups, self.id);
@@ -62,7 +62,7 @@ async function startTabs(pinnedEl, groupsEl) {
     queued = true;
     requestAnimationFrame(() => {
       queued = false;
-      refresh().catch((error) => console.error("Liquid Fox New Tab: refresh failed", error));
+      refresh().catch((error) => console.error("Default New Tab: refresh failed", error));
     });
   }
 
@@ -84,7 +84,7 @@ async function startTabs(pinnedEl, groupsEl) {
       properties: ["favIconUrl", "groupId", "hidden", "pinned", "title"],
     });
   } catch (error) {
-    console.warn("Liquid Fox New Tab: filtered tab updates unavailable, listening to all updates in this window", error);
+    console.warn("Default New Tab: filtered tab updates unavailable, listening to all updates in this window", error);
     api.tabs.onUpdated.addListener(schedule, { windowId: self.windowId });
   }
 

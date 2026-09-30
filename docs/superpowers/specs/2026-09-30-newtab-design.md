@@ -1,4 +1,6 @@
-# Liquid Fox New Tab: design
+# Default New Tab: design
+
+(Renamed from Liquid Fox New Tab on 2026-09-30.)
 
 Date: 2026-09-30. Status: approved in chat (three design sections, all "go").
 

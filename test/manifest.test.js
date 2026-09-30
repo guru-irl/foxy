@@ -6,6 +6,10 @@ const root = new URL("../", import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), "utf8");
 const manifest = JSON.parse(read("manifest.json"));
 
+test("manifest names the add-on Default New Tab", () => {
+  assert.equal(manifest.name, "Default New Tab");
+});
+
 test("manifest replaces the new tab page and the home page with newtab.html", () => {
   assert.equal(manifest.manifest_version, 3);
   assert.deepEqual(manifest.chrome_url_overrides, { newtab: "newtab.html" });

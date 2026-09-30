@@ -1,4 +1,4 @@
-# Liquid Fox New Tab
+# Default New Tab
 
 A private Firefox add-on for the Liquid Fox theme. It replaces the new tab page and
 the home page with a clock (Danfo), the date (Bebas Neue), this window's pinned tabs

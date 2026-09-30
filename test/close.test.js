@@ -131,7 +131,7 @@ test("a failed blank warns, removes the listener and closes without waiting for 
   }
   assert.deepEqual(api.calls, [["addListener", FILTER], ["update", 7, BLANK], ["removeListener"], ["remove", 7]]);
   assert.equal(warn.mock.callCount(), 1);
-  assert.deepEqual(warn.mock.calls[0].arguments.slice(0, 2), ["Liquid Fox New Tab: could not blank the page before closing it", 7]);
+  assert.deepEqual(warn.mock.calls[0].arguments.slice(0, 2), ["Default New Tab: could not blank the page before closing it", 7]);
   assert.match(warn.mock.calls[0].arguments[2].message, /Cannot blank tab/);
 });
 
@@ -143,7 +143,7 @@ test("a failed close warns and resolves after cleaning up", async (t) => {
   await completesSoon(blankAndClose(api, 7, { timeoutMs: 10000 }));
   assert.deepEqual(api.calls, [["addListener", FILTER], ["update", 7, BLANK], ...AFTER_BLANK]);
   assert.equal(warn.mock.callCount(), 1);
-  assert.deepEqual(warn.mock.calls[0].arguments.slice(0, 2), ["Liquid Fox New Tab: could not close the new tab page", 7]);
+  assert.deepEqual(warn.mock.calls[0].arguments.slice(0, 2), ["Default New Tab: could not close the new tab page", 7]);
   assert.match(warn.mock.calls[0].arguments[2].message, /Cannot remove tab/);
 });
 
@@ -155,7 +155,7 @@ test("a failed discard warns and still removes the tab", async (t) => {
   await completesSoon(blankAndClose(api, 7, { timeoutMs: 10000 }));
   assert.deepEqual(api.calls, [["addListener", FILTER], ["update", 7, BLANK], ...AFTER_BLANK]);
   assert.equal(warn.mock.callCount(), 1);
-  assert.deepEqual(warn.mock.calls[0].arguments.slice(0, 2), ["Liquid Fox New Tab: could not flush the page's state before closing it", 7]);
+  assert.deepEqual(warn.mock.calls[0].arguments.slice(0, 2), ["Default New Tab: could not flush the page's state before closing it", 7]);
   assert.match(warn.mock.calls[0].arguments[2].message, /Cannot flush tab/);
 });
 
