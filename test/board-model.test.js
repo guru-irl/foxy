@@ -215,33 +215,35 @@ test("building a board does not mutate input snapshots", async () => {
   assert.deepEqual(input, before);
 });
 
-test("selfUrl excludes every Foxy page, ignoring query and hash, while retaining selfTabId filtering", async () => {
-  const selfUrl = "moz-extension://foxy-test/newtab.html";
-  const input = await snapshot({
-    windows: [{ id: 1 }, { id: 2 }],
-    groups: [{ id: 101, windowId: 1 }, { id: 201, windowId: 2 }],
-    tabs: [
-      { id: 1, windowId: 1, pinned: true, url: `${selfUrl}?q=one#pin` },
-      { id: 2, windowId: 1, groupId: 101, url: `${selfUrl}#group` },
-      { id: 3, windowId: 1, url: selfUrl },
-      { id: 99, windowId: 1, url: "https://example.com/self" },
-      { id: 4, windowId: 1, url: "moz-extension://foxy-test/other.html" },
-      { id: 5, windowId: 2, pinned: true, url: selfUrl },
-      { id: 6, windowId: 2, groupId: 201, url: `${selfUrl}?q=two` },
-      { id: 7, windowId: 2, url: `${selfUrl}#remote` },
-      { id: 8, windowId: 2, url: "moz-extension://other/newtab.html" },
-    ],
+for (const suffix of ["", "?q=self", "#page", "?q=self#page"]) {
+  test(`${suffix ? `review minor 4: selfUrl ${suffix}` : "selfUrl"} excludes every Foxy page, ignoring query and hash, while retaining selfTabId filtering`, async () => {
+    const selfUrl = "moz-extension://foxy-test/newtab.html";
+    const input = await snapshot({
+      windows: [{ id: 1 }, { id: 2 }],
+      groups: [{ id: 101, windowId: 1 }, { id: 201, windowId: 2 }],
+      tabs: [
+        { id: 1, windowId: 1, pinned: true, url: `${selfUrl}?q=one#pin` },
+        { id: 2, windowId: 1, groupId: 101, url: `${selfUrl}#group` },
+        { id: 3, windowId: 1, url: selfUrl },
+        { id: 99, windowId: 1, url: "https://example.com/self" },
+        { id: 4, windowId: 1, url: "moz-extension://foxy-test/other.html" },
+        { id: 5, windowId: 2, pinned: true, url: selfUrl },
+        { id: 6, windowId: 2, groupId: 201, url: `${selfUrl}?q=two` },
+        { id: 7, windowId: 2, url: `${selfUrl}#remote` },
+        { id: 8, windowId: 2, url: "moz-extension://other/newtab.html" },
+      ],
+    });
+    input.selfUrl = `${selfUrl}${suffix}`;
+    const before = structuredClone(input);
+    const board = buildBoard(freeze(input));
+    assert.deepEqual(board.pinned, []);
+    assert.deepEqual(board.columns, []);
+    assert.deepEqual(board.tabs.map(section => [section.windowId, section.rows.map(row => row.id)]), [
+      [1, [4]], [2, [8]],
+    ]);
+    assert.deepEqual(input, before);
   });
-  input.selfUrl = selfUrl;
-  const before = structuredClone(input);
-  const board = buildBoard(freeze(input));
-  assert.deepEqual(board.pinned, []);
-  assert.deepEqual(board.columns, []);
-  assert.deepEqual(board.tabs.map(section => [section.windowId, section.rows.map(row => row.id)]), [
-    [1, [4]], [2, [8]],
-  ]);
-  assert.deepEqual(input, before);
-});
+}
 
 test("no eligible windows gives an empty board, without inventing a current window", () => {
   assert.deepEqual(buildBoard({ windows: [], tabs: [], groups: [], currentWindowId: 1, selfTabId: 99 }), {

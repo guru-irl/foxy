@@ -9,8 +9,9 @@ import {
 
 const W1 = "P1 P2 | 3 [101: 4 5] 6 [102: 7 8] 9";
 const W2 = "P11 P12 | 13 [201: 14 15] 16 [202: 17 18] 19";
-function fixture() {
+function fixture(selfTabId) {
   return createFirefox({
+    selfTabId,
     windows: [{ id: 1, focused: true }, { id: 2 }], currentWindowId: 1,
     groups: [101, 102, 201, 202].map(id => ({ id, windowId: id < 200 ? 1 : 2 })),
     tabs: [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17, 18, 19].map(id => ({
@@ -73,6 +74,49 @@ for (const [name, tabId, windowId, beforeTabId, one, two = W2] of [
   test(`TABS drop ${name}`, async () => {
     const ff = fixture();
     assert.deepEqual(await dropTab(ff.browser, tabId, { kind: "tabs", windowId, beforeTabId }), { ok: true });
+    await layouts(ff, one, two);
+  });
+}
+
+for (const [name, kind, tabId, beforeTabId, prepare, one, two = W2] of [
+  ["group anchor closed", "group", 3, 4, api => api.tabs.remove(4),
+    "P1 P2 | [101: 5 3] 6 [102: 7 8] 9"],
+  ["group anchor left the group", "group", 3, 4, api => api.tabs.group({ tabIds: [4], groupId: 102 }),
+    "P1 P2 | [101: 5 3] 6 [102: 4 7 8] 9"],
+  ["TABS anchor closed after render", "tabs", 4, 9, api => api.tabs.remove(9),
+    "P1 P2 | 3 [101: 5] 6 4 [102: 7 8]"],
+  ["TABS anchor became pinned", "tabs", 4, 9, api => api.tabs.update(9, { pinned: true }),
+    "P1 P2 P9 | 3 [101: 5] 6 4 [102: 7 8]"],
+  ["TABS anchor moved to another window", "tabs", 4, 9, api => api.tabs.move(9, { windowId: 2, index: -1 }),
+    "P1 P2 | 3 [101: 5] 6 4 [102: 7 8]", "P11 P12 | 13 [201: 14 15] 16 [202: 17 18] 19 9"],
+  ["PINNED anchor closed", "pinned", 11, 2, api => api.tabs.remove(2),
+    "P1 P11 | 3 [101: 4 5] 6 [102: 7 8] 9", "P12 | 13 [201: 14 15] 16 [202: 17 18] 19"],
+]) {
+  test(`review minor 2: ${name} falls back to the target end`, async t => {
+    const ff = fixture();
+    t.mock.method(console, "warn", () => {});
+    await prepare(ff.browser);
+    assert.deepEqual(await dropTab(ff.browser, tabId, {
+      kind, windowId: 1, groupId: 101, beforeTabId,
+    }), { ok: true });
+    await layouts(ff, one, two);
+  });
+}
+
+for (const [name, prepare, one, two] of [
+  ["became unpinned", async api => {
+    await api.tabs.update(2, { pinned: false });
+    await api.tabs.move(2, { index: -1 });
+  }, "P3 P1 | 4 6 2", "| 5"],
+  ["moved to another window", api => api.tabs.move(2, { windowId: 2, index: 0 }),
+    "P3 P1 | 4 6", "P2 | 5"],
+]) {
+  test(`review minor 2: PINNED anchor ${name} falls back to the local pinned end`, async () => {
+    const ff = createFirefox({ windows: [{ id: 1 }, { id: 2 }],
+      tabs: [{ id: 1, windowId: 1, pinned: true }, { id: 2, windowId: 1, pinned: true },
+        { id: 3, windowId: 1, pinned: true }, { id: 4, windowId: 1 }, { id: 6, windowId: 1 }, { id: 5, windowId: 2 }] });
+    await prepare(ff.browser);
+    assert.deepEqual(await dropTab(ff.browser, 1, { kind: "pinned", windowId: 1, beforeTabId: 2 }), { ok: true });
     await layouts(ff, one, two);
   });
 }
@@ -172,6 +216,22 @@ for (const [name, groupId, windowId, beforeGroupId, one, two = W2] of [
   });
 }
 
+for (const [name, prepare, one, two] of [
+  ["moved out of the target window", api => api.tabGroups.move(201, { windowId: 1, index: 2 }),
+    "P1 P2 | [201: 14 15] 3 6 [102: 7 8] 9", "P11 P12 | 13 16 [202: 17 18] 19 [101: 4 5]"],
+  ["closed after render", api => api.tabs.remove([14, 15]),
+    "P1 P2 | 3 6 [102: 7 8] 9", "P11 P12 | 13 16 [202: 17 18] 19 [101: 4 5]"],
+]) {
+  test(`review minor 3: before group ${name} falls back to the target window end`, async () => {
+    const ff = fixture();
+    await prepare(ff.browser);
+    assert.equal(await dropGroup(ff.browser, 101, { windowId: 2, beforeGroupId: 201 }), true);
+    await layouts(ff, one, two);
+    assert.deepEqual(ff.calls.filter(call => call.api === "tabGroups.move").at(-1).args,
+      [101, { windowId: 2, index: -1 }]);
+  });
+}
+
 test("group column forwards offset uses the dragged group's full size", async () => {
   const ff = createFirefox({ windows: [{ id: 1 }, { id: 2 }], groups: [101, 102, 103].map(id => ({ id, windowId: 1 })),
     tabs: [{ id: 1, windowId: 1, groupId: 101 }, { id: 2, windowId: 1, groupId: 101 },
@@ -260,6 +320,45 @@ test("open tab delegates the only-history-entry close after switching", async ()
   assert.equal(ff.calls.filter(call => call.api === "runtime.sendMessage").length, 1);
 });
 
+test("review critical 1: foreign window is focused even when the close message never settles", async t => {
+  const ff = openFixture();
+  const send = t.mock.method(ff.browser.runtime, "sendMessage", () => new Promise(() => {}));
+  void openTab(ff.browser, await ff.browser.tabs.get(4), { id: 99, windowId: 1 }, { close: true });
+  // Drain the finite API promise chain, without awaiting the intentionally pending close.
+  await new Promise(resolve => setImmediate(resolve));
+  await layouts(ff, "P1 | 2 99", "P3 | 4");
+  assert.equal((await ff.browser.tabs.get(4)).active, true);
+  assert.equal((await ff.browser.windows.getLastFocused()).id, 2);
+  assert.equal(ff.calls.filter(call => call.api === "windows.update").length, 1);
+  assert.equal(send.mock.callCount(), 1);
+});
+
+test("review critical 1: activation and foreign focus finish before requesting page close", async () => {
+  const ff = openFixture();
+  ff.browser.runtime.onMessage.addListener(async message => {
+    if (message.type !== "blank-and-close") return;
+    assert.equal((await ff.browser.tabs.get(4)).active, true);
+    assert.equal((await ff.browser.windows.getLastFocused()).id, 2);
+    await ff.browser.tabs.remove(99);
+  });
+  assert.equal(await openTab(ff.browser, { id: 4 }, { id: 99, windowId: 1 }, { close: true }), true);
+  await layouts(ff, "P1 | 2", "P3 | 4");
+  const activation = ff.calls.findIndex(call => call.api === "tabs.update");
+  const focus = ff.calls.findIndex(call => call.api === "windows.update");
+  const close = ff.calls.findIndex(call => call.api === "runtime.sendMessage");
+  assert.ok(activation < focus && focus < close);
+});
+
+test("review critical 1: failed foreign focus warns and leaves the page open", async t => {
+  const ff = openFixture(), warn = t.mock.method(console, "warn", () => {});
+  t.mock.method(ff.browser.windows, "update", async () => { throw new Error("Window closed"); });
+  assert.equal(await openTab(ff.browser, { id: 4 }, { id: 99, windowId: 1 }, { close: true }), false);
+  await layouts(ff, "P1 | 2 99", "P3 | 4");
+  assert.equal((await ff.browser.tabs.get(4)).active, true);
+  assert.equal(ff.calls.some(call => call.api === "runtime.sendMessage" || call.api === "tabs.remove"), false);
+  assert.match(warn.mock.calls[0].arguments[0], /^Foxy:/);
+});
+
 test("close tabs removes precisely the selected tabs", async () => {
   const ff = fixture();
   assert.equal(await closeTabs(ff.browser, [1, 4, 19]), true);
@@ -271,6 +370,53 @@ test("close group removes all of its members without closing unrelated tabs", as
   await layouts(ff, W1, "P11 P12 | 13 16 [202: 17 18] 19");
   assert.equal((await ff.browser.tabGroups.query({})).some(group => group.id === 201), false);
 });
+for (const explicit of [true, false]) {
+  test(`review important 1: closeTabs preserves the page (${explicit ? "explicit self ID" : "legacy call"})`, async () => {
+    const ff = fixture(4);
+    assert.equal(await closeTabs(ff.browser, [1, 4, 19], ...(explicit ? [4] : [])), true);
+    await layouts(ff, "P2 | 3 [101: 4 5] 6 [102: 7 8] 9", "P11 P12 | 13 [201: 14 15] 16 [202: 17 18]");
+    assert.equal(ff.calls.some(call => call.api === "runtime.sendMessage"), false);
+  });
+  test(`review important 1: closeGroup ungroups the page before removing other members (${explicit ? "explicit self ID" : "legacy call"})`, async () => {
+    const ff = fixture(4);
+    assert.equal(await closeGroup(ff.browser, 101, ...(explicit ? [4] : [])), true);
+    await layouts(ff, "P1 P2 | 3 4 6 [102: 7 8] 9");
+    assert.equal((await ff.browser.tabs.get(4)).groupId, -1);
+    assert.equal((await ff.browser.tabGroups.query({})).some(group => group.id === 101), false);
+    const ungroup = ff.calls.findIndex(call => call.api === "tabs.ungroup");
+    const remove = ff.calls.findIndex(call => call.api === "tabs.remove");
+    assert.ok(ungroup >= 0 && ungroup < remove);
+    assert.equal(ff.calls.some(call => call.api === "runtime.sendMessage"), false);
+  });
+}
+
+test("review important 1: closeTabs selecting only the page is a safe no-op", async () => {
+  const ff = fixture();
+  assert.equal(await closeTabs(ff.browser, [4], 4), true);
+  await layouts(ff);
+  assert.equal(ff.calls.some(call => call.api === "tabs.remove"), false);
+});
+
+test("review important 1: closing a page-only group leaves the page loose", async () => {
+  const ff = createFirefox({ windows: [{ id: 1 }, { id: 2 }], selfTabId: 99,
+    groups: [{ id: 101, windowId: 1 }],
+    tabs: [{ id: 99, windowId: 1, groupId: 101 }, { id: 1, windowId: 1 }, { id: 2, windowId: 2 }] });
+  assert.equal(await closeGroup(ff.browser, 101, 99), true);
+  await layouts(ff, "| 99 1", "| 2");
+  assert.equal((await ff.browser.tabs.get(99)).groupId, -1);
+  assert.deepEqual(await ff.browser.tabGroups.query({}), []);
+  assert.equal(ff.calls.some(call => call.api === "tabs.remove"), false);
+});
+
+test("review important 1: failed page ungroup aborts the whole-group close", async t => {
+  const ff = fixture(4), warn = t.mock.method(console, "warn", () => {});
+  t.mock.method(ff.browser.tabs, "ungroup", async () => { throw new Error("Cannot ungroup page"); });
+  assert.equal(await closeGroup(ff.browser, 101, 4), false);
+  await layouts(ff);
+  assert.equal(ff.calls.some(call => call.api === "tabs.remove"), false);
+  assert.match(warn.mock.calls[0].arguments[0], /^Foxy:/);
+});
+
 test("rename permits an empty title and recolor passes Firefox's grey color name", async () => {
   const ff = fixture();
   assert.equal(await renameGroup(ff.browser, 101, "Work"), true);
@@ -315,6 +461,22 @@ test("a failed second step leaves a valid partial move and reports failure for a
   await layouts(ff, "P2 | 3 [101: 4 5] 6 [102: 7 8] 9", "P11 P12 | 13 [201: 14 15] 16 [202: 17 18] 19 1");
   assert.match(warn.mock.calls[0].arguments[0], /^Foxy:/);
 });
+
+for (const [tabId, beforeTabId] of [[12, 1], [13, null]]) {
+  test(`review minor 1: ignored adoption stops before pinning or reordering foreign tab ${tabId}`, async t => {
+    const ff = fixture(), warn = t.mock.method(console, "warn", () => {});
+    const move = ff.browser.tabs.move;
+    const moves = t.mock.method(ff.browser.tabs, "move", async (...args) => {
+      if (args[1].windowId != null) return [];
+      return move(...args);
+    });
+    assert.deepEqual(await dropTab(ff.browser, tabId, { kind: "pinned", windowId: 1, beforeTabId }), { ok: false });
+    await layouts(ff);
+    assert.equal(moves.mock.callCount(), 1);
+    assert.equal(ff.calls.some(call => call.api === "tabs.update"), false);
+    assert.match(warn.mock.calls[0].arguments[0], /^Foxy:/);
+  });
+}
 
 test("PINNED warns and reports false if Firefox silently ignores adoption", async t => {
   const ff = fixture(), warn = t.mock.method(console, "warn", () => {});
