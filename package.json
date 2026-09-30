@@ -1,0 +1,8 @@
+{
+  "name": "liquidfox-newtab",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test && python3 -m unittest discover -s scripts -p 'test_*.py'"
+  }
+}
