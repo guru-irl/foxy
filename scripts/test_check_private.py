@@ -1,4 +1,6 @@
+from contextlib import redirect_stderr
 import importlib
+import io
 import os
 import pathlib
 import re
@@ -96,6 +98,53 @@ class PrivateCheckTest(unittest.TestCase):
         self.git("add", "link", "dangling")
         self.assertEqual(self.scan(), [f"dangling:1: {PATTERN}"])
 
+    def test_deleted_tracked_file_is_noted_and_scan_continues(self):
+        self.track("deleted\nfile.txt", b"safe\n").unlink()
+        self.track("private.txt", b"secretcorp\n")
+        self.git("commit", "-m", "secretcorp message")
+        sha = self.git("rev-parse", "--short", "HEAD")
+        result = self.cli("--patterns", self.patterns)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [
+            "private.txt:1: pattern #1", f"commit {sha}: pattern #1",
+        ])
+        self.assertEqual(len(result.stderr.splitlines()), 1)
+        self.assertIn(repr("deleted\nfile.txt"), result.stderr)
+        self.assertIn("Skipping", result.stderr)
+        notes = io.StringIO()
+        with redirect_stderr(notes):
+            self.assertEqual(self.scan(), [
+                f"private.txt:1: {PATTERN}", f"commit {sha}: {PATTERN}",
+            ])
+        self.assertEqual(notes.getvalue(), result.stderr)
+
+    def test_missing_tracked_file_without_hits_is_clean(self):
+        self.track("deleted.txt", b"safe\n").unlink()
+        result = self.cli("--patterns", self.patterns)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "clean\n")
+        self.assertEqual(len(result.stderr.splitlines()), 1)
+        self.assertIn("deleted.txt", result.stderr)
+
+    def test_tracked_gitlink_is_noted_and_skipped(self):
+        sha = self.git("rev-parse", "HEAD")
+        self.git("update-index", "--add", "--cacheinfo", f"160000,{sha},module")
+        for present in (True, False):
+            with self.subTest(present=present):
+                module = self.repo / "module"
+                if present:
+                    module.mkdir()
+                    (module / "private.txt").write_text("secretcorp\n")
+                else:
+                    (module / "private.txt").unlink()
+                    module.rmdir()
+                result = self.cli("--patterns", self.patterns)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "clean\n")
+                self.assertEqual(len(result.stderr.splitlines()), 1)
+                self.assertIn("module", result.stderr)
+                self.assertIn("Skipping", result.stderr)
+
     def test_missing_patterns_file_exits_two(self):
         result = self.cli("--patterns", self.root / "missing.txt")
         self.assertEqual(result.returncode, 2, result.stderr)
@@ -114,6 +163,28 @@ class PrivateCheckTest(unittest.TestCase):
         self.assertIn("private.txt:1:", result.stdout)
         self.assertNotIn("secretcorp", result.stdout + result.stderr)
         self.assertNotIn("private content", result.stdout + result.stderr)
+
+    def test_cli_identifies_pattern_file_lines_for_all_hit_types(self):
+        self.patterns.write_text("# comment\n\n" + PATTERN + "\n# gap\n(?i)hiddenco\n")
+        self.track("private.txt", b"secretcorp hiddenco private content\n")
+        self.git("commit", "-m", "secretcorp hiddenco message")
+        sha = self.git("rev-parse", "--short", "HEAD")
+        self.git("branch", "secretcorp-hiddenco")
+        result = self.cli("--patterns", self.patterns)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [
+            "private.txt:1: pattern #3",
+            "private.txt:1: pattern #5",
+            f"commit {sha}: pattern #3",
+            f"commit {sha}: pattern #5",
+            "branch secretcorp-hiddenco: pattern #3",
+            "branch secretcorp-hiddenco: pattern #5",
+        ])
+        self.assertEqual(result.stderr, "")
+        self.assertNotIn(PATTERN, result.stdout)
+        self.assertNotIn("(?i)hiddenco", result.stdout)
+        self.assertNotIn("private content", result.stdout)
+        self.assertNotIn("message", result.stdout)
 
     def test_blank_lines_and_comments_are_ignored(self):
         self.patterns.write_text("\n# ignored\n  # indented comment\n" + PATTERN + "\n")

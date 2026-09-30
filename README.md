@@ -20,7 +20,7 @@ Design: `docs/superpowers/specs/2026-09-30-newtab-design.md`.
     npm test                          # node --test and the Python tests; no npm packages
     python3 scripts/preview.py        # headless screenshots in dist/preview/ (throwaway profile)
 
-Before pushing: run `python3 scripts/check_private.py` (patterns stay outside the repo in `~/.config/foxy/scan-patterns.txt`).
+Before pushing: the scan reads files from the working tree, so commit (or stash) first, then run `python3 scripts/check_private.py` (patterns stay outside the repo in `~/.config/foxy/scan-patterns.txt`).
 
 ## Sign and install
 

@@ -22,34 +22,42 @@ def _scan_hits(repo: Path, patterns: list[re.Pattern]):
         relative = os.fsdecode(name)
         path = repo / relative
         # Git tracks the link itself, not the content of its external target.
-        data = os.fsencode(os.readlink(path)) if path.is_symlink() else path.read_bytes()
+        if path.is_symlink():
+            data = os.fsencode(os.readlink(path))
+        else:
+            if not path.exists() or path.is_dir():
+                print(f"Skipping tracked path (missing or directory): {relative!r}",
+                      file=sys.stderr)
+                continue
+            data = path.read_bytes()
         if b"\0" in data[:8000]:
             continue
         for number, line in enumerate(data.decode("utf-8", errors="replace").splitlines(), 1):
-            for pattern in patterns:
+            for pattern_index, pattern in enumerate(patterns):
                 if pattern.search(line):
-                    yield f"{relative}:{number}", pattern.pattern
+                    yield f"{relative}:{number}", pattern_index
 
     fields = _git(repo, "log", "--all", "--format=%h%x00%B%x00").decode(
         "utf-8", errors="replace",
     ).split("\0")
     for index in range(0, len(fields) - 1, 2):
         sha, message = fields[index].strip(), fields[index + 1]
-        for pattern in patterns:
+        for pattern_index, pattern in enumerate(patterns):
             if pattern.search(message):
-                yield f"commit {sha}", pattern.pattern
+                yield f"commit {sha}", pattern_index
 
     branches = _git(repo, "for-each-ref", "--format=%(refname:short)",
                     "refs/heads", "refs/remotes").decode("utf-8", errors="replace")
     for branch in branches.splitlines():
-        for pattern in patterns:
+        for pattern_index, pattern in enumerate(patterns):
             if pattern.search(branch):
-                yield f"branch {branch}", pattern.pattern
+                yield f"branch {branch}", pattern_index
 
 
 def scan(repo: Path, patterns: list[re.Pattern]) -> list[str]:
     """Return locations and matching regexes, without including matched content."""
-    return [f"{location}: {pattern}" for location, pattern in _scan_hits(repo, patterns)]
+    return [f"{location}: {patterns[index].pattern}"
+            for location, index in _scan_hits(repo, patterns)]
 
 
 def main() -> int:
@@ -59,8 +67,10 @@ def main() -> int:
     args = parser.parse_args()
     try:
         lines = args.patterns.read_text(encoding="utf-8").splitlines()
-        patterns = [re.compile(line) for line in lines
-                    if line.strip() and not line.lstrip().startswith("#")]
+        numbered_patterns = [(number, re.compile(line))
+                             for number, line in enumerate(lines, 1)
+                             if line.strip() and not line.lstrip().startswith("#")]
+        patterns = [pattern for _, pattern in numbered_patterns]
     except FileNotFoundError:
         print("Patterns file is missing; provide --patterns PATH.", file=sys.stderr)
         return 2
@@ -75,8 +85,8 @@ def main() -> int:
         print("Cannot scan tracked files or Git metadata.", file=sys.stderr)
         return 2
     if hits:
-        for location, _ in hits:
-            print(f"{location}: [pattern redacted]")
+        for location, index in hits:
+            print(f"{location}: pattern #{numbered_patterns[index][0]}")
         return 1
     print("clean")
     return 0
