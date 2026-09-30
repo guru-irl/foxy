@@ -12,71 +12,93 @@ export function createOutbound({
   api, getState, save, now = Date.now, removeDelayMs = 2000, quietMs = 10000, extensionBaseUrl,
   schedule = () => {},
 }) {
-  const pending = new Map();
   const warn = error => console.warn("Foxy: outbound sync failed", error);
   const guarded = fn => async (...args) => {
     try { await fn(...args); } catch (error) { warn(error); }
   };
   async function read(fn) {
-    try { return await fn(); } catch (error) { warn(error); return null; }
+    // Tabs, groups and bookmarks may disappear between queued events.
+    try { return await fn(); } catch { return null; }
   }
 
   function scheduleRemoval(tabId) {
-    const entry = getState().tabs[tabId];
-    if (!entry || pending.has(tabId)) return;
-    pending.set(tabId, { bookmarkId: entry.bookmarkId, folderId: entry.folderId, due: now() + removeDelayMs });
-    schedule(removeDelayMs);
+    const state = getState(), entry = state.tabs[tabId], pending = state.pendingRemovals[tabId];
+    if (!entry || (pending?.bookmarkId === entry.bookmarkId && pending.folderId === entry.folderId)) return;
+    state.pendingRemovals[tabId] = { bookmarkId: entry.bookmarkId, folderId: entry.folderId, due: now() + removeDelayMs };
+    const saved = save();
+    try { schedule(removeDelayMs); } catch (error) { warn(error); }
+    return saved;
+  }
+
+  function cancelRemoval(tabId) {
+    const state = getState();
+    if (!state.pendingRemovals[tabId]) return;
+    delete state.pendingRemovals[tabId];
+    return save();
   }
 
   // Query current positions, never the numeric-key order of state.tabs.
   async function position(tab, folderId, bookmark) {
     const state = getState();
-    const earlier = (await api.tabs.query({ windowId: tab.windowId,
+    const members = (await api.tabs.query({ windowId: tab.windowId,
       ...(tab.pinned ? { pinned: true } : { groupId: tab.groupId }) }))
-      .filter(other => other.index < tab.index && state.tabs[other.id]?.folderId === folderId)
-      .sort((a, b) => b.index - a.index);
-    for (const other of earlier) {
-      const nodes = await read(() => api.bookmarks.get(state.tabs[other.id].bookmarkId));
-      const previous = nodes?.[0];
-      if (!previous || previous.parentId !== folderId) continue;
-      // Pins share one folder across windows. Already-correct relative order
-      // must not be tightened into adjacency, which would make windows fight.
-      if (tab.pinned && bookmark?.parentId === folderId && bookmark.index > previous.index) {
-        return bookmark.index;
+      .filter(other => other.id !== tab.id && state.tabs[other.id]?.folderId === folderId);
+    async function neighbour(candidates) {
+      for (const other of candidates) {
+        const nodes = await read(() => api.bookmarks.get(state.tabs[other.id].bookmarkId));
+        if (nodes?.[0]?.parentId === folderId) return nodes[0];
       }
+      return null;
+    }
+    const previous = await neighbour(members.filter(other => other.index < tab.index).sort((a, b) => b.index - a.index));
+    const next = await neighbour(members.filter(other => other.index > tab.index).sort((a, b) => a.index - b.index));
+    if (bookmark?.parentId === folderId) {
       // Firefox move() interprets index AFTER removing the moving bookmark.
-      return previous.index + 1 - Number(bookmark?.parentId === folderId && bookmark.index < previous.index);
+      if (previous && bookmark.index < previous.index) return previous.index;
+      if (next && bookmark.index > next.index) return next.index;
+      // Unmapped bookmarks and other windows' pins may stay between neighbours.
+      return bookmark.index;
     }
-    if (tab.pinned) {
-      if (bookmark?.parentId === folderId) return bookmark.index;
-      return (await api.bookmarks.getChildren(folderId)).length;
-    }
-    return 0;
+    if (previous) return previous.index + 1;
+    return tab.pinned ? (await api.bookmarks.getChildren(folderId)).length : 0;
   }
 
   const syncTab = guarded(async tabId => {
     const tab = await read(() => api.tabs.get(tabId));
     if (!tab) return;
     let state = getState();
+    if (state.failedCreates[tabId] !== undefined && state.failedCreates[tabId] !== tab.url) {
+      delete state.failedCreates[tabId];
+      await save();
+    }
     let folderId = tab.pinned ? state.pinnedId : folderOfGroup(state, tab.groupId);
     if (!tab.pinned && tab.groupId != null && tab.groupId !== -1 && !folderId) {
       await syncGroup(tab.groupId);
       state = getState();
       folderId = folderOfGroup(state, tab.groupId);
     }
+    const entry = state.tabs[tabId];
     if (!folderId || !isSyncableUrl(tab.url, extensionBaseUrl)) {
-      scheduleRemoval(tabId);
+      if (folderId && entry?.folderId === folderId) await cancelRemoval(tabId);
+      else await scheduleRemoval(tabId);
       return;
     }
-    pending.delete(tabId);
-    const entry = state.tabs[tabId];
+    await cancelRemoval(tabId);
     const nodes = entry ? await read(() => api.bookmarks.get(entry.bookmarkId)) : null;
     const bookmark = nodes?.[0];
     if (entry && !bookmark) return; // A remote deletion belongs to inbound.
+    if (!entry && state.failedCreates[tabId] === tab.url) return;
     const index = await position(tab, folderId, bookmark);
     const title = tab.title ?? "";
     if (!entry) {
-      const created = await api.bookmarks.create({ parentId: folderId, index, url: tab.url, title });
+      let created;
+      try { created = await api.bookmarks.create({ parentId: folderId, index, url: tab.url, title }); }
+      catch (error) {
+        state.failedCreates[tabId] = tab.url;
+        warn(error);
+        await save();
+        return;
+      }
       state.tabs[tabId] = { bookmarkId: created.id, folderId, url: tab.url, title };
       await save();
       return;
@@ -127,11 +149,10 @@ export function createOutbound({
   });
 
   function tabRemoved(tabId, removeInfo = {}) {
-    if (removeInfo.isWindowClosing) {
-      pending.delete(tabId);
-      return;
-    }
-    scheduleRemoval(tabId);
+    try {
+      const saved = removeInfo.isWindowClosing ? cancelRemoval(tabId) : scheduleRemoval(tabId);
+      Promise.resolve(saved).catch(warn);
+    } catch (error) { warn(error); }
   }
 
   const groupRemoved = guarded(async (group, removeInfo = {}) => {
@@ -145,13 +166,13 @@ export function createOutbound({
   });
 
   const flush = guarded(async () => {
-    for (const [tabId, removal] of pending) {
+    for (const [tabId, removal] of Object.entries(getState().pendingRemovals)) {
       if (removal.due > now()) continue;
       // A failed write stays pending for the next queue-owned drain.
       await guarded(async () => {
         const state = getState(), entry = state.tabs[tabId];
         if (!entry || entry.bookmarkId !== removal.bookmarkId || entry.folderId !== removal.folderId) {
-          pending.delete(tabId);
+          await cancelRemoval(tabId);
           return;
         }
         const groupId = groupOfFolder(state, entry.folderId);
@@ -162,7 +183,7 @@ export function createOutbound({
           if (nodes?.[0]) await api.bookmarks.remove(entry.bookmarkId);
         }
         delete state.tabs[tabId];
-        pending.delete(tabId);
+        delete state.pendingRemovals[tabId];
         await save();
       })();
     }

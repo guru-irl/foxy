@@ -65,10 +65,10 @@ test("outbound URL policy excludes empty, new-tab and this extension's pages onl
   for (const [url, expected] of cases) assert.equal(isSyncableUrl(url, base), expected, String(url));
 });
 
-test("inbound URL policy allows valid HTTP(S) URLs and only about:blank", () => {
+test("inbound URL policy allows only valid HTTP(S) URLs", () => {
   const cases = [
     ["https://example.com/a?b=1#c", true], ["http://localhost:8080/", true],
-    ["HTTPS://example.com/", true], ["about:blank", true],
+    ["HTTPS://example.com/", true], ["about:blank", false],
     ["about:newtab", false], ["about:home", false], ["about:config", false],
     ["about:blank#fragment", false], ["file:///notes.txt", false], ["chrome://browser/content/", false],
     ["data:text/plain,hello", false], ["javascript:void(0)", false], ["ftp://example.com/", false],

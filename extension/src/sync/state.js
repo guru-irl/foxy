@@ -4,14 +4,18 @@ export const STATE_KEY = "foxySync";
 export function emptyState() {
   return {
     rootId: null, pinnedId: null, groups: {}, tabs: {}, openFolders: [], missing: [],
-    cantReopen: {}, deferred: [], quietUntil: {},
+    cantReopen: {}, deferred: [], quietUntil: {}, pendingRemovals: {}, failedCreates: {},
   };
 }
 
 export async function loadState(api) {
   try {
     const stored = await api.storage.local.get(STATE_KEY);
-    return validState(stored[STATE_KEY]) ? stored[STATE_KEY] : emptyState();
+    const state = stored[STATE_KEY];
+    if (!validState(state)) return emptyState();
+    state.pendingRemovals ??= {};
+    state.failedCreates ??= {};
+    return state;
   } catch (error) {
     console.warn("Foxy: could not load sync state", error);
     return emptyState();
@@ -69,5 +73,8 @@ function validState(value) {
     && entries(value.tabs, entry => record(entry) && string(entry.bookmarkId) && string(entry.folderId)
       && string(entry.url) && string(entry.title))
     && strings(value.openFolders) && strings(value.missing) && strings(value.deferred)
-    && entries(value.cantReopen, strings) && entries(value.quietUntil, Number.isFinite);
+    && entries(value.cantReopen, strings) && entries(value.quietUntil, Number.isFinite)
+    && (value.pendingRemovals === undefined || entries(value.pendingRemovals, entry => record(entry)
+      && string(entry.bookmarkId) && string(entry.folderId) && Number.isFinite(entry.due)))
+    && (value.failedCreates === undefined || entries(value.failedCreates, string));
 }

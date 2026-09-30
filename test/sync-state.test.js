@@ -8,7 +8,7 @@ import {
 
 const blank = () => ({
   rootId: null, pinnedId: null, groups: {}, tabs: {}, openFolders: [], missing: [],
-  cantReopen: {}, deferred: [], quietUntil: {},
+  cantReopen: {}, deferred: [], quietUntil: {}, pendingRemovals: {}, failedCreates: {},
 });
 const populated = () => ({
   rootId: "root-guid", pinnedId: "pins-guid",
@@ -21,6 +21,8 @@ const populated = () => ({
   openFolders: ["folder-a", "folder-b"], missing: ["folder-c"],
   cantReopen: { "folder-c": ["file:///notes.txt", "about:config"] },
   deferred: ["folder-a"], quietUntil: { 42: 1234567890 },
+  pendingRemovals: { 9: { bookmarkId: "bookmark-b", folderId: "folder-b", due: 1234567895 } },
+  failedCreates: { 15: "data:text/plain,rejected" },
 });
 
 // Catch missing bookkeeping fields and shared mutable defaults across event-page loads.
@@ -34,6 +36,8 @@ test("emptyState has the complete shape and independent mutable containers", () 
   first.cantReopen.folder = ["about:config"];
   first.deferred.push("folder");
   first.quietUntil[1] = 100;
+  first.pendingRemovals[1] = { bookmarkId: "bookmark", folderId: "folder", due: 105 };
+  first.failedCreates[2] = "data:text/plain,rejected";
   assert.deepEqual(second, blank());
 });
 
@@ -55,6 +59,21 @@ test("save and load round trip all state in storage.local without touching other
   restored.tabs[42].url = "https://changed.example/";
   restored.cantReopen["folder-c"].push("chrome://browser/");
   assert.deepEqual(await loadState(ff.browser), populated());
+});
+
+test("legacy state without pendingRemovals keeps its maps and defaults deadlines to empty", async () => {
+  const ff = createFirefox(), legacy = populated();
+  delete legacy.pendingRemovals;
+  await ff.browser.storage.local.set({ foxySync: legacy });
+  assert.deepEqual(await loadState(ff.browser), { ...legacy, pendingRemovals: {} });
+});
+
+test("legacy state without either new outbound field preserves maps", async () => {
+  const ff = createFirefox(), legacy = populated();
+  delete legacy.pendingRemovals;
+  delete legacy.failedCreates;
+  await ff.browser.storage.local.set({ foxySync: legacy });
+  assert.deepEqual(await loadState(ff.browser), { ...legacy, pendingRemovals: {}, failedCreates: {} });
 });
 
 test("corrupt top-level and nested state gives a fresh empty state", async (t) => {
@@ -80,6 +99,13 @@ test("corrupt top-level and nested state gives a fresh empty state", async (t) =
     ["deferred wrong member", { ...populated(), deferred: [false] }],
     ["quietUntil not map", { ...populated(), quietUntil: [] }],
     ["quietUntil wrong timestamp", { ...populated(), quietUntil: { 1: "soon" } }],
+    ["pendingRemovals not map", { ...populated(), pendingRemovals: [] }],
+    ["pendingRemovals null entry", { ...populated(), pendingRemovals: { 9: null } }],
+    ["pendingRemovals missing bookmark", { ...populated(), pendingRemovals: { 9: { folderId: "folder-b", due: 105 } } }],
+    ["pendingRemovals wrong folder", { ...populated(), pendingRemovals: { 9: { bookmarkId: "bookmark-b", folderId: 1, due: 105 } } }],
+    ["pendingRemovals wrong deadline", { ...populated(), pendingRemovals: { 9: { bookmarkId: "bookmark-b", folderId: "folder-b", due: "soon" } } }],
+    ["failedCreates not map", { ...populated(), failedCreates: [] }],
+    ["failedCreates wrong URL", { ...populated(), failedCreates: { 15: null } }],
   ];
   for (const [name, value] of cases) await t.test(name, async () => {
     const ff = createFirefox();

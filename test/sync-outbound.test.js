@@ -132,7 +132,7 @@ for (const reason of ["ungrouped", "closed"]) test(`${reason} tab removes one bo
   assert.deepEqual(await loadState(f.api), f.state);
 });
 
-for (const reason of ["ungrouped", "closed", "unsyncable"]) test(`${reason} removal asks the controller to schedule a queue-owned flush with removeDelayMs`, async () => {
+for (const reason of ["ungrouped", "closed", "unsyncable-left-folder"]) test(`${reason} removal asks the controller to schedule a queue-owned flush with removeDelayMs`, async () => {
   const scheduled = [];
   const f = await synced({ removeDelayMs: 5, schedule: ms => scheduled.push(ms) });
   if (reason === "closed") {
@@ -140,7 +140,10 @@ for (const reason of ["ungrouped", "closed", "unsyncable"]) test(`${reason} remo
     f.outbound.tabRemoved(10, { isWindowClosing: false });
   } else {
     if (reason === "ungrouped") await f.api.tabs.ungroup(10);
-    else await f.api.tabs.update(10, { url: "about:blank" });
+    else {
+      await f.api.tabs.update(10, { url: "about:blank" });
+      await f.api.tabs.ungroup(10);
+    }
     await f.outbound.syncTab(10);
   }
   assert.deepEqual(scheduled, [5]);
@@ -302,6 +305,13 @@ test("a new pin with no earlier same-window pin appends after other windows' boo
   assert.deepEqual(writes(f.ff).map(call => call.api), ["bookmarks.create"]);
   f.ff.calls.length = 0;
   await f.outbound.syncTab(pin.id);
+  assert.deepEqual(await f.pages(f.state.pinnedId), [
+    { title: "P1", url: url("p1") }, { title: url("new-pin"), url: url("new-pin") },
+    { title: "P3", url: url("p3") }, { title: "P2", url: url("p2") }, { title: "P4", url: url("p4") },
+  ]);
+  assert.deepEqual(writes(f.ff).map(call => call.api), ["bookmarks.move"]);
+  f.ff.calls.length = 0;
+  for (const id of [8, 3, pin.id, 6, 2]) await f.outbound.syncTab(id);
   assert.deepEqual(writes(f.ff), []);
 });
 
@@ -416,15 +426,71 @@ test("newtab, home, blank and every extension page are skipped without bookmarks
   assert.equal(writes(f.ff).length, 2);
 });
 
-test("mapped tab navigating to an unsyncable URL uses guarded delayed removal", async () => {
-  const f = await synced();
+for (const pinned of [false, true]) for (const unsyncable of ["about:blank", "about:newtab", "about:home", "moz-extension://foxy-test/newtab.html"]) {
+  test(`unsyncable URL: ${unsyncable} in the same ${pinned ? "pinned" : "group"} folder keeps its entry and bookmark`, async (t) => {
+    const f = await synced();
+    if (pinned) {
+      await f.api.tabs.update(10, { pinned: true });
+      await f.outbound.syncTab(10);
+    }
+    const entry = structuredClone(f.state.tabs[10]), before = await f.api.bookmarks.getTree();
+    f.ff.calls.length = 0;
+    const get = f.api.tabs.get;
+    t.mock.method(f.api.tabs, "get", async id => ({ ...await get(id), ...(id === 10 ? { url: unsyncable, title: "Unsyncable" } : {}) }));
+    await f.outbound.syncTab(10);
+    await f.outbound.flush();
+    assert.deepEqual(await f.api.bookmarks.getTree(), before);
+    assert.deepEqual(f.state.tabs[10], entry);
+    assert.deepEqual(f.state.pendingRemovals, {});
+    assert.deepEqual(writes(f.ff), []);
+    assert.equal(f.ff.calls.some(call => call.api === "storage.local.set"), false);
+  });
+}
+
+for (const reason of ["other group", "unpinned", "closed"]) test(`unsyncable URL: ${reason} still schedules guarded removal`, async () => {
+  const f = await synced({ removeDelayMs: 5 });
+  if (reason === "unpinned") {
+    await f.api.tabs.update(10, { pinned: true });
+    await f.outbound.syncTab(10);
+  }
+  const bookmarkId = f.state.tabs[10].bookmarkId;
   await f.api.tabs.update(10, { url: "about:blank" });
-  await f.outbound.syncTab(10);
-  assert.deepEqual(await f.pages(), abc);
+  f.ff.calls.length = 0;
+  if (reason === "closed") {
+    await f.api.tabs.remove(10);
+    f.outbound.tabRemoved(10);
+  } else {
+    if (reason === "unpinned") await f.api.tabs.update(10, { pinned: false });
+    else {
+      const other = await f.api.tabs.group({ tabIds: [99] });
+      await f.outbound.syncGroup(other);
+      f.ff.calls.length = 0;
+      await f.api.tabs.group({ groupId: other, tabIds: [10] });
+    }
+    await f.outbound.syncTab(10);
+  }
   await f.outbound.flush();
-  assert.deepEqual(await f.pages(), [abc[0], abc[2]]);
+  assert.ok(f.state.tabs[10]);
+  f.tick(5);
+  await f.outbound.flush();
   assert.equal(f.state.tabs[10], undefined);
-  assert.deepEqual(writes(f.ff).map(call => call.api), ["bookmarks.remove"]);
+  assert.deepEqual(writes(f.ff), [{ api: "bookmarks.remove", args: [bookmarkId] }]);
+});
+
+test("unsyncable URL: rejoining the original folder cancels an already scheduled removal", async () => {
+  const f = await synced({ removeDelayMs: 5 });
+  await f.api.tabs.ungroup(10);
+  await f.outbound.syncTab(10);
+  await f.api.tabs.update(10, { url: "about:blank" });
+  await f.api.tabs.group({ groupId: 7, tabIds: [10] });
+  f.ff.calls.length = 0;
+  await f.outbound.syncTab(10);
+  f.tick(5);
+  await f.outbound.flush();
+  assert.deepEqual(await f.pages(), abc);
+  assert.ok(f.state.tabs[10]);
+  assert.deepEqual((await loadState(f.api)).pendingRemovals, {});
+  assert.deepEqual(writes(f.ff), []);
 });
 
 test("syncTab twice and a repeated full group pass produce no echo writes or storage changes", async () => {
@@ -520,6 +586,194 @@ test("bookmark creation rejection is logged and does not abort the group's other
   assert.deepEqual(await f.pages(), [{ title: "Valid", url: url("valid") }]);
   assert.equal(f.state.tabs[1], undefined);
   assert.ok(warn.mock.calls.some(call => /^Foxy:/.test(call.arguments[0])));
+});
+
+for (const pinned of [true, false]) for (const index of [1, 0]) {
+  test(`relative order: ${pinned ? "pin" : "group tab"} moved backward to ${index} writes once then stabilizes`, async () => {
+    const f = pinned ? await fixture({ groups: [], tabs: [
+      { id: 30, windowId: 1, pinned: true, url: url("a"), title: "A" },
+      { id: 10, windowId: 1, pinned: true, url: url("b"), title: "B" },
+      { id: 20, windowId: 1, pinned: true, url: url("c"), title: "C" },
+    ] }) : await synced();
+    if (pinned) for (const id of [30, 10, 20]) await f.outbound.syncTab(id);
+    const folderId = pinned ? f.state.pinnedId : f.folder();
+    f.ff.calls.length = 0;
+    await f.api.tabs.move(20, { index });
+    await f.outbound.syncTab(20);
+    assert.deepEqual(await f.pages(folderId), index === 1 ? [abc[0], abc[2], abc[1]] : [abc[2], abc[0], abc[1]]);
+    assert.deepEqual(writes(f.ff).map(call => call.api), ["bookmarks.move"]);
+    f.ff.calls.length = 0;
+    for (const tab of await f.api.tabs.query({ windowId: 1 })) await f.outbound.syncTab(tab.id);
+    assert.deepEqual(writes(f.ff), []);
+  });
+}
+
+for (const pinned of [true, false]) test(`relative order: ${pinned ? "pins" : "group tabs"} preserve unmapped bookmarks between mapped neighbours`, async () => {
+  const f = await synced();
+  if (pinned) {
+    for (const id of [30, 10, 20]) {
+      await f.api.tabs.update(id, { pinned: true });
+      await f.outbound.syncTab(id);
+    }
+  }
+  const folderId = pinned ? f.state.pinnedId : f.folder();
+  await f.api.bookmarks.create({ parentId: folderId, index: 1, title: "X", url: "about:config" });
+  const expected = [abc[0], { title: "X", url: "about:config" }, abc[1], abc[2]];
+  f.ff.calls.length = 0;
+  for (let pass = 0; pass < 2; pass++) {
+    for (const id of [30, 10, 20]) await f.outbound.syncTab(id);
+    assert.deepEqual(await f.pages(folderId), expected);
+    assert.deepEqual(writes(f.ff), []);
+  }
+});
+
+for (const reason of ["closed", "ungrouped"]) test(`persisted removal: ${reason} tab is removed by a fresh outbound after wake`, async () => {
+  const f = await synced({ removeDelayMs: 5 }), entry = structuredClone(f.state.tabs[10]);
+  if (reason === "closed") {
+    await f.api.tabs.remove(10);
+    f.outbound.tabRemoved(10);
+  } else {
+    await f.api.tabs.ungroup(10);
+    await f.outbound.syncTab(10);
+  }
+  const restored = await loadState(f.api);
+  assert.deepEqual(restored.pendingRemovals, { 10: { bookmarkId: entry.bookmarkId, folderId: entry.folderId, due: 105 } });
+  let clock = 104;
+  const fresh = createOutbound({ api: f.api, getState: () => restored, save: () => saveState(f.api, restored), now: () => clock });
+  await fresh.flush();
+  assert.deepEqual(await f.pages(), abc);
+  clock = 105;
+  await fresh.flush();
+  assert.deepEqual(await f.pages(), [abc[0], abc[2]]);
+  assert.equal(restored.tabs[10], undefined);
+  assert.deepEqual(restored.pendingRemovals, {});
+  assert.deepEqual(await loadState(f.api), restored);
+});
+
+for (const reason of ["rejoined", "window closing"]) test(`persisted removal: ${reason} cancellation survives wake`, async () => {
+  const f = await synced({ removeDelayMs: 5 });
+  await f.api.tabs.ungroup(10);
+  await f.outbound.syncTab(10);
+  assert.ok((await loadState(f.api)).pendingRemovals?.[10], "scheduled removal must be saved");
+  if (reason === "rejoined") {
+    await f.api.tabs.group({ groupId: 7, tabIds: [10] });
+    await f.outbound.syncTab(10);
+  } else f.outbound.tabRemoved(10, { isWindowClosing: true });
+  const restored = await loadState(f.api);
+  assert.deepEqual(restored.pendingRemovals, {});
+  f.ff.calls.length = 0;
+  await createOutbound({ api: f.api, getState: () => restored, save: () => saveState(f.api, restored), now: () => 105 }).flush();
+  assert.ok(restored.tabs[10]);
+  assert.deepEqual(writes(f.ff), []);
+});
+
+for (const missing of ["tab", "bookmark", "group during flush"]) test(`expected missing object: ${missing} does not log outbound sync failed`, async (t) => {
+  const f = await synced(), warn = t.mock.method(console, "warn", () => {});
+  if (missing === "tab") {
+    await f.api.tabs.remove(10);
+    await f.outbound.syncTab(10);
+    assert.ok(f.state.tabs[10]);
+  } else if (missing === "bookmark") {
+    await f.api.bookmarks.remove(f.state.tabs[10].bookmarkId);
+    await f.outbound.syncTab(10);
+    assert.ok(f.state.tabs[10]);
+  } else {
+    const before = await f.api.bookmarks.getTree();
+    await f.api.tabs.remove([30, 10, 20]);
+    for (const id of [30, 10, 20]) f.outbound.tabRemoved(id);
+    await f.outbound.flush();
+    assert.deepEqual(await f.api.bookmarks.getTree(), before);
+    assert.deepEqual(f.state.tabs, {});
+  }
+  assert.equal(warn.mock.callCount(), 0);
+});
+
+for (const failure of ["getState", "schedule", "save", "save rejection"]) test(`guarded tabRemoved: ${failure} never escapes the listener and logs Foxy`, async (t) => {
+  const f = await synced(), error = new Error(failure), warn = t.mock.method(console, "warn", () => {});
+  const outbound = createOutbound({ api: f.api,
+    getState: () => { if (failure === "getState") throw error; return f.state; },
+    save: () => {
+      if (failure === "save") throw error;
+      if (failure === "save rejection") return Promise.reject(error);
+      return saveState(f.api, f.state);
+    },
+    schedule: () => { if (failure === "schedule") throw error; },
+  });
+  assert.doesNotThrow(() => outbound.tabRemoved(10));
+  await f.ff.settle();
+  assert.equal(warn.mock.callCount(), 1);
+  assert.match(warn.mock.calls[0].arguments[0], /^Foxy:/);
+  assert.ok(warn.mock.calls[0].arguments.includes(error));
+});
+
+test("guarded tabRemoved: a throwing scheduling hook still persists its removal deadline", async (t) => {
+  const f = await synced(), warn = t.mock.method(console, "warn", () => {});
+  const outbound = createOutbound({ api: f.api, getState: () => f.state, save: () => saveState(f.api, f.state),
+    now: () => 100, removeDelayMs: 5, schedule: () => { throw new Error("scheduler unavailable"); } });
+  assert.doesNotThrow(() => outbound.tabRemoved(10));
+  assert.deepEqual((await loadState(f.api)).pendingRemovals, { 10: {
+    bookmarkId: f.state.tabs[10].bookmarkId, folderId: f.folder(), due: 105,
+  } });
+  assert.equal(warn.mock.callCount(), 1);
+});
+
+async function rejectedCreateFixture(t) {
+  const warn = t.mock.method(console, "warn", () => {});
+  const f = await fixture({ tabs: [
+    { id: 1, windowId: 1, groupId: 7, url: "data:text/plain,no", title: "Rejected" },
+    { id: 2, windowId: 1, groupId: 7, url: url("valid"), title: "Valid" },
+  ] });
+  await f.outbound.syncGroup(7);
+  assert.deepEqual(await f.pages(), [{ title: "Valid", url: url("valid") }]);
+  assert.equal(warn.mock.callCount(), 1);
+  f.ff.calls.length = 0;
+  return { ...f, warn };
+}
+
+test("failed create: identical URL is suppressed across wake and a changed URL can create", async (t) => {
+  const f = await rejectedCreateFixture(t);
+  await f.outbound.syncTab(1);
+  await f.outbound.syncTab(1);
+  assert.deepEqual(writes(f.ff), []);
+  assert.equal(f.warn.mock.callCount(), 1);
+  const restored = await loadState(f.api);
+  assert.deepEqual(restored.failedCreates, { 1: "data:text/plain,no" });
+  const fresh = createOutbound({ api: f.api, getState: () => restored, save: () => saveState(f.api, restored) });
+  await fresh.syncTab(1);
+  assert.deepEqual(writes(f.ff), []);
+  assert.equal(f.warn.mock.callCount(), 1);
+  await f.api.tabs.update(1, { url: url("accepted") });
+  await fresh.syncTab(1);
+  await fresh.syncTab(1);
+  assert.deepEqual(await f.pages(), [{ title: url("accepted"), url: url("accepted") }, { title: "Valid", url: url("valid") }]);
+  assert.equal(restored.tabs[1].url, url("accepted"));
+  assert.deepEqual(restored.failedCreates, {});
+  assert.deepEqual(writes(f.ff).map(call => call.api), ["bookmarks.create"]);
+  assert.equal(f.warn.mock.callCount(), 1);
+});
+
+test("failed create: a different rejected URL is tried and logged only once", async (t) => {
+  const f = await rejectedCreateFixture(t);
+  const get = f.api.tabs.get;
+  t.mock.method(f.api.tabs, "get", async id => ({ ...await get(id), ...(id === 1 ? { url: "data:text/plain,other" } : {}) }));
+  await f.outbound.syncTab(1);
+  await f.outbound.syncTab(1);
+  assert.deepEqual(writes(f.ff).map(call => call.api), ["bookmarks.create"]);
+  assert.equal(f.warn.mock.callCount(), 2);
+  assert.deepEqual((await loadState(f.api)).failedCreates, { 1: "data:text/plain,other" });
+});
+
+test("failed create: changing through an unsyncable URL permits retry when the original URL returns", async (t) => {
+  const f = await rejectedCreateFixture(t);
+  await f.api.tabs.update(1, { url: "about:blank" });
+  await f.outbound.syncTab(1);
+  assert.deepEqual((await loadState(f.api)).failedCreates, {});
+  const get = f.api.tabs.get;
+  t.mock.method(f.api.tabs, "get", async id => ({ ...await get(id), ...(id === 1 ? { url: "data:text/plain,no" } : {}) }));
+  await f.outbound.syncTab(1);
+  await f.outbound.syncTab(1);
+  assert.deepEqual(writes(f.ff).map(call => call.api), ["bookmarks.create"]);
+  assert.equal(f.warn.mock.callCount(), 2);
 });
 
 test("failed bookmark update is logged without advancing lastSynced", async (t) => {

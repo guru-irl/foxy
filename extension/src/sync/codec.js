@@ -35,7 +35,6 @@ export function isSyncableUrl(url, extensionBaseUrl) {
 }
 
 export function isOpenableUrl(url) {
-  if (url === "about:blank") return true;
   try {
     const { protocol } = new URL(url);
     return protocol === "http:" || protocol === "https:";
