@@ -15,8 +15,8 @@ class BuildTest(unittest.TestCase):
     def test_package_has_only_addon_files(self):
         names = build.package_files()
         for required in [
-            "manifest.json", "newtab.html", "newtab.css",
-            "src/main.js", "src/model.js", "src/actions.js", "src/render.js",
+            "manifest.json", "newtab.html", "newtab.css", "background.js",
+            "src/forget.js", "src/main.js", "src/model.js", "src/actions.js", "src/render.js",
             "fonts/Danfo.ttf", "fonts/Danfo-OFL.txt",
             "fonts/BebasNeue-Regular.ttf", "fonts/BebasNeue-OFL.txt",
             "icons/globe.svg",

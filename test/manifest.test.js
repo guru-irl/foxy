@@ -12,10 +12,20 @@ test("manifest replaces the new tab page and the home page with newtab.html", ()
   assert.deepEqual(manifest.chrome_settings_overrides, { homepage: "newtab.html" });
 });
 
-test("manifest asks only for tabs and tabGroups", () => {
-  assert.deepEqual(manifest.permissions, ["tabs", "tabGroups"]);
+test("manifest asks only for tabs, tabGroups and sessions and uses a module background page", () => {
+  assert.deepEqual(manifest.permissions, ["tabs", "tabGroups", "sessions"]);
   assert.equal(manifest.host_permissions, undefined);
-  assert.equal(manifest.background, undefined);
+  assert.deepEqual(manifest.background, { scripts: ["background.js"], type: "module" });
+});
+
+test("the background script exists and imports the forget helper", () => {
+  assert.ok(manifest.background, "missing background declaration");
+  for (const script of manifest.background.scripts) {
+    assert.ok(existsSync(new URL(script, root)), `missing ${script}`);
+  }
+  const source = read("background.js");
+  assert.match(source, /from ["']\.\/src\/forget\.js["']/);
+  assert.ok(existsSync(new URL("src/forget.js", root)), "missing src/forget.js");
 });
 
 test("manifest has the gecko settings AMO needs", () => {

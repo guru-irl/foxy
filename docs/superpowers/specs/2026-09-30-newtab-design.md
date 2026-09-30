@@ -48,13 +48,15 @@ Repo: `~/src/liquidfox-newtab/` (local git only).
 
 | File | Responsibility |
 |---|---|
-| `manifest.json` | MV3 manifest: new tab + home page override, permissions `tabs` and `tabGroups`, gecko id, `strict_min_version` 140.0, `data_collection_permissions.required = ["none"]` |
+| `manifest.json` | MV3 manifest: new tab + home page override, permissions `tabs`, `tabGroups` and `sessions`, module background script, gecko id, `strict_min_version` 140.0, `data_collection_permissions.required = ["none"]` |
 | `newtab.html` | Page skeleton: clock, date, pinned strip, groups grid |
 | `newtab.css` | All page styling |
 | `src/model.js` | Pure functions: sort tabs into pinned + groups, group color key, time text, date text, delay to next minute |
 | `src/actions.js` | `activateTab`: switch, then close the page; stays open if the switch fails |
 | `src/render.js` | DOM building for the pinned strip and the group cards (text only, no HTML strings) |
 | `src/main.js` | Wires the browser API: reads tabs, listens for changes, runs the clock |
+| `background.js` | Module event page: listens for session changes and runs the forgetter |
+| `src/forget.js` | Matches and forgets recently closed entries containing only this page |
 | `fonts/` | Danfo (variable, ELSH axis) and Bebas Neue, both OFL, with licence files |
 | `icons/globe.svg` | Fallback icon for tabs without a usable favicon |
 | `preview/` | Fake `browser` API + fixtures, for headless screenshots |
@@ -62,7 +64,9 @@ Repo: `~/src/liquidfox-newtab/` (local git only).
 | `scripts/build.py` | Zips only the add-on files into `dist/liquidfox-newtab-<version>.zip` |
 | `scripts/sign.py` | AMO v5 signing: upload, wait for validation, create/update, wait for signing, download |
 
-No background script. The page reads the tabs itself while it is open.
+The page reads the tabs itself while it is open. A small background event page (`background.js`, `src/forget.js`)
+only removes this page from Recently Closed Tabs, matching Firefox's own new tab
+page (added 2026-09-30 after the final review).
 
 ## Behavior
 
