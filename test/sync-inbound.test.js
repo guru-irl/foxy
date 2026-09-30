@@ -194,14 +194,89 @@ for (const twoDrags of [false, true]) test(`outbound move echoes preserve ${twoD
 for (const record of ["none", "different parent", "different index"]) {
   test(`genuine remote bookmark move still sorts with ${record} expected move`, async () => {
     const f = await fixture(), bid = f.bookmark(20), folderId = f.folder();
-    if (record !== "none") f.state.expectedMoves = { [bid]: {
+    if (record !== "none") f.state.expectedMoves = { [bid]: [{
       parentId: record === "different parent" ? f.folder(8) : folderId,
       index: record === "different index" ? 1 : 0, at: 100,
-    } };
+    }, { parentId: folderId, index: 2, at: 100 }] };
     await f.api.bookmarks.move(bid, { index: 0 });
     await f.inbound.bookmarkMoved(bid, { oldParentId: folderId, parentId: folderId, index: 0 });
     assert.equal(f.ff.layout(1), "| [7: 20 30 10] 99");
     assert.equal(f.state.expectedMoves?.[bid], undefined, "a mismatch must consume the obsolete record");
+    await echoAndStable(f);
+  });
+}
+
+for (const age of [60000, 60001]) test(`expected move aged ${age} ms ${age > 60000 ? "expires and remote move sorts" : "still suppresses its echo"}`, async () => {
+  const f = await fixture(), bid = f.bookmark(20), folderId = f.folder();
+  f.state.expectedMoves = { [bid]: [{ parentId: folderId, index: 0, at: 100 }] };
+  f.tick(age);
+  await f.api.bookmarks.move(bid, { index: 0 });
+  f.ff.calls.length = 0;
+  await f.inbound.bookmarkMoved(bid, { oldParentId: folderId, parentId: folderId, index: 0 });
+  assert.equal(f.ff.layout(1), age > 60000 ? "| [7: 20 30 10] 99" : "| [7: 30 10 20] 99");
+  assert.equal(f.state.expectedMoves[bid], undefined);
+  assert.deepEqual(await loadState(f.api), f.state);
+  if (age > 60000) await echoAndStable(f);
+  else assert.deepEqual(tabActions(f.ff), []);
+});
+
+test("two outbound moves of the same bookmark keep both echoes ordered until consumed", async () => {
+  const f = await fixture(), bid = f.bookmark(20), echoes = [];
+  f.api.bookmarks.onMoved.addListener((id, info) => { echoes.push([id, info]); });
+  await f.api.tabs.move(20, { index: 0 });
+  await f.outbound.syncTab(20);
+  f.tick(1);
+  await f.api.tabs.move(20, { index: 1 });
+  await f.outbound.syncTab(20);
+  await f.ff.settle();
+  assert.equal(echoes.length, 2);
+  assert.deepEqual(f.state.expectedMoves[bid], [
+    { parentId: f.folder(), index: 0, at: 100 }, { parentId: f.folder(), index: 1, at: 101 },
+  ]);
+  f.ff.calls.length = 0;
+  await f.inbound.bookmarkMoved(...echoes[0]);
+  assert.deepEqual(f.state.expectedMoves[bid], [{ parentId: f.folder(), index: 1, at: 101 }]);
+  assert.deepEqual(await loadState(f.api), f.state);
+  await f.inbound.bookmarkMoved(...echoes[1]);
+  assert.equal(f.state.expectedMoves[bid], undefined);
+  assert.equal(f.ff.layout(1), "| [7: 30 20 10] 99");
+  assert.deepEqual(tabActions(f.ff), []);
+  await echoAndStable(f);
+});
+
+test("a matching later echo removes preceding entries but keeps later pending moves", async () => {
+  const f = await fixture(), bid = f.bookmark(20), folderId = f.folder();
+  f.state.expectedMoves = { [bid]: [
+    { parentId: folderId, index: 0, at: 100 },
+    { parentId: folderId, index: 1, at: 101 },
+    { parentId: folderId, index: 2, at: 102 },
+  ] };
+  await f.inbound.bookmarkMoved(bid, { oldParentId: folderId, parentId: folderId, index: 1 });
+  assert.deepEqual(f.state.expectedMoves[bid], [{ parentId: folderId, index: 2, at: 102 }]);
+  assert.deepEqual(await loadState(f.api), f.state);
+  assert.deepEqual(tabActions(f.ff), []);
+  await f.inbound.bookmarkMoved(bid, { oldParentId: folderId, parentId: folderId, index: 2 });
+  assert.equal(f.state.expectedMoves[bid], undefined);
+  await echoAndStable(f);
+});
+
+for (const shape of ["null map", "number map", "string map", "array map", "object entry", "string entry"]) {
+  test(`malformed expectedMoves ${shape} cannot suppress or block a remote move`, async (t) => {
+    const f = await fixture(), bid = f.bookmark(20), folderId = f.folder();
+    const record = { parentId: folderId, index: 0, at: 100 };
+    if (shape === "null map") f.state.expectedMoves = null;
+    if (shape === "number map") f.state.expectedMoves = 7;
+    if (shape === "string map") f.state.expectedMoves = "bad";
+    if (shape === "array map") { f.state.expectedMoves = []; f.state.expectedMoves[bid] = [record]; }
+    if (shape === "object entry") f.state.expectedMoves = { [bid]: record };
+    if (shape === "string entry") f.state.expectedMoves = { [bid]: "bad" };
+    const warn = t.mock.method(console, "warn", () => {});
+    await f.api.bookmarks.move(bid, { index: 0 });
+    await f.inbound.bookmarkMoved(bid, { oldParentId: folderId, parentId: folderId, index: 0 });
+    assert.equal(f.ff.layout(1), "| [7: 20 30 10] 99");
+    assert.equal(warn.mock.callCount(), 0);
+    assert.equal(f.state.expectedMoves?.[bid], undefined);
+    assert.deepEqual(await loadState(f.api), f.state);
     await echoAndStable(f);
   });
 }
@@ -745,6 +820,54 @@ for (const direction of ["pin-to-group", "group-to-pin", "cross-window group-to-
     await echoAndStable(f);
   });
 }
+
+for (const [direction, failingApi] of [
+  ["pin-to-group", "move"], ["group-to-pin", "move"], ["cross-window group-to-group", "move"],
+  ["cross-window group-to-group", "query"], ["cross-window group-to-group", "getChildren"],
+]) test(`completed ${direction} transfer keeps its mapping after ordering ${failingApi} rejects`, async (t) => {
+  const f = await fixture();
+  await addPins(f);
+  const extra = await f.api.tabs.create({ windowId: 1, url: url("extra-pin"), pinned: true, active: false });
+  await f.outbound.syncTab(extra.id);
+  const id = direction === "pin-to-group" ? 200 : 10, bid = f.bookmark(id);
+  const source = direction === "pin-to-group" ? f.state.pinnedId : f.folder();
+  const target = direction === "group-to-pin" ? f.state.pinnedId : f.folder(8);
+  const index = direction === "group-to-pin" ? 0 : 1;
+  const warnings = t.mock.method(console, "warn", () => {});
+  const owner = failingApi === "getChildren" ? f.api.bookmarks : f.api.tabs;
+  const original = owner[failingApi];
+  t.mock.method(owner, failingApi, async (...args) => {
+    // Fail only after pin/group membership has reached the destination. In
+    // particular, the cross-window attachment move/query must still succeed.
+    const tab = await f.api.tabs.get(id);
+    const arrived = direction === "group-to-pin" ? tab.pinned : tab.groupId === 8;
+    if (arrived && (failingApi !== "move" || args[1].windowId === undefined)) {
+      throw new Error("ordering denied");
+    }
+    return original(...args);
+  });
+  await f.api.bookmarks.move(bid, { parentId: target, index });
+  await f.inbound.reconcileFolder(source);
+  assert.equal(f.state.tabs[id]?.bookmarkId, bid, "completed membership changes must retain their mapping");
+  assert.equal(f.state.tabs[id].folderId, target);
+  assert.ok(f.state.deferred.includes(target), "failed ordering must be retried durably");
+  assert.ok(warnings.mock.calls.some(c => /^Foxy:/.test(c.arguments[0])));
+  assert.deepEqual(await loadState(f.api), f.state);
+  f.ff.calls.length = 0;
+  await f.outbound.syncTab(id);
+  await f.outbound.flush();
+  assert.ok(bookmarkWrites(f.ff).every(c => c.api === "bookmarks.move"), "outbound may reorder, never create or remove");
+  owner[failingApi] = original;
+  const resumed = await f.restart();
+  await resumed.applyDeferred();
+  assert.equal(f.state.tabs[id]?.bookmarkId, bid);
+  assert.deepEqual(f.state.deferred, []);
+  const pageUrl = direction === "pin-to-group" ? url("pin1") : url("b");
+  assert.equal((await f.api.tabs.query({})).filter(tab => tab.url === pageUrl).length, 1);
+  assert.equal((await f.api.bookmarks.getChildren(target)).filter(node => node.url === pageUrl).length, 1);
+  assert.ok(!tabActions(f.ff).some(c => /tabs\.(create|remove)$/.test(c.api)));
+  await echoAndStable(f);
+});
 
 for (const direction of ["group-to-pin", "pin-to-group"]) {
   for (const targetFirst of [false, true]) test(`${direction} preserves the existing tab, target-first=${targetFirst}`, async (t) => {

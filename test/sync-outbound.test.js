@@ -101,7 +101,7 @@ test("outbound records each move before writing and preserves it through loadSta
   assert.equal(f.state.expectedMoves, undefined, "legacy state starts without expectedMoves");
   t.mock.method(f.api.bookmarks, "move", async (id, info) => {
     assert.equal(id, bid);
-    assert.deepEqual(f.state.expectedMoves?.[id], { parentId: f.folder(), index: 0, at: 100 });
+    assert.deepEqual(f.state.expectedMoves?.[id], [{ parentId: f.folder(), index: 0, at: 100 }]);
     assert.deepEqual((await loadState(f.api)).expectedMoves, f.state.expectedMoves);
     return move(id, info);
   });
@@ -110,27 +110,80 @@ test("outbound records each move before writing and preserves it through loadSta
   await f.outbound.syncTab(20);
   assert.equal(warn.mock.callCount(), 0);
   assert.deepEqual(await f.pages(), [abc[2], abc[0], abc[1]]);
-  assert.deepEqual(f.state.expectedMoves, { [bid]: { parentId: f.folder(), index: 0, at: 100 } });
+  assert.deepEqual(f.state.expectedMoves, { [bid]: [{ parentId: f.folder(), index: 0, at: 100 }] });
   assert.deepEqual(await loadState(f.api), f.state);
 });
 
 test("adding an expected move prunes records older than 60 seconds only", async () => {
   const f = await synced(), bid = f.state.tabs[20].bookmarkId;
   f.state.expectedMoves = {
-    expired: { parentId: f.folder(), index: 0, at: 99 },
-    boundary: { parentId: f.folder(), index: 1, at: 100 },
-    recent: { parentId: f.folder(), index: 2, at: 101 },
+    expired: [{ parentId: f.folder(), index: 0, at: 99 }],
+    boundary: [{ parentId: f.folder(), index: 1, at: 100 }],
+    recent: [{ parentId: f.folder(), index: 2, at: 99 }, { parentId: f.folder(), index: 2, at: 101 }],
   };
   f.tick(60000);
   await f.api.tabs.move(20, { index: 0 });
   await f.outbound.syncTab(20);
   assert.deepEqual(f.state.expectedMoves, {
-    boundary: { parentId: f.folder(), index: 1, at: 100 },
-    recent: { parentId: f.folder(), index: 2, at: 101 },
-    [bid]: { parentId: f.folder(), index: 0, at: 60100 },
+    boundary: [{ parentId: f.folder(), index: 1, at: 100 }],
+    recent: [{ parentId: f.folder(), index: 2, at: 101 }],
+    [bid]: [{ parentId: f.folder(), index: 0, at: 60100 }],
   });
   assert.deepEqual(await loadState(f.api), f.state);
 });
+
+for (const pending of [false, true]) test(`rejected bookmark move deletes only its added echo record (prior echo=${pending}) and a later retry succeeds`, async (t) => {
+  const f = await synced(), bid = f.state.tabs[20].bookmarkId, move = f.api.bookmarks.move;
+  const before = structuredClone(f.state.tabs[20]);
+  const previous = [{ parentId: f.folder(), index: 2, at: 99 }];
+  f.state.expectedMoves = { ...(pending ? { [bid]: previous } : {}), other: [{ parentId: f.folder(), index: 1, at: 100 }] };
+  t.mock.method(f.api.bookmarks, "move", async () => { throw new Error("move denied"); });
+  const warn = t.mock.method(console, "warn", () => {});
+  await f.api.tabs.move(20, { index: 0 });
+  await f.outbound.syncTab(20);
+  assert.deepEqual(f.state.expectedMoves[bid], pending ? previous : undefined, "only the failed write's echo must be removed");
+  assert.deepEqual(f.state.expectedMoves.other, [{ parentId: f.folder(), index: 1, at: 100 }]);
+  assert.deepEqual(await loadState(f.api), f.state);
+  assert.deepEqual(f.state.tabs[20], before);
+  assert.deepEqual(await f.pages(), abc);
+  assert.equal(warn.mock.callCount(), 1);
+  assert.match(warn.mock.calls[0].arguments[0], /^Foxy:/);
+  f.api.bookmarks.move = move;
+  await f.outbound.syncTab(20);
+  assert.deepEqual(await f.pages(), [abc[2], abc[0], abc[1]]);
+});
+
+test("expected move history keeps only the latest eight writes per bookmark", async () => {
+  const f = await synced(), bid = f.state.tabs[20].bookmarkId;
+  for (let i = 0; i < 10; i++) {
+    f.tick(1);
+    await f.api.tabs.move(20, { index: i % 2 === 0 ? 0 : 2 });
+    await f.outbound.syncTab(20);
+  }
+  assert.equal(writes(f.ff).length, 10);
+  assert.deepEqual(f.state.expectedMoves[bid].map(({ index, at }) => [index, at]),
+    [[0, 103], [2, 104], [0, 105], [2, 106], [0, 107], [2, 108], [0, 109], [2, 110]]);
+  assert.deepEqual(await loadState(f.api), f.state);
+});
+
+for (const shape of ["null map", "number map", "string map", "array map", "object entry", "string entry"]) {
+  test(`malformed expectedMoves ${shape} does not prevent recording a new outbound move`, async (t) => {
+    const f = await synced(), bid = f.state.tabs[20].bookmarkId;
+    if (shape === "null map") f.state.expectedMoves = null;
+    if (shape === "number map") f.state.expectedMoves = 7;
+    if (shape === "string map") f.state.expectedMoves = "bad";
+    if (shape === "array map") f.state.expectedMoves = [];
+    if (shape === "object entry") f.state.expectedMoves = { [bid]: { parentId: f.folder(), index: 2, at: 99 }, bad: 7 };
+    if (shape === "string entry") f.state.expectedMoves = { [bid]: "bad", bad: null };
+    const warn = t.mock.method(console, "warn", () => {});
+    await f.api.tabs.move(20, { index: 0 });
+    await f.outbound.syncTab(20);
+    assert.equal(warn.mock.callCount(), 0);
+    assert.deepEqual(await f.pages(), [abc[2], abc[0], abc[1]]);
+    assert.deepEqual(f.state.expectedMoves, { [bid]: [{ parentId: f.folder(), index: 0, at: 100 }] });
+    assert.deepEqual(await loadState(f.api), f.state);
+  });
+}
 
 test("tab leaving for another group moves the same bookmark without rewriting either folder", async () => {
   const f = await synced(), bookmarkId = f.state.tabs[10].bookmarkId;

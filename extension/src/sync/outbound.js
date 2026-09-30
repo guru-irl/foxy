@@ -108,13 +108,27 @@ export function createOutbound({
       return;
     }
     if (bookmark.parentId !== folderId || bookmark.index !== index) {
-      const at = now(), expected = state.expectedMoves ??= {};
-      for (const [id, move] of Object.entries(expected)) {
-        if (at - move.at > 60000) delete expected[id];
+      const at = now();
+      if (!state.expectedMoves || typeof state.expectedMoves !== "object" || Array.isArray(state.expectedMoves)) {
+        state.expectedMoves = {};
       }
-      expected[entry.bookmarkId] = { parentId: folderId, index, at };
+      const expected = state.expectedMoves;
+      for (const [id, moves] of Object.entries(expected)) {
+        const fresh = Array.isArray(moves) ? moves.filter(move => move && at - move.at <= 60000) : [];
+        if (fresh.length) expected[id] = fresh;
+        else delete expected[id];
+      }
+      const record = { parentId: folderId, index, at };
+      const moves = expected[entry.bookmarkId] = [...(expected[entry.bookmarkId] ?? []), record].slice(-8);
       await save();
-      await api.bookmarks.move(entry.bookmarkId, { parentId: folderId, index });
+      try { await api.bookmarks.move(entry.bookmarkId, { parentId: folderId, index }); }
+      catch (error) {
+        const remaining = moves.filter(move => move !== record);
+        if (remaining.length) expected[entry.bookmarkId] = remaining;
+        else delete expected[entry.bookmarkId];
+        await save();
+        throw error;
+      }
     }
     if (entry.folderId !== folderId) {
       entry.folderId = folderId;

@@ -102,9 +102,6 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
         await api.tabs.group({ groupId: group.id, tabIds: [tabId] });
         changed = true;
       }
-      entry.folderId = folderId;
-      await positionTab(tabId, folderId, await bookmarks(folderId));
-      return true;
     } catch (error) {
       // Outbound must not interpret a half-transferred tab as a local departure
       // and remove the bookmark that already lives in the destination folder.
@@ -112,6 +109,15 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
       warn(error);
       return false;
     }
+    // Membership is complete. A failed sort must not discard this identity
+    // and let outbound create a duplicate bookmark for the transferred tab.
+    entry.folderId = folderId;
+    const ordered = await attempt(async () => {
+      await positionTab(tabId, folderId, await bookmarks(folderId));
+      return true;
+    });
+    if (!ordered) defer(folderId);
+    return true;
   }
 
   async function departure(tabId, entry) {
@@ -328,10 +334,19 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
   }
 
   async function bookmarkMoved(id, moveInfo) {
-    const expected = getState().expectedMoves?.[id];
-    if (expected) {
-      delete getState().expectedMoves[id];
-      if (expected.parentId === moveInfo.parentId && expected.index === moveInfo.index) return;
+    const state = getState();
+    if (!state.expectedMoves || typeof state.expectedMoves !== "object" || Array.isArray(state.expectedMoves)) {
+      state.expectedMoves = {};
+    }
+    const expected = state.expectedMoves[id];
+    if (expected !== undefined) {
+      const at = now(), fresh = Array.isArray(expected)
+        ? expected.filter(move => move && at - move.at <= 60000) : [];
+      const match = fresh.findIndex(move => move.parentId === moveInfo.parentId && move.index === moveInfo.index);
+      const remaining = match < 0 ? [] : fresh.slice(match + 1);
+      if (remaining.length) state.expectedMoves[id] = remaining;
+      else delete state.expectedMoves[id];
+      if (match >= 0) return;
     }
     if (moveInfo.parentId !== moveInfo.oldParentId) {
       await reconcileFolder(moveInfo.oldParentId, true);
