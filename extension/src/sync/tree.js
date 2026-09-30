@@ -18,9 +18,21 @@ export async function findOrCreateRoot(api, knownRootId) {
   return created.id;
 }
 
-/** Report duplicate roots without merging or mutating them. */
-export async function findExtraRoots(api, rootId) {
-  return (await directRoots(api)).filter(node => node.id !== rootId).map(node => node.id);
+/** Report the stored orphan first, then duplicate roots, without mutating them. */
+export async function findExtraRoots(api, rootId, knownRootId) {
+  const extra = new Set();
+  if (knownRootId && knownRootId !== rootId) {
+    try {
+      const [known] = await api.bookmarks.get(knownRootId);
+      if (known?.type === "folder") extra.add(known.id);
+    } catch (error) {
+      console.warn("Foxy: could not read stored bookmark root", knownRootId, error);
+    }
+  }
+  for (const node of await directRoots(api)) {
+    if (node.id !== rootId) extra.add(node.id);
+  }
+  return [...extra];
 }
 
 async function directRoots(api) {

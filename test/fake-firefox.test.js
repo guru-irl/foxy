@@ -73,19 +73,66 @@ test("get rejects unknown tabs and getCurrent uses the calling page rather than 
 test("create handles current window, pinned range, discarded titles and activation", async () => {
   const ff = strip();
   const log = logEvents(ff, ["tabs.onCreated"]);
-  const a = await ff.browser.tabs.create({ url: "https://example.com/a", title: "Ignored" });
+  const a = await ff.browser.tabs.create({ url: "https://example.com/a" });
   assert.equal(a.title, "https://example.com/a");
   assert.equal(a.active, true);
   assert.equal((await ff.browser.tabs.get(1)).active, false);
   const b = await ff.browser.tabs.create({ pinned: true, active: false });
   assert.equal(b.index, 1);
-  const c = await ff.browser.tabs.create({ discarded: true, title: "Saved" });
+  const c = await ff.browser.tabs.create({ url: "https://example.com/saved", discarded: true, title: "Saved" });
   assert.equal(c.active, false);
   assert.equal(c.title, "Saved");
   await assert.rejects(ff.browser.tabs.create({ discarded: true, active: true }));
   assert.equal(log.length, 0);
   await ff.settle();
   assert.equal(log.length, 3);
+  await invariants(ff);
+});
+
+const invalidCreates = [
+  ["active discarded tab", { url: "https://example.com/", discarded: true, active: true },
+    "Active tabs cannot be created and discarded."],
+  ["pinned discarded tab", { url: "https://example.com/", discarded: true, pinned: true, active: false },
+    "Pinned tabs cannot be created and discarded."],
+  ["discarded tab with no URL", { discarded: true, active: false },
+    'Cannot create a discarded new tab or "about" urls.'],
+  ["discarded tab with empty URL", { discarded: true, active: false, url: "" },
+    'Cannot create a discarded new tab or "about" urls.'],
+  ["discarded about:blank", { discarded: true, active: false, url: "about:blank" },
+    'Cannot create a discarded new tab or "about" urls.'],
+  ["discarded about:newtab", { discarded: true, active: false, url: "about:newtab" },
+    'Cannot create a discarded new tab or "about" urls.'],
+  ["discarded about URL with fragment", { discarded: true, active: false, url: "about:blank#top" },
+    'Cannot create a discarded new tab or "about" urls.'],
+  ["title on a loaded tab", { url: "https://example.com/", title: "Saved" },
+    "Title may only be set for discarded tabs."],
+  ["title with explicit discarded false", { url: "https://example.com/", title: "Saved", discarded: false },
+    "Title may only be set for discarded tabs."],
+];
+for (const [name, props, message] of invalidCreates) {
+  test(`create rejects ${name} like Firefox 157 without changing state or emitting events`, async () => {
+    const ff = createFirefox({ tabs: [{ id: 1, windowId: 1 }] });
+    const before = await ff.browser.windows.getAll({ populate: true });
+    const log = logEvents(ff, ["tabs.onCreated", "tabs.onUpdated", "tabs.onActivated"]);
+    await assert.rejects(ff.browser.tabs.create(props), { message });
+    assert.deepEqual(await ff.browser.windows.getAll({ populate: true }), before);
+    await ff.settle();
+    assert.deepEqual(log, []);
+  });
+}
+
+test("a pinned inactive tab can be discarded after creation", async () => {
+  const ff = createFirefox({ tabs: [{ id: 1, windowId: 1 }] });
+  const log = logEvents(ff, ["tabs.onUpdated"]);
+  const tab = await ff.browser.tabs.create({ url: "https://example.com/pin", active: false, pinned: true });
+  const [discarded] = await ff.browser.tabs.discard(tab.id);
+  assert.equal(discarded.discarded, true);
+  assert.equal(discarded.pinned, true);
+  assert.equal(discarded.active, false);
+  assert.equal((await ff.browser.tabs.get(tab.id)).discarded, true);
+  assert.equal((await ff.browser.tabs.get(1)).active, true);
+  await ff.settle();
+  assert.deepEqual(log, [["tabs.onUpdated", tab.id, { discarded: true }, discarded]]);
   await invariants(ff);
 });
 
@@ -135,7 +182,7 @@ test("update activates, pins out of groups, unpins at the boundary and loads dis
   assert.equal((await ff.browser.tabs.get(1)).active, false);
   await ff.browser.tabs.update(3, { pinned: false });
   assert.equal(ff.layout(1), "P1 | 3 2 [101: 4] 5");
-  const tab = await ff.browser.tabs.create({ discarded: true });
+  const tab = await ff.browser.tabs.create({ url: "https://example.com/saved", discarded: true });
   assert.equal((await ff.browser.tabs.update(tab.id, { url: "https://example.com/a" })).discarded, false);
   await invariants(ff);
 });

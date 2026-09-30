@@ -192,7 +192,15 @@ export function createFirefox(setup = {}) {
   api("tabs", "create", (props = {}) => {
     const id = props.windowId ?? currentWindowId;
     const tabs = windowTabs(id), pinned = props.pinned ?? false, discarded = props.discarded ?? false;
-    if (discarded && props.active === true) throw new Error("Cannot create an active discarded tab");
+    if (discarded) {
+      if (props.active === true) throw new Error("Active tabs cannot be created and discarded.");
+      if (pinned) throw new Error("Pinned tabs cannot be created and discarded.");
+      if (!props.url || props.url.startsWith("about:")) {
+        throw new Error('Cannot create a discarded new tab or "about" urls.');
+      }
+    } else if (props.title) {
+      throw new Error("Title may only be set for discarded tabs.");
+    }
     checkURL(props.url ?? "about:blank");
     const count = pinnedCount(id);
     const index = pinned ? Math.max(0, Math.min(props.index ?? count, count))

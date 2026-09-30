@@ -246,6 +246,45 @@ test("findExtraRoots returns an empty list when no extra direct Foxy folders exi
   assert.deepEqual(await tree.findExtraRoots(ff.browser, root.id), []);
 });
 
+for (const change of ["rename", "move", "rename-and-move"]) {
+  test(`findExtraRoots returns a ${change} known root first without mutating bookmarks`, async () => {
+    const ff = createFirefox({ bookmarks: [
+      { title: "Foxy" }, { title: "Foxy" }, { title: "Foxy" }, { title: "Foxy" },
+    ] });
+    const b = ff.browser.bookmarks;
+    const [root, first, last, known] = await b.getChildren("unfiled_____");
+    if (change.includes("rename")) await b.update(known.id, { title: "Personal tabs" });
+    if (change.includes("move")) await b.move(known.id, { parentId: "menu________" });
+    await b.move(last.id, { index: 0 });
+    const before = await b.getTree();
+    assert.deepEqual(await tree.findExtraRoots(ff.browser, root.id, known.id), [known.id, first.id, last.id]);
+    assert.deepEqual(await b.getTree(), before);
+  });
+}
+
+test("findExtraRoots lists a known direct Foxy folder first, only once", async () => {
+  const ff = createFirefox({ bookmarks: [{ title: "Foxy" }, { title: "Foxy" }, { title: "Foxy" }] });
+  const [root, other, known] = await ff.browser.bookmarks.getChildren("unfiled_____");
+  assert.deepEqual(await tree.findExtraRoots(ff.browser, root.id, known.id), [known.id, other.id]);
+});
+
+test("findExtraRoots never returns the selected root even when it is known", async () => {
+  const ff = createFirefox({ bookmarks: [{ title: "Foxy" }, { title: "Foxy" }] });
+  const [root, other] = await ff.browser.bookmarks.getChildren("unfiled_____");
+  assert.deepEqual(await tree.findExtraRoots(ff.browser, root.id, root.id), [other.id]);
+});
+
+test("findExtraRoots skips known bookmarks and stale ids, logging a failed read", async (t) => {
+  const ff = createFirefox({ bookmarks: [{ title: "Foxy" }, { title: "Foxy" },
+    { title: "Foxy", url: "https://example.com/" }] });
+  const [root, other, bookmark] = await ff.browser.bookmarks.getChildren("unfiled_____");
+  assert.deepEqual(await tree.findExtraRoots(ff.browser, root.id, bookmark.id), [other.id]);
+  const warn = t.mock.method(console, "warn", () => {});
+  assert.deepEqual(await tree.findExtraRoots(ff.browser, root.id, "stale-guid"), [other.id]);
+  assert.equal(warn.mock.callCount(), 1);
+  assert.match(warn.mock.calls[0].arguments[0], /^Foxy:/);
+});
+
 test("readTree keeps later pinned folders out of groups and selects pins by index", async () => {
   const ff = createFirefox({ bookmarks: [{ title: "Foxy", children: [
     { title: "Loose", url: "https://example.com/loose" },
