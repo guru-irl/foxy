@@ -218,9 +218,12 @@ Other Bookmarks
   broken by the most shared URLs; tabs are matched to bookmarks by URL within
   their folder, in order. Unmatched open groups get new folders. Unmatched
   folders are "saved, not open" here.
-- Finding the Foxy folder: by stored GUID; otherwise the oldest folder named
-  `Foxy` directly under Other Bookmarks (for example one arriving through
-  Sync); otherwise it is created.
+- Finding the Foxy folder: the oldest folder named `Foxy` directly under
+  Other Bookmarks, so devices that each created one before Sync merged
+  converge on the same folder; otherwise the stored GUID (renamed or moved);
+  otherwise it is created. The contents of any other Foxy folder (and of the
+  stored one, if it's no longer the chosen root) are moved into it; nothing
+  is deleted.
 
 ### 8.3 Tabs to bookmarks (outbound)
 
