@@ -1,15 +1,9 @@
-/* Preview only: stands in for the window's glass behind the transparent page. */
+/* Preview only: neutral glass behind the transparent page. */
 html {
   min-height: 100%;
-  background:
-    radial-gradient(circle at 20% 15%, rgba(120, 60, 50, 0.35), transparent 45%),
-    radial-gradient(circle at 80% 70%, rgba(40, 60, 90, 0.35), transparent 50%),
-    #26272a;
+  background: #26272a;
 }
 
 html[data-scheme="light"] {
-  background:
-    radial-gradient(circle at 20% 15%, rgba(230, 190, 170, 0.5), transparent 45%),
-    radial-gradient(circle at 80% 70%, rgba(170, 190, 220, 0.5), transparent 50%),
-    #e9e9ea;
+  background: #e9e9ea;
 }

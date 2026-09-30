@@ -18,7 +18,8 @@ class BuildTest(unittest.TestCase):
         names = build.package_files()
         for required in [
             "manifest.json", "newtab.html", "newtab.css", "background.js",
-            "src/close.js", "src/main.js", "src/model.js", "src/actions.js", "src/render.js",
+            "src/close.js", "src/main.js", "src/model.js", "src/actions.js",
+            "src/board/model.js", "src/board/targets.js", "src/board/moves.js", "src/board/render.js",
             "fonts/GoogleSansFlex.ttf", "fonts/GoogleSansFlex-OFL.txt",
             "fonts/GoogleSansFlex-TRADEMARKS.md",
             "fonts/CascadiaMono.ttf", "fonts/CascadiaMono-OFL.txt",
@@ -53,20 +54,22 @@ class BuildTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=SCRATCH) as directory:
             root = pathlib.Path(directory)
             extension = root / "extension"
-            (extension / "src").mkdir(parents=True)
+            (extension / "src" / "board").mkdir(parents=True)
             (extension / "manifest.json").write_text('{"version": "2.3.4"}')
             (extension / "src" / "main.js").write_text('// page module\n')
+            (extension / "src" / "board" / "render.js").write_text('// board module\n')
             (extension / ".preview.html").write_text('preview only')
             (root / "manifest.json").write_text('{"version": "0.0.0"}')
             (root / "theme").mkdir()
             (root / "theme" / "userChrome.css").write_text('theme only')
-            self.assertEqual(build.package_files(root), ["manifest.json", "src/main.js"])
+            self.assertEqual(build.package_files(root), ["manifest.json", "src/board/render.js", "src/main.js"])
             out = build.build(root)
             self.assertEqual(out, root / "dist" / "foxy-2.3.4.zip")
             with zipfile.ZipFile(out) as zf:
-                self.assertEqual(zf.namelist(), ["manifest.json", "src/main.js"])
+                self.assertEqual(zf.namelist(), ["manifest.json", "src/board/render.js", "src/main.js"])
                 self.assertEqual(zf.read("manifest.json"), b'{"version": "2.3.4"}')
                 self.assertEqual(zf.read("src/main.js"), b'// page module\n')
+                self.assertEqual(zf.read("src/board/render.js"), b'// board module\n')
 
     def test_zip_is_reproducible(self):
         first = build.build(out_dir=OUT_DIR).read_bytes()

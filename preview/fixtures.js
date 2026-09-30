@@ -1,74 +1,56 @@
-// Preview only: fake tabs and groups. Icons are inline SVG squares, so the
-// preview never loads anything from the network.
+// Preview fixtures use only inline, neutral icons. No network requests.
+const TITLES = ["YouTube", "Inbox (3)", "Pull request #1234: Fix the flaky sidebar test in the vertical tab strip",
+  "Docs", "Calendar", "Figma", "Hacker News", "Weather", "Maps", "Music", "Notes", "Photos"];
+const icon = "data:image/svg+xml," + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="3" fill="#aaa"/></svg>');
 
-const SWATCHES = ["#e2475b", "#f0883e", "#3fb950", "#58a6ff", "#bc8cff", "#39c5cf", "#e3b341", "#f778ba"];
-const TITLES = [
-  "YouTube",
-  "Inbox (3)",
-  "Pull request #1234: Fix the flaky sidebar test in the vertical tab strip",
-  "Docs",
-  "Calendar",
-  "Figma",
-  "Hacker News",
-  "Weather",
-  "Maps",
-  "Music",
-  "Notes",
-  "Photos",
-];
-
-const icon = (i) =>
-  "data:image/svg+xml," +
-  encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" rx="4" fill="${SWATCHES[i % SWATCHES.length]}"/></svg>`,
-  );
-
-// Tabs in window order: pinned tabs, one ungrouped tab (must not show), then
-// each group's tabs. Groups are returned in reverse so the page has to order
-// them by their tabs. With brokenIcons, a group's 2nd tab has an icon
-// that fails to load and its 3rd has none; both must show the globe.
-function scenario(pinnedCount, specs) {
-  const tabs = [];
-  const groups = [];
+function scenario(specs, { pinned = 6, loose = 3, other = false } = {}) {
+  const tabs = [], groups = [], windows = [{ id: 1, focused: true }];
   let id = 1;
-  const add = (extra) => tabs.push({ id: id++, index: tabs.length, windowId: 1, hidden: false, ...extra });
-
-  for (let i = 0; i < pinnedCount; i++) {
-    add({ pinned: true, groupId: -1, title: TITLES[i % TITLES.length], url: `https://example.com/pinned/${i}`, favIconUrl: icon(i) });
+  function addWindow(windowId, pinnedCount, groupSpecs, looseCount) {
+    let index = 0;
+    const add = extra => tabs.push({ id: id++, windowId, index: index++, lastAccessed: 1000 - windowId,
+      title: TITLES[(id - 2) % TITLES.length], favIconUrl: icon, ...extra });
+    for (let i = 0; i < pinnedCount; i++) add({ pinned: true, url: `https://example.com/pin/${windowId}/${i}` });
+    groupSpecs.forEach((spec, g) => {
+      const groupId = windowId * 100 + g + 1;
+      groups.push({ id: groupId, windowId, title: spec.title, color: spec.color, collapsed: false });
+      for (let i = 0; i < spec.count; i++) {
+        add({ groupId, url: `https://example.com/${groupId}/${i}`,
+          ...(spec.brokenIcons && i === 1 ? { favIconUrl: "data:image/png;base64,AAAA" } : {}),
+          ...(spec.brokenIcons && i === 2 ? { favIconUrl: null } : {}) });
+      }
+    });
+    for (let i = 0; i < looseCount; i++) add({ url: `https://example.com/loose/${windowId}/${i}` });
   }
-  add({ pinned: false, groupId: -1, title: "Ungrouped (must not show)", url: "https://example.com/loose", favIconUrl: icon(0) });
-
-  specs.forEach((spec, g) => {
-    const groupId = 100 + g;
-    groups.push({ id: groupId, windowId: 1, title: spec.title, color: spec.color, collapsed: false });
-    for (let i = 0; i < spec.count; i++) {
-      let favIconUrl = icon(g + i);
-      if (spec.brokenIcons && i === 1) favIconUrl = "data:image/png;base64,AAAA";
-      if (spec.brokenIcons && i === 2) favIconUrl = undefined;
-      add({ pinned: false, groupId, title: TITLES[(g * 3 + i) % TITLES.length], url: `https://example.com/${groupId}/${i}`, favIconUrl });
-    }
-  });
-
-  return { tabs, groups: groups.reverse() };
+  addWindow(1, pinned, specs, loose);
+  if (other) {
+    windows.push({ id: 2, focused: false });
+    addWindow(2, 2, [{ title: "READING", color: "orange", count: 6 },
+      { title: "TRAVEL", color: "purple", count: 4 }], 2);
+  }
+  // Reverse the API's groups to demonstrate ordering by tab-strip position.
+  return { windows, tabs, groups: groups.reverse() };
 }
 
+const one = [
+  { title: "DEV SERVER", color: "red", count: 5, brokenIcons: true },
+  { title: "Research with a very long group name that has to be cut off", color: "green", count: 12 },
+  { title: "   ", color: "grey", count: 3 },
+];
 export const SCENARIOS = {
-  none: scenario(0, []),
-  one: scenario(3, [{ title: "Work", color: "blue", count: 4 }]),
-  two: scenario(5, [
-    { title: "Work", color: "blue", count: 4 },
-    { title: "Reading", color: "orange", count: 6 },
-  ]),
-  three: scenario(6, [
-    { title: "Work", color: "blue", count: 5, brokenIcons: true },
-    { title: "Research with a very long group name that has to be cut off", color: "green", count: 12 },
-    { title: "Fun", color: "pink", count: 3 },
-  ]),
-  five: scenario(8, [
-    { title: "Work", color: "blue", count: 4 },
+  empty: scenario([], { pinned: 0 }),
+  "one-window": scenario(one),
+  "two-windows": scenario(one, { other: true }),
+  "many-groups": scenario([
+    { title: "DEV SERVER", color: "red", count: 20 },
+    { title: "READING", color: "blue", count: 20 },
+    { title: "TRAVEL", color: "purple", count: 3 },
+    { title: "SHOPPING", color: "yellow", count: 5 },
+    { title: "ADMIN", color: "orange", count: 20 },
+    { title: "NOTES", color: "cyan", count: 4 },
+    { title: "MUSIC", color: "pink", count: 3 },
     { title: "", color: "grey", count: 2 },
-    { title: "Travel", color: "purple", count: 3 },
-    { title: "Shopping", color: "yellow", count: 5 },
-    { title: "Admin", color: "red", count: 2 },
   ]),
+  light: scenario(one),
 };

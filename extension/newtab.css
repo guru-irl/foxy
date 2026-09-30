@@ -23,7 +23,6 @@
   --text: light-dark(rgba(0, 0, 0, 0.85), rgba(255, 255, 255, 0.92));
   --text-muted: light-dark(rgba(0, 0, 0, 0.55), rgba(255, 255, 255, 0.6));
   --gap: 12px;
-  --strip: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.06));
   --card: light-dark(rgba(246, 246, 247, 0.85), rgba(22, 22, 24, 0.78));
   --label: light-dark(rgba(0, 0, 0, 0.62), rgba(255, 255, 255, 0.68));
   --hover: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.08));
@@ -48,14 +47,18 @@ body {
 }
 
 .page {
-  width: min(860px, 100% - 64px);
-  margin: 10vh auto 64px;
-  container-type: inline-size;
+  box-sizing: border-box;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding-block: 10vh 24px;
 }
 
 /* --- Clock ------------------------------------------------------------- */
 
 .clock {
+  flex: none;
+  margin-bottom: 40px;
   text-align: center;
 }
 
@@ -116,80 +119,14 @@ button:focus-visible {
   mask: url("icons/globe.svg") center / contain no-repeat;
 }
 
-/* --- Pinned tabs --------------------------------------------------------- */
-
-.pinned {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 40px;
-  padding: 8px;
-  border-radius: 20px;
-  background: var(--strip);
-}
-
-.pin {
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-}
-
-.pin .icon {
-  width: 20px;
-  height: 20px;
-}
-
-/* --- Tab groups ------------------------------------------------------------ */
-
-/* Cards are always a third of the column wide, so a row with one or two cards
-   is centered rather than stretched; cards in a row share the tallest height. */
-.groups {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: var(--gap);
-  margin-top: var(--gap);
-}
-
-.pinned[hidden] + .groups {
-  margin-top: 40px;
-}
-
-.card {
-  --g1: oklch(0.93 0.01 250);
-  --g2: oklch(0.72 0.02 250);
-  display: flex;
-  flex-direction: column;
-  flex: 0 0 calc((100% - 2 * var(--gap)) / 3);
-  box-sizing: border-box;
-  min-width: 0;
-  padding: 8px;
-  border-radius: 12px;
-  background: var(--card);
-}
-
-@container (width < 640px) {
-  .card {
-    flex-basis: calc((100% - var(--gap)) / 2);
-  }
-}
-
-@container (width < 420px) {
-  .card {
-    flex-basis: 100%;
-  }
-}
-
 /* The dot's center lines up with the row icons below it: 10px + 6px here,
    8px + 8px in the rows. At weight 800, stretch 50%, oblique 10deg and auto
    optical size, flat HEIN capitals at 16px cover 12 rows in the Firefox
    preview (>=50% coverage): a measured raster cap ratio of 12/16 = 0.75.
-   Both caps and dot fill occupy rows 400-411 in the 32px header (390-421),
+   Both caps and dot fill occupy rows 348-359 in the 32px header (338-369),
    centered without a top nudge. Round-letter overshoot is not cap height. */
-.card-title {
+.column-header,
+.column-title {
   height: var(--row);
   margin: 0;
   padding-inline: 10px 8px;
@@ -199,7 +136,7 @@ button:focus-visible {
   line-height: var(--row);
   font-weight: 800;
   font-stretch: 50%;
-  font-style: oblique 10deg;
+  font-style: normal;
   text-transform: uppercase;
   letter-spacing: 0;
   white-space: nowrap;
@@ -207,7 +144,7 @@ button:focus-visible {
   color: var(--label);
 }
 
-.card-name {
+.group-name {
   min-width: 0;
 }
 
@@ -226,29 +163,15 @@ button:focus-visible {
   box-shadow: 0 0 6px color-mix(in oklab, var(--g2) 50%, transparent);
 }
 
-.card[data-color="red"] { --g1: oklch(0.86 0.10 45); --g2: oklch(0.72 0.17 18); }
-.card[data-color="orange"] { --g1: oklch(0.90 0.10 80); --g2: oklch(0.77 0.16 52); }
-.card[data-color="yellow"] { --g1: oklch(0.96 0.11 108); --g2: oklch(0.87 0.15 85); }
-.card[data-color="green"] { --g1: oklch(0.91 0.13 135); --g2: oklch(0.76 0.16 158); }
-.card[data-color="cyan"] { --g1: oklch(0.92 0.09 185); --g2: oklch(0.77 0.13 220); }
-.card[data-color="blue"] { --g1: oklch(0.88 0.09 228); --g2: oklch(0.70 0.16 258); }
-.card[data-color="purple"] { --g1: oklch(0.87 0.10 325); --g2: oklch(0.71 0.17 295); }
-.card[data-color="pink"] { --g1: oklch(0.90 0.09 355); --g2: oklch(0.74 0.17 5); }
-.card[data-color="gray"] { --g1: oklch(0.93 0.01 250); --g2: oklch(0.72 0.02 250); }
-
-/* Eight and a half rows, then the list scrolls inside the card; the cut-off half row shows there is more. */
-.card-tabs {
-  display: flex;
-  flex-direction: column;
-  max-height: calc(8.5 * var(--row));
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--thumb) transparent;
-}
-
-.card-tabs:focus-visible {
-  outline: none;
-}
+.column[data-color="red"] { --g1: oklch(0.86 0.10 45); --g2: oklch(0.72 0.17 18); }
+.column[data-color="orange"] { --g1: oklch(0.90 0.10 80); --g2: oklch(0.77 0.16 52); }
+.column[data-color="yellow"] { --g1: oklch(0.96 0.11 108); --g2: oklch(0.87 0.15 85); }
+.column[data-color="green"] { --g1: oklch(0.91 0.13 135); --g2: oklch(0.76 0.16 158); }
+.column[data-color="cyan"] { --g1: oklch(0.92 0.09 185); --g2: oklch(0.77 0.13 220); }
+.column[data-color="blue"] { --g1: oklch(0.88 0.09 228); --g2: oklch(0.70 0.16 258); }
+.column[data-color="purple"] { --g1: oklch(0.87 0.10 325); --g2: oklch(0.71 0.17 295); }
+.column[data-color="pink"] { --g1: oklch(0.90 0.09 355); --g2: oklch(0.74 0.17 5); }
+.column[data-color="gray"] { --g1: oklch(0.93 0.01 250); --g2: oklch(0.72 0.02 250); }
 
 .row {
   display: flex;
@@ -267,4 +190,173 @@ button:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Fixed edges and a horizontally scrolling middle. All columns keep their
+   width, even when a title or row is longer than the viewport. */
+.board {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: var(--gap);
+  margin-inline: 24px;
+}
+
+.strip {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: var(--gap);
+  overflow-x: auto;
+}
+
+.column {
+  --g1: oklch(0.93 0.01 250);
+  --g2: oklch(0.72 0.02 250);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 264px;
+  width: 264px;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.column-header,
+.column-title {
+  box-sizing: border-box;
+  position: relative;
+  flex: none;
+  width: 100%;
+}
+
+.column-header {
+  font-style: oblique 10deg;
+}
+
+.group-name {
+  display: inline-block;
+  max-width: calc(100% - 46px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.remote .group-name {
+  max-width: calc(100% - 70px);
+}
+
+.unnamed {
+  color: var(--text-muted);
+}
+
+.column-close,
+.bring-here {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font: normal 400 16px / 24px "Foxy Sans", system-ui, sans-serif;
+}
+
+.bring-here {
+  right: 28px;
+}
+
+.column-close {
+  opacity: 0;
+}
+
+.column:hover .column-close,
+.column:focus-within .column-close {
+  opacity: 1;
+}
+
+.rows {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.rows,
+.strip {
+  scrollbar-width: thin;
+  scrollbar-color: var(--thumb) transparent;
+}
+
+.rows:focus-visible,
+.strip:focus-visible,
+.row:focus-visible {
+  outline: none;
+}
+
+.row {
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--hover);
+}
+
+.row:active,
+.row:focus-visible {
+  background: var(--pressed);
+}
+
+.row-close {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  opacity: 0;
+}
+
+.row:hover .row-close,
+.row:focus-within .row-close {
+  opacity: 1;
+}
+
+.subheading,
+.other-window {
+  flex: none;
+  margin: 12px 8px 4px;
+  color: var(--text-muted);
+  font: normal 600 10px / 20px "Foxy Sans", system-ui, sans-serif;
+  font-stretch: 90%;
+  letter-spacing: 0.12em;
+}
+
+.other-window {
+  margin-top: 0;
+}
+
+.window-gap {
+  flex: none;
+  height: 20px;
+}
+
+.new-group {
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--card) 45%, transparent);
+}
+
+.action {
+  color: var(--text-muted);
+  font: normal 700 14px / 1 "Foxy Sans", system-ui, sans-serif;
+  font-stretch: 80%;
+}
+
+.url {
+  font-family: "Foxy Mono", monospace;
+  font-variant-ligatures: none;
 }
