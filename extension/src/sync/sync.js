@@ -14,7 +14,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   const save = () => saveState(api, state);
   const outbound = createOutbound({ api, getState: () => state, save, now, removeDelayMs, quietMs,
     extensionBaseUrl: api.runtime.getURL(""),
-    schedule: ms => setTimeout(() => queue.run(() => outbound.flush()).catch(() => {}), ms),
+    schedule: ms => setTimeout(() => queue.run(flush).catch(() => {}), ms),
   });
   // Losing OS focus doesn't stop showing the last Firefox window's active tab.
   // Keep this adapter local to sync; never mutate the injected browser object.
@@ -66,7 +66,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     // Every wake drains durable removal deadlines, not just browser startup.
     return starting.then(() => queue.run(async () => {
       await ensureTree();
-      await outbound.flush();
+      await flush();
     }));
   }
   async function run(fn) {
@@ -97,6 +97,30 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     if (pinned || cleaned) await save();
     if (root || pinned) await ensureTree();
   }
+  async function managedGroup(groupId) {
+    const folderId = state.groups[groupId]?.folderId;
+    if (!folderId) return true;
+    const node = await getNode(folderId);
+    if (node?.parentId === state.rootId) return true;
+    await folderRemoved(folderId);
+    return false;
+  }
+  async function syncGroup(groupId) {
+    if (await managedGroup(groupId)) await outbound.syncGroup(groupId);
+  }
+  async function syncTab(tabId) {
+    let tab;
+    try { tab = await api.tabs.get(tabId); }
+    catch { return outbound.syncTab(tabId); } // Outbound owns missing-tab reads/logging.
+    if (tab.pinned || await managedGroup(tab.groupId)) await outbound.syncTab(tabId);
+  }
+  async function flush() {
+    for (const folderId of new Set(Object.values(state.pendingRemovals).map(removal => removal.folderId))) {
+      const groupId = groupOfFolder(state, folderId);
+      if (groupId !== null) await managedGroup(groupId);
+    }
+    await outbound.flush();
+  }
   async function applyDeferred() {
     // A moved-out folder still exists, but must retry the same removal action
     // after the shown-tab guard releases. The folder id itself is durable.
@@ -117,19 +141,19 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   const jobs = {
     "runtime.onStartup": async () => {},
     "runtime.onInstalled": async () => {},
-    "tabs.onCreated": tab => outbound.syncTab(tab.id),
-    "tabs.onUpdated": id => outbound.syncTab(id),
+    "tabs.onCreated": tab => syncTab(tab.id),
+    "tabs.onUpdated": syncTab,
     "tabs.onRemoved": (id, info) => outbound.tabRemoved(id, info),
-    "tabs.onMoved": id => outbound.syncTab(id),
-    "tabs.onAttached": id => outbound.syncTab(id),
-    "tabs.onDetached": id => outbound.syncTab(id),
+    "tabs.onMoved": syncTab,
+    "tabs.onAttached": syncTab,
+    "tabs.onDetached": syncTab,
     "tabs.onActivated": applyDeferred,
-    "tabGroups.onCreated": group => outbound.syncGroup(group.id),
-    "tabGroups.onUpdated": group => outbound.syncGroup(group.id),
+    "tabGroups.onCreated": group => syncGroup(group.id),
+    "tabGroups.onUpdated": group => syncGroup(group.id),
     "tabGroups.onRemoved": (group, info) => outbound.groupRemoved(group, info),
     "tabGroups.onMoved": async group => {
-      await outbound.syncGroup(group.id);
-      for (const tab of await api.tabs.query({ groupId: group.id })) await outbound.syncTab(tab.id);
+      await syncGroup(group.id);
+      for (const tab of await api.tabs.query({ groupId: group.id })) await syncTab(tab.id);
     },
     "bookmarks.onCreated": (id, node) => changed(id, node),
     "bookmarks.onChanged": async id => changed(id, await getNode(id)),

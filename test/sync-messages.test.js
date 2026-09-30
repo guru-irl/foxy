@@ -345,3 +345,23 @@ test("focusing another Firefox window releases a shown tab's deferred navigation
   await drain(ff, sync);
   assert.equal((await ff.browser.tabs.get(4)).url, "https://other-window/");
 });
+
+test("outbound does not write to a moved-out folder while its shown tab waits to be ungrouped", async () => {
+  const ff = createFirefox(localSetup), sync = wire(ff);
+  await drain(ff, sync);
+  await ff.browser.tabs.update(4, { active: true });
+  await drain(ff, sync);
+  const before = await loadState(ff.browser), folderId = before.groups[11].folderId;
+  const outside = await ff.browser.bookmarks.create({ title: "Outside" });
+  await ff.browser.bookmarks.move(folderId, { parentId: outside.id });
+  await drain(ff, sync);
+  await ff.browser.tabs.update(4, { url: "https://local-after-removal/" });
+  await ff.browser.tabGroups.update(11, { title: "Changed locally" });
+  await drain(ff, sync);
+  assert.equal((await ff.browser.bookmarks.get(before.tabs[4].bookmarkId))[0].url, "https://work/");
+  assert.equal((await ff.browser.bookmarks.get(folderId))[0].title, "🔴 Work");
+  await ff.browser.tabs.update(1, { active: true });
+  await drain(ff, sync);
+  assert.equal((await ff.browser.tabs.get(4)).groupId, -1);
+  assert.equal((await ff.browser.tabs.get(4)).url, "https://local-after-removal/");
+});
