@@ -47,6 +47,15 @@ class DiscoveryTest(unittest.TestCase):
             )
 
 
+class ArgumentsTest(unittest.TestCase):
+    def test_absolute_file_outside_worktree_is_rejected_without_launching(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = browser_test.main([str(ROOT.parent / "other-worktree" / "outside.test.js")])
+        self.assertEqual(code, 2)
+        self.assertIn("Foxy: test file is outside the worktree", output.getvalue())
+
+
 class RunnerTest(unittest.TestCase):
     def setUp(self):
         SCRATCH.mkdir(parents=True, exist_ok=True)

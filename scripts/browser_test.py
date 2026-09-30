@@ -186,7 +186,7 @@ def main(argv=None):
     for name in argv:
         path = Path(name)
         # Accept repo-relative paths, absolute filesystem paths and root URL paths.
-        if name.startswith("/") and not path.is_relative_to(ROOT):
+        if name.startswith("/test/browser/"):
             path = ROOT / name.lstrip("/")
         elif not path.is_absolute():
             path = ROOT / path
