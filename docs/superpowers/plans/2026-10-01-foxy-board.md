@@ -147,14 +147,14 @@ export async function renameGroup(api, groupId, title): Promise<boolean>
 export async function recolorGroup(api, groupId, apiColor): Promise<boolean>
 ```
 
-Algorithms (Firefox 157 facts: `tabs.move` inserts the tab next to the tab currently at `index` and takes that tab's group; illegal pinned or unpinned positions are ignored silently; `tabs.ungroup` puts the tab after its group; `tabs.group` appends to the end of the group and adopts across windows; `tabGroups.move` puts the group's first tab at `index`):
+Algorithms (Firefox 157 facts: `tabs.move` inserts the tab next to the tab currently at `index` and takes that tab's group; illegal pinned or unpinned positions are ignored silently; `tabs.ungroup` puts a group's first tab before the group and any other tab after it; `tabs.group` into an existing group leaves members in place, moves same-window tabs that sit before the group to its front, and appends everything else (including tabs adopted from other windows) at its end; `tabGroups.move` puts the group's first tab at `index`):
 
 - `indexBefore(tab, before)`: `before.index - 1` when the tab is in the same window and before it, otherwise `before.index`.
 - **`dropTab`, kind `group`:**
   1. Unpin if pinned.
   2. `tabs.group({ tabIds: [tabId], groupId })` if not already a member.
-  3. With a `beforeTabId` that is not the tab itself, re-read both tabs. If `before` is still in the group, `tabs.move(tabId, { index: indexBefore(tab, before) })`. This is always a backward move or a no-op, so the tab stays in the group.
-  4. With `beforeTabId: null` and the tab already a member but not last, move it to the index of the group's last tab.
+  3. With a `beforeTabId` that is not the tab itself, re-read both tabs. If `before` is still in the group, `tabs.move(tabId, { index: indexBefore(tab, before) })`. The tab is already a member, so the neighbour it lands next to is a member too and it stays in the group.
+  4. With `beforeTabId: null` and the tab not the group's last member, move it to the index of the group's last tab.
   5. Correct: re-read; if `groupId` differs, `tabs.group` again.
 - **`dropTab`, kind `tabs`:**
   1. Unpin if pinned; `tabs.ungroup` if grouped.
