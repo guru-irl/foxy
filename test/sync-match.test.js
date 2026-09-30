@@ -69,6 +69,19 @@ test("group matching trims names as folder encoding does, including unnamed grou
   });
 });
 
+test("group matching treats missing and null titles as unnamed groups", () => {
+  assert.deepEqual(matchGroups([
+    { groupId: 1, color: "grey", urls: [] },
+    group(2, [], { title: null, color: "grey" }),
+  ], [
+    folder("unnamed-first", 0, [], { name: "", color: "grey" }),
+    folder("unnamed-second", 1, [], { name: "  ", color: "grey" }),
+  ]), {
+    pairs: [{ groupId: 1, folderId: "unnamed-first" }, { groupId: 2, folderId: "unnamed-second" }],
+    unmatchedGroups: [], unmatchedFolders: [],
+  });
+});
+
 test("group matching is pure and preserves unmatched input order", () => {
   const open = [group(8, [], { title: "Missing" }), group(3), group(1, [], { title: "Other" })];
   const folders = [folder("late", 8, [], { name: "Unmatched" }), folder("match", 2),

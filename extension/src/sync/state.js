@@ -23,16 +23,23 @@ export async function saveState(api, state) {
   await api.storage.local.set({ [STATE_KEY]: state });
 }
 
-/** Return the task's own result while keeping a non-rejecting internal tail. */
+/**
+ * Run jobs FIFO, returning each result with a non-rejecting internal tail.
+ * Jobs must never await run() or idle() of their own queue: that deadlocks.
+ * Call inner work's function directly; enqueue follow-up work without awaiting it.
+ */
 export function createQueue() {
   let tail = Promise.resolve();
   return {
     run(fn) {
-      const result = tail.then(fn);
+      const result = tail.then(() => fn());
       tail = result.catch(error => { console.error("Foxy: sync task failed", error); });
       return result;
     },
-    idle() { return tail; },
+    async idle() {
+      let t;
+      do { t = tail; await t; } while (t !== tail);
+    },
   };
 }
 

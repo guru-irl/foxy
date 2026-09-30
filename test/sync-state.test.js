@@ -140,6 +140,26 @@ test("queue runs one task at a time in call order and returns each result", asyn
   assert.deepEqual(seen, ["first:start", "first:end", "second", "third"]);
 });
 
+test("queue invokes handlers with no arguments", async () => {
+  const queue = createQueue();
+  await queue.run(() => "previous result");
+  assert.equal(await queue.run((...args) => args.length), 0);
+});
+
+test("nested non-awaited run executes after the outer job in FIFO order", async () => {
+  const queue = createQueue(), seen = [];
+  let inner;
+  const outer = queue.run(async () => {
+    seen.push("outer:start");
+    inner = queue.run(() => { seen.push("inner"); });
+    seen.push("outer:end");
+  });
+  const later = queue.run(() => { seen.push("later"); });
+  await Promise.all([outer, later]);
+  await inner;
+  assert.deepEqual(seen, ["outer:start", "outer:end", "later", "inner"]);
+});
+
 test("queue logs a rejected task, preserves rejection and continues", async (t) => {
   const log = t.mock.method(console, "error", () => {});
   const queue = createQueue(), error = new Error("handler failed"), seen = [];
@@ -177,6 +197,31 @@ test("idle waits for queued tasks, resolves after failure and allows later work"
   assert.equal(drained, true);
   assert.equal(await queue.run(async () => "new task"), "new task");
   await queue.idle();
+});
+
+test("idle drains jobs enqueued by a running job", async () => {
+  const queue = createQueue(), gate = Promise.withResolvers(), entered = Promise.withResolvers();
+  let inner, finished = false;
+  const outer = queue.run(() => {
+    inner = queue.run(async () => {
+      entered.resolve();
+      await gate.promise;
+      finished = true;
+    });
+  });
+  const idle = queue.idle();
+  await entered.promise;
+  assert.equal(finished, false);
+  // Release next turn: a tail snapshot resolves while the inner job is still gated.
+  const finishedAtIdle = idle.then(() => finished);
+  const release = setImmediate(() => gate.resolve());
+  try {
+    assert.equal(await finishedAtIdle, true);
+  } finally {
+    clearImmediate(release);
+    gate.resolve();
+    await Promise.all([outer, inner]);
+  }
 });
 
 test("a failed storage save rejects its task but does not poison the queue", async (t) => {

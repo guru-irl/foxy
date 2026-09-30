@@ -190,18 +190,21 @@ export function createFirefox(setup = {}) {
   api("tabs", "get", id => tabObject(tabById(id)));
   api("tabs", "getCurrent", () => setup.selfTabId == null ? undefined : tabObject(tabById(setup.selfTabId)));
   api("tabs", "create", (props = {}) => {
+    checkURL(props.url ?? "about:blank");
     const id = props.windowId ?? currentWindowId;
     const tabs = windowTabs(id), pinned = props.pinned ?? false, discarded = props.discarded ?? false;
     if (discarded) {
       if (props.active === true) throw new Error("Active tabs cannot be created and discarded.");
       if (pinned) throw new Error("Pinned tabs cannot be created and discarded.");
-      if (!props.url || props.url.startsWith("about:")) {
+      // Keep the brief's missing-URL rejection. Firefox uses BROWSER_NEW_TAB_URL
+      // (moz-extension with Foxy's override); "" resolves to an extension URL there,
+      // but this fake's checkURL rejects relative URLs before reaching this branch.
+      if (props.url === undefined || props.url.startsWith("about:")) {
         throw new Error('Cannot create a discarded new tab or "about" urls.');
       }
     } else if (props.title) {
       throw new Error("Title may only be set for discarded tabs.");
     }
-    checkURL(props.url ?? "about:blank");
     const count = pinnedCount(id);
     const index = pinned ? Math.max(0, Math.min(props.index ?? count, count))
       : Math.max(count, Math.min(props.index ?? tabs.length, tabs.length));

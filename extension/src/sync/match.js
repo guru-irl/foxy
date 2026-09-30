@@ -5,7 +5,7 @@ export function matchGroups(open, folders) {
     const urls = new Set(group.urls);
     let best = null, bestOverlap = -1;
     for (const folder of folders) {
-      if (used.has(folder.id) || group.title.trim() !== folder.name.trim() || group.color !== folder.color) continue;
+      if (used.has(folder.id) || (group.title ?? "").trim() !== folder.name.trim() || group.color !== folder.color) continue;
       const overlap = [...new Set(folder.bookmarks.map(bookmark => bookmark.url))]
         .filter(url => urls.has(url)).length;
       if (overlap > bestOverlap || (overlap === bestOverlap && folder.index < best.index)) {
