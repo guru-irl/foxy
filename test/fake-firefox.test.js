@@ -104,6 +104,8 @@ const invalidCreates = [
     'Cannot create a discarded new tab or "about" urls.'],
   ["discarded tab with undefined URL", { discarded: true, active: false, url: undefined },
     'Cannot create a discarded new tab or "about" urls.'],
+  ["discarded tab with null URL", { discarded: true, active: false, url: null },
+    'Cannot create a discarded new tab or "about" urls.'],
   // The fake rejects relative URLs; Firefox resolves "" to an extension URL.
   ["discarded tab with empty URL", { discarded: true, active: false, url: "" },
     "Illegal URL: "],

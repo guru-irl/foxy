@@ -199,7 +199,7 @@ export function createFirefox(setup = {}) {
       // Keep the brief's missing-URL rejection. Firefox uses BROWSER_NEW_TAB_URL
       // (moz-extension with Foxy's override); "" resolves to an extension URL there,
       // but this fake's checkURL rejects relative URLs before reaching this branch.
-      if (props.url === undefined || props.url.startsWith("about:")) {
+      if (props.url == null || props.url.startsWith("about:")) {
         throw new Error('Cannot create a discarded new tab or "about" urls.');
       }
     } else if (props.title) {
