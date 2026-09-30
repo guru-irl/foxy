@@ -1,7 +1,7 @@
 export const CLOSE_MESSAGE = { type: "blank-and-close" };
 
 /** Replace the sending page's history entry with about:blank before closing it. */
-export async function blankAndClose(api, tabId, { timeoutMs = 2000 } = {}) {
+export async function blankAndClose(api, tabId, { timeoutMs = 2000, discardTimeoutMs = 1000 } = {}) {
   let finish;
   const completed = new Promise((resolve) => { finish = resolve; });
   const onUpdated = (id, changeInfo, tab) => {
@@ -24,11 +24,24 @@ export async function blankAndClose(api, tabId, { timeoutMs = 2000 } = {}) {
     clearTimeout(timer);
   }
   if (blanked) {
-    // SessionStore caches history on a timer; discard flushes the blank entry before close.
+    // SessionStore caches history on a timer; prepareDiscardBrowser flushes
+    // session state even when the discard itself is refused.
+    let discardTimer;
+    const timedOut = Symbol("discard timed out");
     try {
-      await api.tabs.discard(tabId);
+      const result = await Promise.race([
+        api.tabs.discard(tabId),
+        new Promise((resolve) => {
+          discardTimer = setTimeout(() => resolve(timedOut), discardTimeoutMs);
+        }),
+      ]);
+      if (result === timedOut) {
+        console.warn("Default New Tab: flushing the page's state timed out, closing it anyway", tabId);
+      }
     } catch (error) {
       console.warn("Default New Tab: could not flush the page's state before closing it", tabId, error);
+    } finally {
+      clearTimeout(discardTimer);
     }
   }
   try {

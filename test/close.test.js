@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { blankAndClose, handleMessage } from "../src/close.js";
 
-function fakeApi({ updateFails = false, discardFails = false, removeFails = false, onUpdate } = {}) {
+function fakeApi({ updateFails = false, discardFails = false, discardHangs = false, removeFails = false, onUpdate } = {}) {
   const calls = [];
   let listener;
   const api = {
@@ -28,6 +28,7 @@ function fakeApi({ updateFails = false, discardFails = false, removeFails = fals
       async discard(id) {
         calls.push(["discard", id]);
         if (discardFails) throw new Error("Cannot flush tab");
+        if (discardHangs) return new Promise(() => {});
       },
       async remove(id) {
         calls.push(["remove", id]);
@@ -114,6 +115,34 @@ test("cancels the completion timeout after the event", async (t) => {
   } });
   await completesSoon(blankAndClose(api, 7, { timeoutMs: 10000 }));
   assert.equal(pending.size, 0, "completion timer must not stay pending after an event");
+});
+
+test("a hung discard times out, warns and removes the tab without leaving a timer", async (t) => {
+  const pending = new Set();
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  t.after(() => { for (const timer of pending) realClearTimeout(timer); });
+  t.mock.method(globalThis, "setTimeout", (fn, ms, ...args) => {
+    const timer = realSetTimeout((...params) => {
+      pending.delete(timer);
+      fn(...params);
+    }, ms, ...args);
+    pending.add(timer);
+    return timer;
+  });
+  t.mock.method(globalThis, "clearTimeout", (timer) => {
+    pending.delete(timer);
+    realClearTimeout(timer);
+  });
+  const warn = t.mock.method(console, "warn", () => {});
+  const api = fakeApi({ discardHangs: true, onUpdate: (browser) => {
+    queueMicrotask(() => browser.emit(7, COMPLETE, { url: "about:blank" }));
+  } });
+  await completesSoon(blankAndClose(api, 7, { timeoutMs: 10000, discardTimeoutMs: 20 }));
+  assert.deepEqual(api.calls, [["addListener", FILTER], ["update", 7, BLANK], ...AFTER_BLANK]);
+  assert.equal(warn.mock.callCount(), 1);
+  assert.deepEqual(warn.mock.calls[0].arguments, ["Default New Tab: flushing the page's state timed out, closing it anyway", 7]);
+  assert.equal(pending.size, 0, "discard timer must not stay pending after closing");
 });
 
 test("a failed blank warns, removes the listener and closes without waiting for the timeout", async (t) => {
