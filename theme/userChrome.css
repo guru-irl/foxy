@@ -1,0 +1,1463 @@
+/*
+ * Liquid Fox - Transparent Firefox Theme for macOS
+ *
+ * Required about:config settings:
+ *   toolkit.legacyUserProfileCustomizations.stylesheets = true
+ *   widget.macos.titlebar-blend-mode.behind-window = true
+ */
+
+/* ============================================
+   Variables
+   ============================================ */
+:root {
+  --liquid-radius: 12px;
+  --liquid-radius-small: 8px;
+  --liquid-padding: 8px;
+  --liquid-shadow:
+    0 0.5px 0 0 rgba(255, 255, 255, 0.35),
+    0 1.5px 4.5px rgba(0, 0, 0, 0.08),
+    0 7px 24px rgba(0, 0, 0, 0.12);
+  --liquid-shadow-small:
+    0 0.5px 0 0 rgba(255, 255, 255, 0.35),
+    0 1px 3px rgba(0, 0, 0, 0.04),
+    0 3px 11px rgba(0, 0, 0, 0.06);
+  --liquid-window-tint:
+    linear-gradient(
+      176deg,
+      rgba(170, 155, 110, 0) 0%,
+      rgba(65, 125, 110, 0.06) 30%,
+      rgba(50, 105, 145, 0.13) 60%,
+      rgba(185, 150, 85, 0.19) 100%
+    );
+  --liquid-border-gradient:
+    linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.9) 0%,
+      rgba(255, 255, 255, 0.3) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+  --liquid-border-gradient-dark:
+    linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.3) 0%,
+      rgba(255, 255, 255, 0.1) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+}
+
+/* ============================================
+   Window Transparency
+   Activates macOS vibrancy / behind-window blur
+   ============================================ */
+:root {
+  appearance: -moz-sidebar !important;
+}
+
+/* ============================================
+   Squircle corners (superellipse)
+   ============================================ */
+@supports (corner-shape: squircle) {
+  * {
+    corner-shape: squircle !important;
+  }
+}
+
+/* ============================================
+   Browser Chrome - Make UI panels transparent
+   ============================================ */
+:root:not([windowtype="Toolkit:PictureInPicture"], [inDOMFullscreen]) {
+
+  /* --- Subtle gradient tint over vibrancy --- */
+  &::before {
+    content: "" !important;
+    display: block !important;
+    position: fixed !important;
+    inset: 0 !important;
+    background: var(--liquid-window-tint) !important;
+    pointer-events: none !important;
+    z-index: -1 !important;
+  }
+
+  /* --- Clear all backgrounds so vibrancy is uniform --- */
+  body,
+  #navigator-toolbox,
+  #browser,
+  #sidebar-main,
+  #tabbrowser-tabbox,
+  #tabbrowser-tabpanels,
+  #browser-panel,
+  #browsing-context-stack {
+    background: transparent !important;
+  }
+
+  /* --- Expand-on-hover sidebar: floating overlay card --- */
+  &[sidebar-expand-on-hover] #sidebar-main[sidebar-launcher-expanded] {
+    background: light-dark(rgba(232, 232, 232, 0.97), rgba(32, 32, 32, 0.97)) !important;
+    border-radius: 0 var(--liquid-radius) var(--liquid-radius) 0 !important;
+    box-shadow:
+      0 0 0 0.5px rgba(0, 0, 0, 0.08),
+      2px 3px 10px rgba(0, 0, 0, 0.14),
+      8px 10px 28px rgba(0, 0, 0, 0.20),
+      16px 22px 56px rgba(0, 0, 0, 0.24) !important;
+  }
+
+}
+
+/* ============================================
+   Shared liquid panel mixin (outline pseudo-element)
+   ============================================ */
+.browserContainer::after,
+.sidebar-browser-stack::after {
+  content: "" !important;
+  position: absolute !important;
+  inset: 0 !important;
+  border-radius: inherit !important;
+  border: 1px solid transparent !important;
+  background: var(--liquid-border-gradient) border-box !important;
+  mask:
+    linear-gradient(#fff 0 0) padding-box,
+    linear-gradient(#fff 0 0) !important;
+  mask-composite: subtract !important;
+  pointer-events: none !important;
+  z-index: 2147483647 !important;
+}
+
+/* --- Dark mode: subtler outline + brighter backdrop --- */
+@media (prefers-color-scheme: dark) {
+  .browserContainer::after,
+  .sidebar-browser-stack::after {
+    background: var(--liquid-border-gradient-dark) border-box !important;
+  }
+
+  :root:not([windowtype="Toolkit:PictureInPicture"], [inDOMFullscreen])::before {
+    background:
+      linear-gradient(rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.08)),
+      var(--liquid-window-tint) !important;
+  }
+}
+
+/* ============================================
+   Sidebar button styling (shared across all layouts)
+   ============================================ */
+:root:not([windowtype="Toolkit:PictureInPicture"], [inDOMFullscreen]) sidebar-main {
+  --toolbarbutton-active-background: transparent !important;
+  --button-background-color: transparent !important;
+  --button-background-color-hover: rgba(0, 0, 0, 0.12) !important;
+  --button-background-color-active: rgba(0, 0, 0, 0.18) !important;
+  --button-background-color-ghost-hover: rgba(0, 0, 0, 0.12) !important;
+  --button-background-color-ghost-active: rgba(0, 0, 0, 0.18) !important;
+  --button-border-radius: var(--liquid-radius-small) !important;
+}
+
+/* ============================================
+   Content area: rounded + padded (vertical tabs only)
+   Uses :has() to detect sidebar with tabs in the DOM
+   ============================================ */
+:root:not([windowtype="Toolkit:PictureInPicture"], [inDOMFullscreen]):has(sidebar-main #tabbrowser-tabs) {
+
+  /* --- 2px bottom padding on whole window --- */
+  #browser {
+    padding-bottom: 2px !important;
+  }
+
+  /* --- Web content frame ---
+     Symmetric inline margins so the card keeps an even border on both sides
+     regardless of which side the sidebar sits on (left or right). */
+  .browserContainer {
+    position: relative !important;
+    border-radius: var(--liquid-radius) !important;
+    overflow: hidden !important;
+    box-shadow: var(--liquid-shadow) !important;
+    margin: 0 var(--liquid-padding) calc(var(--liquid-padding) - 2px) var(--liquid-padding) !important;
+  }
+
+  /* --- Sidebar panels (AI, bookmarks, history, etc.) --- */
+  .sidebar-browser-stack {
+    position: relative !important;
+    border-radius: var(--liquid-radius) !important;
+    overflow: hidden !important;
+    box-shadow: var(--liquid-shadow) !important;
+  }
+
+  /* --- Toolbar spacing: small gap below address bar --- */
+  #navigator-toolbox {
+    padding-bottom: 2px !important;
+  }
+
+  /* --- Tab rounding + selected tab styling --- */
+  #tabbrowser-tabs {
+    --tab-border-radius: var(--liquid-radius-small) !important;
+    font-size: calc(1em + 1px) !important;
+  }
+
+  .tab-background:is([selected], [multiselected]) {
+    box-shadow: var(--liquid-shadow-small) !important;
+  }
+
+  /* --- Address bar rounding ---
+     (local edit 2026-09-30) Removed the forced border-radius on
+     .urlbar-background/#searchbar. It fought Nova's radius math and made the
+     dropdown corners disagree with the input and result rows. The radius is
+     now set through --urlbar-border-radius in LOCAL OVERRIDES at the end. */
+
+  /* --- Tab groups: Dia-inspired style --- */
+
+  /* Group container: override display:contents so it renders as a box */
+  tab-group {
+    display: flex !important;
+    flex-direction: column !important;
+    background-color: color-mix(in srgb, var(--tab-group-color) 10%, transparent) !important;
+    border-radius: var(--liquid-radius-small) !important;
+    outline: 1px solid color-mix(in srgb, var(--tab-group-color) 15%, transparent) !important;
+    outline-offset: -1px !important;
+    padding: 0 !important;
+    margin: 2px 8px !important;
+    --tab-group-line-color: transparent !important;
+    --tab-group-line-thickness: 0px !important;
+  }
+
+  /* Hide the group line entirely */
+  .tab-group-line {
+    display: none !important;
+  }
+
+  /* Label container: stretch full width, no extra spacing */
+  .tab-group-label-container {
+    align-self: stretch !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Label: plain text, no own shape -- container handles visuals */
+  .tab-group-label {
+    background-color: transparent !important;
+    color: light-dark(
+      var(--tab-group-color),
+      var(--tab-group-color-invert)
+    ) !important;
+    border-radius: 0 !important;
+    max-width: none !important;
+    width: 100% !important;
+    min-height: var(--tab-min-height) !important;
+    line-height: var(--tab-min-height) !important;
+    outline: none !important;
+    box-shadow: none !important;
+    font-weight: normal !important;
+    text-align: start !important;
+    padding-inline: 8px !important;
+  }
+
+  /* Overflow count (+1, +2): explicit color since --tab-group-line-color is transparent */
+  .tab-group-overflow-count {
+    color: light-dark(
+      var(--tab-group-color),
+      var(--tab-group-color-invert)
+    ) !important;
+  }
+
+  /* Subtle hover highlight on group label */
+  .tab-group-label-hover-highlight {
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-radius: var(--liquid-radius-small) !important;
+    background: transparent !important;
+  }
+
+  tab-group[collapsed]:not([movingtabgroup]) .tab-group-label-hover-highlight:hover {
+    background: rgba(0, 0, 0, 0.06) !important;
+  }
+
+  /* Tabs within groups: tight spacing, bottom breathing room */
+  tab-group > .tabbrowser-tab {
+    margin: 1px 0 !important;
+  }
+
+  tab-group > .tabbrowser-tab:last-of-type {
+    margin-bottom: 3px !important;
+  }
+
+  /* --- Dark mode: stronger group tint --- */
+  @media (prefers-color-scheme: dark) {
+    tab-group {
+      background-color: color-mix(in srgb, var(--tab-group-color) 20%, transparent) !important;
+      outline: 1px solid color-mix(in srgb, var(--tab-group-color) 25%, transparent) !important;
+    }
+  }
+}
+
+/* ============================================
+   Expanded sidebar only: wider pinned tabs
+   ============================================ */
+:root:not([windowtype="Toolkit:PictureInPicture"], [inDOMFullscreen]):has(sidebar-main[expanded] #tabbrowser-tabs) {
+  #pinned-tabs-container[orient="vertical"] {
+    --tab-pinned-min-width-expanded: 85px !important;
+  }
+}
+
+/* ============================================
+   Collapsed sidebar: vertical tabs overrides
+   ============================================ */
+:root:not([windowtype="Toolkit:PictureInPicture"], [inDOMFullscreen]):has(sidebar-main:not([expanded]) #tabbrowser-tabs) {
+
+  /* Tab groups: edge-to-edge like horizontal tabs */
+  tab-group {
+    margin-inline: 0 !important;
+    border-radius: 0 !important;
+    outline: none !important;
+    border-inline: none !important;
+    border-block: 1px solid color-mix(in srgb, var(--tab-group-color) 15%, transparent) !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
+
+  /* Group label: center the single-letter text, nudge down slightly */
+  .tab-group-label {
+    text-align: center !important;
+    padding-inline: 0 !important;
+    padding-top: 3px !important;
+  }
+}
+
+/* ============================================
+   Horizontal tabs layout: rounded box + padding
+   ============================================ */
+:root:not([windowtype="Toolkit:PictureInPicture"], [inDOMFullscreen]):not(:has(sidebar-main #tabbrowser-tabs)) {
+
+  /* --- Kill chrome-content separator line on toolbox --- */
+  #navigator-toolbox {
+    border: none !important;
+  }
+
+  /* --- Tighten gap between traffic lights and first tab --- */
+  .titlebar-spacer[type="pre-tabs"] {
+    width: 8px !important;
+  }
+
+  /* --- Inactive pinned tabs: subtle background + visible hover --- */
+  .tabbrowser-tab[pinned]:not([selected]):not([multiselected]) .tab-background {
+    background-color: rgba(0, 0, 0, 0.08) !important;
+  }
+
+  .tabbrowser-tab[pinned]:not([selected]):not([multiselected]):hover .tab-background {
+    background-color: rgba(0, 0, 0, 0.15) !important;
+  }
+
+  /* --- Gap after last pinned tab before regular tabs --- */
+  .tabbrowser-tab[pinned] + .tabbrowser-tab:not([pinned]),
+  .tabbrowser-tab[pinned] + tab-group {
+    margin-inline-start: 6px !important;
+  }
+
+  /* --- Bookmarks bar: match nav-bar side margins --- */
+  #PersonalToolbar {
+    margin-inline: var(--liquid-padding) !important;
+  }
+
+  /* --- Window bottom padding (same trick as vertical tabs) --- */
+  #browser {
+    padding-bottom: 2px !important;
+  }
+
+  /* --- Sidebar icon strip: layout + background --- */
+  sidebar-main {
+    margin-inline-start: 8px !important;
+    margin-bottom: calc(var(--liquid-padding) - 2px) !important;
+    border-radius: 0 0 0 var(--liquid-radius) !important;
+    background: light-dark(rgba(255, 255, 255, 0.35), rgba(0, 0, 0, 0.12)) !important;
+  }
+
+  /* --- Sidebar panels (bookmarks, history, etc.): flush, no frills --- */
+  #sidebar-box {
+    margin: 0 0 calc(var(--liquid-padding) - 2px) 0 !important;
+    padding: 0 !important;
+  }
+
+  #sidebar-box,
+  #sidebar-box > *,
+  .sidebar-browser-stack,
+  #sidebar {
+    border-radius: 0 !important;
+  }
+
+  .sidebar-browser-stack {
+    margin: 0 !important;
+  }
+
+  /* Style splitter handles to blend with sidebar */
+  #sidebar-splitter,
+  #sidebar-launcher-splitter {
+    border: none !important;
+    width: 4px !important;
+    min-width: 4px !important;
+    background: light-dark(rgba(255, 255, 255, 0.35), rgba(0, 0, 0, 0.12)) !important;
+    margin-bottom: calc(var(--liquid-padding) - 2px) !important;
+  }
+
+  /* Restore blue resize highlight on hover/drag */
+  #sidebar-splitter:hover,
+  #sidebar-launcher-splitter:hover {
+    background: var(--focus-outline-color) !important;
+  }
+
+  /* --- Address bar: rounded top corners + side margin --- */
+  #nav-bar {
+    margin: 0 var(--liquid-padding) !important;
+    border-radius: var(--liquid-radius) var(--liquid-radius) 0 0 !important;
+    overflow: hidden !important;
+  }
+
+  /* --- Content area: rounded bottom corners + side/bottom margin + shadow --- */
+  .browserContainer {
+    position: relative !important;
+    margin: 0 var(--liquid-padding) calc(var(--liquid-padding) - 2px) var(--liquid-padding) !important;
+    border-radius: 0 0 var(--liquid-radius) var(--liquid-radius) !important;
+    overflow: hidden !important;
+    box-shadow: var(--liquid-shadow) !important;
+    transition: margin-left 0.25s ease, border-radius 0.25s ease !important;
+  }
+
+  /* Hide the shared outline (top edge creates a visible line across the padding) */
+  .browserContainer::after {
+    display: none !important;
+  }
+
+  /* --- Tab groups: Dia-inspired style --- */
+
+  /* Group container: horizontal row, no rounding */
+  tab-group {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: stretch !important;
+    background-color: color-mix(in srgb, var(--tab-group-color) 10%, transparent) !important;
+    border-radius: 0 !important;
+    border-block: none !important;
+    border-inline: 1px solid color-mix(in srgb, var(--tab-group-color) 15%, transparent) !important;
+    padding: 0 !important;
+    margin: 0 2px !important;
+    --tab-group-line-color: transparent !important;
+    --tab-group-line-thickness: 0px !important;
+  }
+
+  /* Label */
+  .tab-group-label {
+    background-color: transparent !important;
+    color: light-dark(
+      var(--tab-group-color),
+      var(--tab-group-color-invert)
+    ) !important;
+    border: none !important;
+    font-weight: normal !important;
+    outline: none !important;
+    box-shadow: none !important;
+    padding-inline: 8px !important;
+  }
+
+  /* Overflow count (+1, +2) */
+  .tab-group-overflow-count {
+    color: light-dark(
+      var(--tab-group-color),
+      var(--tab-group-color-invert)
+    ) !important;
+    padding-inline: 6px !important;
+  }
+
+  /* Hover highlight */
+  .tab-group-label-hover-highlight {
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+
+  tab-group[collapsed]:not([movingtabgroup]) .tab-group-label-hover-highlight:hover {
+    background: rgba(0, 0, 0, 0.06) !important;
+  }
+
+  /* --- Dark mode: stronger group tint --- */
+  @media (prefers-color-scheme: dark) {
+    tab-group {
+      background-color: color-mix(in srgb, var(--tab-group-color) 20%, transparent) !important;
+      border-inline-color: color-mix(in srgb, var(--tab-group-color) 25%, transparent) !important;
+    }
+  }
+}
+
+/* ============================================
+   Horizontal tabs + sidebar visible: flush web frame
+   ============================================ */
+:root:not([windowtype="Toolkit:PictureInPicture"], [inDOMFullscreen]):not(:has(sidebar-main #tabbrowser-tabs)):has(#sidebar-main:not([hidden])) .browserContainer {
+  margin-left: 0 !important;
+  border-bottom-left-radius: 0 !important;
+}
+
+/* ============================================
+   Split View: fix spacing, borders, and outlines
+   ============================================ */
+#tabbrowser-tabpanels[splitview] {
+
+  /* --- Remove all outlines, flatten inactive pane shadow --- */
+  .browserContainer {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  /* --- Tighter spacing between split panes --- */
+  .split-view-panel.split-view-panel-active {
+    margin: 1px !important;
+  }
+
+  /* --- Active pane: elevated shadow for emphasis --- */
+  .deck-selected > .browserContainer {
+    box-shadow:
+      0 0.5px 0 0 rgba(255, 255, 255, 0.35),
+      0 2px 8px rgba(0, 0, 0, 0.08),
+      0 8px 28px rgba(0, 0, 0, 0.12) !important;
+  }
+}
+
+/* --- Split view splitter: thin + blue on hover, like sidebar --- */
+.split-view-splitter {
+  width: 4px !important;
+  min-width: 4px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+}
+
+.split-view-splitter:hover {
+  background: var(--focus-outline-color) !important;
+}
+
+/* --- Split view tab entry: subtle divider between tab names --- */
+tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
+  border-inline-start: 1px solid light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.12)) !important;
+}
+
+/* ============================================
+   Tab hover preview: frosted glass card matching the window
+   ============================================ */
+#tab-preview-panel {
+  --panel-background:
+    light-dark(rgba(248, 248, 250, 0.7), rgba(28, 28, 32, 0.68)) !important;
+  --panel-border-color:
+    light-dark(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.12)) !important;
+  --panel-border-radius: var(--liquid-radius) !important;
+  box-shadow: var(--liquid-shadow) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  overflow: hidden !important;
+}
+
+/* Inner surfaces stay transparent so the frosted backdrop reads through */
+#tab-preview-panel .tab-preview-container,
+#tab-preview-panel .tab-preview-text-container {
+  background: transparent !important;
+}
+
+/* Thumbnail: round to the small radius, drop its opaque fill */
+#tab-preview-panel .tab-preview-thumbnail-container,
+#tab-preview-panel .tab-preview-thumbnail-container > img,
+#tab-preview-panel .tab-preview-thumbnail-container > canvas {
+  background: transparent !important;
+  border-radius: var(--liquid-radius-small) !important;
+}
+
+/* Secondary URL line: a touch dimmer, like the rest of the chrome */
+#tab-preview-panel .tab-preview-uri {
+  opacity: 0.7 !important;
+}
+
+/* ============================================
+   LOCAL OVERRIDES (added 2026-09-30)
+   Kept at the end so the theme above can be replaced/updated and this
+   block re-appended. Original saved as userChrome.css.bak-2026-09-30.
+   ============================================ */
+
+@font-face {
+  font-family: "LiquidFox Bebas";
+  src: local("Bebas Neue"), local("BebasNeue-Regular"), url("fonts/BebasNeue-Regular.ttf");
+}
+
+/* --- 0. Neutral palette -------------------------------------------------
+   Nova Ash tints its dark surfaces purple. These are plain grays.
+   --lf-solid is the opaque surface of the address bar dropdown and the
+   expanded sidebar; --lf-surface-menu is the near-opaque menu background. */
+:root {
+  --lf-solid: light-dark(rgb(246, 246, 247), rgb(22, 22, 24));
+  --lf-surface-menu: light-dark(rgba(246, 246, 247, 0.94), rgba(22, 22, 24, 0.94));
+  --lf-card-shadow:
+    0 3px 10px rgba(0, 0, 0, 0.14),
+    0 10px 28px rgba(0, 0, 0, 0.20);
+  --lf-hover: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.07));
+  --lf-active: light-dark(rgba(0, 0, 0, 0.10), rgba(255, 255, 255, 0.11));
+  --lf-separator: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
+  --lf-text-muted: light-dark(rgba(0, 0, 0, 0.55), rgba(255, 255, 255, 0.55));
+  --lf-ring: light-dark(rgba(0, 0, 0, 0.20), rgba(255, 255, 255, 0.22));
+}
+
+/* Nova's color palette with the purple taken out. Nova builds its grays,
+   text, buttons, dialogs, and accent (checkboxes, primary buttons, focus
+   rings, selected items) from violet and violet-tinted gray palettes. Each is
+   replaced by a plain gray of the same lightness (OKLab), so contrast stays
+   as designed. The same block is in userContent.css for Settings and the
+   other about: pages. Original values in the comments. */
+:root {
+  --color-gray-0: #fcfcfc !important; /* #fcfbff */
+  --color-gray-05: #f7f7f7 !important; /* #f7f6fb */
+  --color-gray-10: #eeeeee !important; /* #efedf2 */
+  --color-gray-15: #e3e3e3 !important; /* #e3e2e7 */
+  --color-gray-20: #d6d6d6 !important; /* #d6d5da */
+  --color-gray-25: #c7c7c7 !important; /* #c7c6cb */
+  --color-gray-30: #b7b7b7 !important; /* #b7b6ba */
+  --color-gray-35: #a5a5a5 !important; /* #a6a4a9 */
+  --color-gray-40: #939393 !important; /* #949297 */
+  --color-gray-45: #808080 !important; /* #817f84 */
+  --color-gray-50: #676767 !important; /* #67666a */
+  --color-gray-55: #515151 !important; /* #515054 */
+  --color-gray-60: #3f3f3f !important; /* #3f3e42 */
+  --color-gray-65: #303030 !important; /* #312f33 */
+  --color-gray-70: #252525 !important; /* #252428 */
+  --color-gray-75: #1c1c1c !important; /* #1d1b1f */
+  --color-gray-80: #161616 !important; /* #171519 */
+  --color-gray-85: #131313 !important; /* #131215 */
+  --color-gray-90: #121212 !important; /* #121114 */
+  --color-violet-0: #f0f0f0 !important; /* #f5ecff */
+  --color-violet-10: #e4e4e4 !important; /* #eaddff */
+  --color-violet-20: #cdcdcd !important; /* #d4c1ff */
+  --color-violet-30: #b0b0b0 !important; /* #b89cff */
+  --color-violet-40: #919191 !important; /* #9871ff */
+  --color-violet-50: #717171 !important; /* #764edd */
+  --color-violet-60: #545454 !important; /* #5939a8 */
+  --color-violet-70: #3b3b3b !important; /* #3e2976 */
+  --color-violet-80: #252525 !important; /* #271c48 */
+  --color-violet-90: #161616 !important; /* #161423 */
+  --color-violet-desaturated-0: #f1f1f1 !important; /* #f2f0f8 */
+  --color-violet-desaturated-10: #e5e5e5 !important; /* #e7e1f8 */
+  --color-violet-desaturated-20: #cecece !important; /* #d2c8ec */
+  --color-violet-desaturated-30: #b2b2b2 !important; /* #b6aad9 */
+  --color-violet-desaturated-40: #919191 !important; /* #9687c0 */
+  --color-violet-desaturated-50: #717171 !important; /* #75669f */
+  --color-violet-desaturated-60: #545454 !important; /* #584a7d */
+  --color-violet-desaturated-70: #3b3b3b !important; /* #3e315f */
+  --color-violet-desaturated-80: #252525 !important; /* #281d44 */
+  --color-violet-desaturated-90: #161616 !important; /* #180e30 */
+  --color-violet-100: #262626 !important; /* oklch(27% 0.1 290) */
+  --color-violet-110: #161616 !important; /* oklch(20% 0.05 290) */
+}
+
+/* --- 1. Translucency -----------------------------------------------------
+   Lower the alphas for more glass, raise them for more tint. */
+:root {
+  /* Tint painted over the macOS vibrancy (was 0 / 0.06 / 0.13 / 0.19) */
+  --liquid-window-tint:
+    linear-gradient(
+      176deg,
+      rgba(170, 155, 110, 0) 0%,
+      rgba(65, 125, 110, 0.02) 30%,
+      rgba(50, 105, 145, 0.04) 60%,
+      rgba(185, 150, 85, 0.06) 100%
+    ) !important;
+
+  /* Address bar when not focused (Nova Ash paints it opaque) */
+  --urlbar-background-color: light-dark(rgba(255, 255, 255, 0.30), rgba(255, 255, 255, 0.06)) !important;
+
+  /* Selected tab (Nova Ash paints it opaque) */
+  --tab-background-color-selected: light-dark(rgba(255, 255, 255, 0.40), rgba(255, 255, 255, 0.08)) !important;
+  /* Tab hover (Nova Ash uses a 40% gray) */
+  --tab-background-color-hover: light-dark(rgba(0, 0, 0, 0.05), rgba(255, 255, 255, 0.05)) !important;
+}
+
+/* Dark mode: drop the extra 8% white wash the theme adds on top of the tint */
+@media (prefers-color-scheme: dark) {
+  :root:not([windowtype="Toolkit:PictureInPicture"], [inDOMFullscreen])::before {
+    background: var(--liquid-window-tint) !important;
+  }
+}
+
+/* Nova Ash gives toolbars a 20% black fill; let the vibrancy show through */
+#nav-bar,
+#PersonalToolbar {
+  background-color: transparent !important;
+}
+
+/* --- 2. Borders and shadows ---------------------------------------------- */
+:root {
+  /* Native Firefox/Nova separator lines (content frame, sidebar, toolbar) */
+  --chrome-content-separator-color: transparent !important;
+  --sidebar-border-color: transparent !important;
+  --tabs-navbar-separator-color: transparent !important;
+  --tab-border-color-selected: transparent !important;
+  --tab-box-shadow-selected: none !important;
+
+  /* No theme drop shadows at all. The page card's shadow read as a dark band
+     on the sidebar and toolbar. (Was two soft layers plus a white hairline.) */
+  --liquid-shadow: none !important;
+  /* Selected tab: flat glass, no drop shadow (only used by the selected tab) */
+  --liquid-shadow-small: none !important;
+}
+
+/* Content area: no native border/outline, no gradient outline */
+.browserContainer {
+  border: none !important;
+  outline: none !important;
+}
+
+/* No shadow cast by the page onto the sidebar/toolbar: Firefox's own
+   content-area shadow (the theme's card shadow is --liquid-shadow above). */
+:root {
+  --content-area-shadow: none !important;
+}
+
+.browserContainer::after,
+.sidebar-browser-stack::after {
+  display: none !important;
+}
+
+/* Selected tab: drop Nova's violet-to-orange gradient border and outline. */
+.tab-background[selected]:not([multiselected]) {
+  background: var(--tab-background-color-selected) border-box !important;
+  outline-color: transparent !important;
+}
+
+/* Multiselected tabs (Shift- or Cmd-click): no cyan outline (1px on each
+   tab, 2px on the active one). Every tab in the selection gets the
+   selected-tab fill instead, and the active tab (the one showing) a
+   brighter fill so it still stands out. */
+#tabbrowser-tabs .tab-background[multiselected] {
+  background: var(--tab-background-color-selected) border-box !important;
+  outline-color: transparent !important;
+}
+
+#tabbrowser-tabs .tab-background[multiselected][selected] {
+  background: light-dark(rgba(255, 255, 255, 0.70), rgba(255, 255, 255, 0.15)) border-box !important;
+}
+
+/* No shadow on any part of a tab. :not(#lf) raises specificity above the
+   theme's own !important tab rule. Drag-and-drop stack indicators keep theirs. */
+:root:not(#lf) #tabbrowser-tabs .tabbrowser-tab:not([small-stack], [big-stack]) :is(.tab-stack, .tab-background, .tab-content) {
+  box-shadow: none !important;
+}
+
+/* --- 3. Address bar --------------------------------------------------------
+   Pill shape: the search-engine button inside is a pill, so the bar is too.
+   Nova derives the input, focus ring, dropdown, and result rows from
+   --urlbar-border-radius, so they all stay concentric. */
+:root {
+  --urlbar-border-radius: calc(var(--urlbar-height) / 2) !important;
+
+  /* Focus ring: soft neutral instead of the theme's cyan */
+  --toolbar-field-border-color-focus: var(--lf-ring) !important;
+
+  /* Dropdown (and focused field): opaque neutral, same as the expanded sidebar */
+  --urlbar-background-color-focus: var(--lf-solid) !important;
+
+  /* Result rows: neutral highlight, gray secondary text instead of cyan/purple */
+  --urlbarview-background-color-selected: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.10)) !important;
+  --urlbarview-text-color-selected: var(--toolbar-field-text-color-focus) !important;
+  --urlbarview-background-color-hover: var(--lf-hover) !important;
+  --urlbarview-text-color-action: var(--lf-text-muted) !important;
+}
+
+.urlbarView {
+  --link-color: var(--lf-text-muted) !important;
+}
+
+/* Dropdown shadow: Nova uses a violet glow (rgba(152, 113, 255, 0.15) in dark
+   mode). Use the same plain dark shadow as the expanded sidebar. */
+.urlbar,
+#searchbar {
+  --urlbar-background-box-shadow-open: var(--lf-card-shadow) !important;
+}
+
+/* Dropdown: Nova gives the bottom corners the inner radius and the top corners
+   inner + overhang. Use the outer radius on all four so the panel is uniform. */
+.urlbar > .urlbarView > .urlbarView-background {
+  border-end-start-radius: var(--urlbar-background-border-top-radius-open) !important;
+  border-end-end-radius: var(--urlbar-background-border-top-radius-open) !important;
+}
+
+/* Placeholder: "SEARCH" in Bebas Neue instead of "Search with Google or enter address" */
+#urlbar .urlbar-input::placeholder {
+  color: transparent !important;
+}
+
+#urlbar .urlbar-input-box:has(> .urlbar-input:placeholder-shown)::after {
+  content: "SEARCH";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  translate: 0 -45%;
+  font-family: "LiquidFox Bebas", "Bebas Neue", sans-serif;
+  font-size: 17px;
+  font-weight: normal;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  color: var(--toolbar-field-text-color);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* The page's URL in a monospace font: Cascadia Mono, or the installed
+   Cascadia Code NF with its programming ligatures turned off (that is what
+   Cascadia Mono is), so "//", "==" or "&&" in a URL stay separate
+   characters. Only while the bar shows the current page's address
+   (pageproxystate="valid"); typed text and searches keep the normal font,
+   and it switches back on the first keystroke. The dropdown's URLs (the
+   grey address after a title, and rows whose title is an address, e.g.
+   "Visit") use it too; titles and search suggestions don't. */
+#urlbar[pageproxystate="valid"]:not([usertyping]) .urlbar-input:not(:placeholder-shown),
+.urlbarView-url,
+.urlbarView-title[is-url] {
+  font-family: "Cascadia Mono", "Cascadia Mono NF", "Cascadia Code NF", "Cascadia Code", ui-monospace, monospace !important;
+  font-variant-ligatures: none !important;
+  font-feature-settings: "calt" 0, "liga" 0 !important;
+}
+
+/* --- 4. Sidebar "expand on hover" (autohide) -------------------------------
+   Firefox 157 wraps the launcher in #sidebar-container and paints it with the
+   opaque frame color. The theme above still targets the old #sidebar-main id,
+   so its rules for this mode no longer match.
+   Animation length: the pref sidebar.animation.expand-on-hover.duration-ms
+   (set to 150 in user.js, default 400); keep the 150ms below in sync. */
+:root[sidebar-expand-on-hover] #sidebar-container {
+  --sidebar-launcher-surface-color: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  transition:
+    background-color 150ms ease-in-out,
+    box-shadow 0s !important;
+}
+
+/* Layout. Contents sit at the same spot open and closed, so nothing jumps:
+   - Closed: 4px of padding on the window-edge side and on top, 6px at the
+     bottom. The page sits 4px from the strip (section 5 keeps 8px from the
+     window elsewhere), so tab highlights and group boxes are centered
+     between the window edge and the page: highlight 13px from each, group
+     box 8px from each.
+   - Expanding, open, closing: a card floating 4px in from the window edge
+     (tabs start at the card's edge, where they start when closed), level
+     with the top of the page, 4px above the window bottom, all corners
+     rounded. 4px of padding on top and bottom; on the sides, the group
+     boxes are drawn 4px in (section 8) and tab highlights 9px in.
+   Closed 6px bottom padding + #browser's 2px = the card's 4px gap + 4px
+   padding. */
+:root[sidebar-expand-on-hover] #sidebar-container:not([sidebar-launcher-expanded], [sidebar-ongoing-animations], [sidebar-positionend]) {
+  padding-block: 4px 6px !important;
+  padding-inline-start: 4px !important;
+}
+
+:root[sidebar-expand-on-hover] #sidebar-container[sidebar-positionend]:not([sidebar-launcher-expanded], [sidebar-ongoing-animations]) {
+  padding-block: 4px 6px !important;
+  padding-inline-end: 4px !important;
+}
+
+:root[sidebar-expand-on-hover] #sidebar-container:is([sidebar-launcher-expanded], [sidebar-ongoing-animations]) {
+  inset-block: 0 4px !important;
+  inset-inline-start: 4px !important;
+  padding: 4px 0 !important;
+  border-inline: none !important;
+  border-radius: var(--liquid-radius) !important;
+}
+
+:root[sidebar-expand-on-hover] #sidebar-container[sidebar-positionend]:is([sidebar-launcher-expanded], [sidebar-ongoing-animations]) {
+  inset-inline-start: unset !important;
+  inset-inline-end: 4px !important;
+}
+
+/* Page: 4px from the sidebar strip instead of the theme's 8px (see above) */
+:root[sidebar-expand-on-hover]:not(#lf):not(:has(#sidebar-container[sidebar-positionend])) .browserContainer {
+  margin-inline-start: 4px !important;
+}
+
+:root[sidebar-expand-on-hover]:not(#lf):has(#sidebar-container[sidebar-positionend]) .browserContainer {
+  margin-inline-end: 4px !important;
+}
+
+/* Target state while expanding/expanded: fully opaque neutral card. The
+   fade runs from the see-through strip to solid while it opens. Closing drops
+   this attribute at the start, so the card fades back to see-through while
+   it closes. The shadow comes in after the card has finished opening (the
+   reveal below would cut it off while opening). */
+:root[sidebar-expand-on-hover] #sidebar-container[sidebar-launcher-expanded] {
+  background-color: var(--lf-solid) !important;
+  box-shadow: var(--lf-card-shadow) !important;
+  transition:
+    background-color 150ms ease-in-out,
+    box-shadow 120ms ease-out 150ms !important;
+}
+
+/* Open/close as a card growing from the strip to full width, instead of
+   Firefox's slide. Firefox lays the card out at full width at once, slides
+   it in from the left with `translate`, and counter-slides the contents to
+   keep the icons still. Both slides are cancelled here (important user
+   styles beat Web Animations), and the card is revealed with a clip that
+   starts at the strip's width (--sidebar-launcher-collapsed-width, measured
+   by Firefox, minus the strip's 4px edge padding) and grows to the full
+   card, with the card's rounded corners on the moving edge. Closing runs it
+   backwards and holds the end until Firefox finishes, so the full card never
+   flashes. */
+:root[sidebar-expand-on-hover] #sidebar-container,
+:root[sidebar-expand-on-hover] sidebar-main {
+  translate: none !important;
+}
+
+@keyframes lf-sidebar-grow {
+  from {
+    clip-path: inset(0 calc(100% - var(--sidebar-launcher-collapsed-width) + 4px) 0 0 round var(--liquid-radius));
+  }
+  to {
+    clip-path: inset(0 0 0 0 round var(--liquid-radius));
+  }
+}
+
+@keyframes lf-sidebar-shrink {
+  from {
+    clip-path: inset(0 0 0 0 round var(--liquid-radius));
+  }
+  to {
+    clip-path: inset(0 calc(100% - var(--sidebar-launcher-collapsed-width) + 4px) 0 0 round var(--liquid-radius));
+  }
+}
+
+@keyframes lf-sidebar-grow-end {
+  from {
+    clip-path: inset(0 0 0 calc(100% - var(--sidebar-launcher-collapsed-width) + 4px) round var(--liquid-radius));
+  }
+  to {
+    clip-path: inset(0 0 0 0 round var(--liquid-radius));
+  }
+}
+
+@keyframes lf-sidebar-shrink-end {
+  from {
+    clip-path: inset(0 0 0 0 round var(--liquid-radius));
+  }
+  to {
+    clip-path: inset(0 0 0 calc(100% - var(--sidebar-launcher-collapsed-width) + 4px) round var(--liquid-radius));
+  }
+}
+
+/* Separate names for opening and closing, so switching always starts a new
+   animation */
+:root[sidebar-expand-on-hover] #sidebar-container[sidebar-launcher-expanded] {
+  animation: lf-sidebar-grow 150ms ease-in-out;
+}
+
+:root[sidebar-expand-on-hover] #sidebar-container[sidebar-ongoing-animations]:not([sidebar-launcher-expanded]) {
+  animation: lf-sidebar-shrink 150ms ease-in-out forwards;
+}
+
+:root[sidebar-expand-on-hover] #sidebar-container[sidebar-positionend][sidebar-launcher-expanded] {
+  animation-name: lf-sidebar-grow-end;
+}
+
+:root[sidebar-expand-on-hover] #sidebar-container[sidebar-positionend][sidebar-ongoing-animations]:not([sidebar-launcher-expanded]) {
+  animation-name: lf-sidebar-shrink-end;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[sidebar-expand-on-hover] #sidebar-container {
+    animation: none !important;
+  }
+}
+
+/* Resize handle hover: soft highlight instead of the theme's cyan */
+#sidebar-launcher-splitter:hover,
+#sidebar-splitter:hover {
+  background-color: light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.14)) !important;
+}
+
+/* Closed sidebar: no "more tools" chevron at the bottom (it does nothing
+   in expand-on-hover mode). Firefox shows it in place of the tool buttons
+   whenever the sidebar is closed, and marks that area [overflowing]; the
+   whole area is hidden then. It's hidden (not removed) so the tab list
+   doesn't change height when the sidebar opens and closes. The tools show
+   as usual in the open sidebar. (User styles reach into sidebar-main's
+   shadow DOM.) */
+.buttons-wrapper[overflowing] {
+  visibility: hidden !important;
+}
+
+/* Divider under the pinned tabs. Firefox draws a short, bright 2px dash in
+   the closed sidebar and a thin full-width line in the open one, and drops
+   the dash while the sidebar animates. Here it's the open sidebar's thin
+   line in both states, inset 4px like the pinned tabs and group boxes below
+   (so it's as wide as them when closed and grows with the card when opening).
+
+   Spacing (measured on screenshots): the line sat 10px below the pinned
+   tab's highlight and 8px above a group box (closed: 11px and 6px). It's
+   moved up 1px, with the space given back below it so nothing after it
+   moves: 9px on both sides, the same as the gap between two tab
+   highlights. When the list starts with an ungrouped tab instead of a group,
+   Firefox pads that first tab 4px at the top plus its 2px highlight margin,
+   so the divider takes those 6px back to keep 9px there too. */
+#vertical-pinned-tabs-splitter {
+  background-image: none !important;
+  margin-block: -1px 1px !important;
+
+  &:not(:hover) {
+    border-top: var(--tabstrip-inner-border) !important;
+  }
+
+  &:hover {
+    background-color: light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.14)) !important;
+  }
+}
+
+#tabbrowser-tabs:has(> #tabbrowser-arrowscrollbox > .tabbrowser-tab:nth-child(1 of :not([hidden]))) > #vertical-pinned-tabs-splitter {
+  margin-block-end: -5px !important;
+}
+
+/* Pinned tabs as wide as a group box: Firefox insets a tab's highlight 9px
+   from the tab column (32px wide when closed), while a group box sits 4px in
+   (42px). Pinned highlights and the divider use 4px too, in both states, so
+   the tiles, the line and the group boxes share one column edge. The
+   highlight is as tall as it is wide when closed (a 42px square); the row
+   keeps that height when the sidebar opens so nothing below it moves. The
+   icons stay centered. */
+:root:not(#lf) #pinned-tabs-container[orient="vertical"] .tabbrowser-tab .tab-background {
+  margin-inline: 4px !important;
+  min-height: calc(var(--tab-collapsed-width) - 8px) !important;
+}
+
+/* Spacing between pinned tiles. Firefox spaces tabs 9px apart (2px highlight
+   margin, 2px tab padding below, 3px tab padding and 2px highlight margin
+   above the next). Pinned tiles are group-box sized now, so they're spaced
+   like group boxes: 4px. Dropping the padding and highlight margin above
+   every pinned tile does that, and also puts the first tile 4px below the
+   card's top edge, the same as its 4px side inset, so its corners nest in
+   the card's. The space below the last tile (to the divider) is unchanged.
+   Same in both states. */
+:root:not(#lf) #pinned-tabs-container[orient="vertical"] > .tabbrowser-tab {
+  padding-block-start: 0 !important;
+
+  > .tab-stack > .tab-background {
+    margin-block-start: 0 !important;
+  }
+}
+
+:root:not(#lf) #tabbrowser-tabs[orient="vertical"]:not([expanded]) #pinned-tabs-container .tabbrowser-tab .tab-background {
+  width: calc(var(--tab-collapsed-width) - 8px) !important;
+}
+
+:root:not(#lf) #tabbrowser-tabs[orient="vertical"] > #vertical-pinned-tabs-splitter {
+  margin-inline: 4px !important;
+}
+
+/* Gap between a tab's icon and its title in the open sidebar: 12px
+   instead of Firefox's 7.5px. Also moves the pinned names and the New Tab
+   button's text, and the group names, whose gap after the dot is worked
+   out from this (section 8), so every name still starts in one column.
+   A tab playing sound shows its speaker button in that gap, with the same
+   12px after it. */
+:root:not(#lf) #tabbrowser-tabs[orient="vertical"][expanded] {
+  /* !important: this is a user style sheet, so Firefox's own 7.5px rule
+     wins over a plain declaration whatever the specificity. */
+  --tab-icon-end-margin: 12px !important;
+}
+
+/* Pinned tabs in the open sidebar: a short site name in the group labels'
+   Bebas Neue and color (YOUTUBE, GMAIL) instead of the page title.
+   userChrome.css can't see a tab's address, only its title (the label
+   attribute), so a site is recognized by how its titles end ("... -
+   YouTube", "... - Gmail"); the title is shrunk to nothing and the name
+   drawn in its place. Other pinned sites show their title in the same
+   font. To add a site, add it to both lists below.
+   Nudged down 1px like the group labels, which centers the capitals on
+   the icon. */
+:root:not(#lf) #pinned-tabs-container[orient="vertical"] .tabbrowser-tab .tab-label {
+  position: relative !important;
+  top: 1px !important;
+  color: light-dark(rgba(0, 0, 0, 0.62), rgba(255, 255, 255, 0.68)) !important;
+  font-family: "LiquidFox Bebas", "Bebas Neue", sans-serif !important;
+  font-size: var(--lf-label-size) !important;
+  font-weight: normal !important;
+  /* No extra spacing: Bebas's own tight fit, as on the group names. */
+  letter-spacing: 0 !important;
+}
+
+:root:not(#lf) #pinned-tabs-container[orient="vertical"] .tabbrowser-tab:is([label$="YouTube"], [label$="Gmail"]) .tab-label {
+  font-size: 0 !important;
+
+  /* The label's own 1px nudge (above) moves this too; nudging it again
+     put the name 1px below the icon's center. */
+  &::before {
+    font-size: var(--lf-label-size);
+  }
+}
+
+#pinned-tabs-container .tabbrowser-tab[label$="YouTube"] .tab-label::before { content: "YOUTUBE"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Gmail"] .tab-label::before { content: "GMAIL"; }
+
+/* Scroll edges of the tab list and pinned tabs. Nova paints a 16px band that
+   darkens toward the toolbox color at an edge with more tabs behind it,
+   which shows up as a dark box on glass. No band and no fade: the list is
+   clipped at its edge, which already sits a few pixels clear of the pinned
+   divider above and the new tab button below. The bands are 16px tall with
+   -16px margins, so removing them doesn't move anything.
+   ::part() rules in userChrome.css turned out not to match (apparently
+   Firefox ignores ::part in user style sheets), so this targets the
+   spacers inside the scroll box's shadow DOM directly, the same way the
+   chevron rule above does. Only the tab strips style these spacers, so
+   hiding them everywhere changes nothing else. */
+spacer[part~="overflow-start-indicator"],
+spacer[part~="overflow-end-indicator"] {
+  display: none !important;
+}
+
+/* Tab list scrollbar: thin (Firefox's own setting), a faint neutral thumb
+   and no track. It's invisible while the sidebar is closed or animating,
+   so it can't flash in the narrow column when the sidebar collapses; the
+   list still scrolls. Firefox reads this variable in the scroll box's
+   shadow DOM, and it inherits there from #tabbrowser-tabs. */
+#tabbrowser-tabs[orient="vertical"] {
+  --tab-vertical-scrollbar-color: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.18)) transparent !important;
+}
+
+#tabbrowser-tabs[orient="vertical"]:not([expanded]),
+#sidebar-container[sidebar-ongoing-animations] #tabbrowser-tabs[orient="vertical"] {
+  --tab-vertical-scrollbar-color: transparent transparent !important;
+}
+
+/* --- 5. New tab page ---------------------------------------------------------
+   Transparent page: needs browser.tabs.allow_transparent_browser = true
+   (user.js) and userContent.css. That pref makes every tab's page area
+   see-through, so pages that paint no background of their own need a
+   backstop behind them: white, which is what Firefox draws for them anyway.
+   The backstop is dropped on "blank" pages (new tab, home, about:blank),
+   which Firefox marks with pageproxystate="invalid" on the address bar.
+   An add-on's new tab page (Default New Tab) is marked "valid" instead
+   (extension pages always are, UrlbarInputBase.mjs), but Firefox leaves the
+   address bar empty on it, so an empty address bar drops the backstop too.
+
+   The backstop is a layer inset 1px from the rounded page edge rather than
+   the container's own background: at the curved corners the edge pixels are
+   only partly covered by the page, and a white background at the same edge
+   showed through them as a light fringe. */
+.browserContainer {
+  background: transparent !important;
+  isolation: isolate !important;
+}
+
+.browserContainer::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  border-radius: inherit;
+  background: #fff;
+  pointer-events: none;
+}
+
+/* Tab not painted yet (switching to an unloaded tab) or still loading:
+   theme color, so there's no white flash before a dark page paints */
+.browserContainer:has(browser[blank])::before,
+:root:has(.tabbrowser-tab[selected][busy]) .browserContainer::before {
+  background: var(--tabpanel-background-color);
+}
+
+:root:has(#urlbar[pageproxystate="invalid"]) .browserContainer::before,
+:root:has(#urlbar .urlbar-input:placeholder-shown) .browserContainer::before {
+  background: transparent;
+}
+
+/* The address bar used to be hidden on blank pages here. The Default New
+   Tab add-on has no search box of its own, so the bar stays visible; the
+   old rule is in userChrome.css.bak-before-newtab. */
+
+/* --- 6. Menus and panels (app menu, extensions, downloads, ...) -------------
+   Neutral near-opaque background instead of Nova's purple-black, no border,
+   no violet-to-orange line under the account row, neutral hover. Native
+   macOS menus (right-click menus) are drawn by the system and aren't
+   affected. */
+panel[type="arrow"] {
+  --panel-background-color: var(--lf-surface-menu) !important;
+  --panel-border-color: transparent !important;
+  --panel-separator-color: var(--lf-separator) !important;
+  --button-background-color-hover: var(--lf-hover) !important;
+  --button-background-color-active: var(--lf-active) !important;
+  --button-background-color-ghost-hover: var(--lf-hover) !important;
+  --button-background-color-ghost-active: var(--lf-active) !important;
+  --button-background-color-menu-hover: var(--lf-hover) !important;
+  --button-background-color-menu-active: var(--lf-active) !important;
+}
+
+toolbarseparator.proton-zap::before {
+  border-image: none !important;
+}
+
+/* --- 7. Inactive window -------------------------------------------------------
+   macOS only blurs a window while it's active: Firefox asks for the blur to
+   "follow window active state" (hard-coded, no pref), and inactive windows
+   get a flat gray instead, like Finder's sidebar. There's no way to keep the
+   blur. Closest match: while inactive, turn the effect off and fill the
+   window with the neutral dark surface at 97%, so it reads as solid glass
+   instead of gray, and other windows don't show through. (Kept just under
+   100% so the window stays in transparent mode and doesn't flicker when
+   switching.) */
+:root[windowtype="navigator:browser"]:-moz-window-inactive {
+  appearance: none !important;
+  background-color: light-dark(rgba(240, 240, 241, 0.97), rgba(24, 24, 26, 0.97)) !important;
+  background-image: none !important;
+}
+
+/* --- 8. Tab groups (vertical tabs) ------------------------------------------
+   The theme draws each group as a box tinted with the group color, with a
+   colored outline and a colored label, which turns muddy on the dark glass.
+   Here: a faint neutral box with no outline, a neutral label, and the group
+   color only as a small dot. :not(#lf) outranks the theme's rules.
+
+   Nothing inside a group moves when the sidebar opens or closes: grouped
+   tabs sit exactly where ungrouped tabs do, the spacing is the same in both
+   states, and the dot stays centered over the tab icons (Firefox keeps a tab's icon at
+   half of --tab-collapsed-width from the tab's edge in both states).
+   The box is drawn 4px in from the tabs' edges without moving the tabs: 4px
+   of padding with the background clipped to the content box, and -4px side
+   margins on the tabs to cancel the padding. The 12px/8px radius leaves
+   round 8px corners on the clipped background. */
+:root:not(#lf) #tabbrowser-tabs tab-group {
+  margin-inline: 0 !important;
+  padding-inline: 4px !important;
+  background-color: light-dark(rgba(0, 0, 0, 0.04), rgba(255, 255, 255, 0.045)) !important;
+  background-clip: content-box !important;
+  border-radius: 12px / 8px !important;
+  outline: none !important;
+  border: none !important;
+}
+
+/* Spacing, all the same in both sidebar states so nothing moves.
+   Firefox pads every tab 3px above and 2px below, plus a 2px margin around
+   its highlight, so a tab's highlight sits 5px below its top edge and 4px
+   above its bottom edge. The theme also added 1px around grouped tabs and
+   3px under the last one, which made groups bottom-heavy.
+
+   Inside a group: the label row is spaced like a tab row (5px above and
+   below), grouped tabs are spaced like ungrouped ones, and the last tab gets
+   1px so it ends 5px from the bottom. Result: 5px between the box and its
+   content on all four sides (the sides were already 5px), and the label
+   sits as far from the top as the last tab sits from the bottom.
+
+   Around a group: 2px above and 1px below, so there are 6px between the box
+   and an ungrouped tab's highlight on either side (4 + 2 above, 1 + 5
+   below). Between two groups it's 4px (1 + 3), the same as the gap above
+   the first group, which has no top margin. */
+:root:not(#lf) #tabbrowser-tabs tab-group {
+  margin-block: 2px 1px !important;
+}
+
+:root:not(#lf) #tabbrowser-tabs tab-group:nth-child(1 of :not([hidden])) {
+  margin-block-start: 0 !important;
+}
+
+:root:not(#lf) #tabbrowser-tabs tab-group + tab-group {
+  margin-block-start: 3px !important;
+}
+
+:root:not(#lf) #tabbrowser-tabs tab-group > .tab-group-label-container {
+  margin-block: calc(var(--tab-margin-block) + var(--tab-padding-block-start)) !important;
+}
+
+:root:not(#lf) #tabbrowser-tabs tab-group > .tabbrowser-tab {
+  margin-inline: -4px !important;
+  margin-block: 0 !important;
+}
+
+:root:not(#lf) #tabbrowser-tabs tab-group > .tabbrowser-tab:last-of-type {
+  margin-block-end: calc(var(--tab-padding-block-start) - var(--tab-padding-block-end)) !important;
+}
+
+/* Label row: a gradient dot in the group color, centered on the
+   tab icon column, then the name in Bebas Neue starting where tab titles
+   start.
+   --lf-group-dot sets the dot's size; everything else follows it.
+   --lf-label-size is the name's size: 12px / 0.7, so Bebas Neue's
+   capitals (0.7em) are exactly 12px, the dot's height, and both have
+   whole-pixel edges.
+   Vertical: the dot hangs off the text's baseline (vertical-align), so the
+   dot and the capitals are placed from the same position and round to the
+   same pixels; with 12px capitals the dot's bottom is the baseline. The
+   label has a 32px line (the theme's line-height). Firefox rounds the
+   font's ascent and descent to whole pixels (15px and 5px at this size,
+   from 0.9em and 0.3em), which puts the capitals exactly 1px above the
+   middle of the line, so the label is nudged down 1px to center both on
+   the row. The closed sidebar hides the name without changing the font
+   (see the end of this section), so the dot stays put when it opens.
+   Horizontal: the label starts 4px in from the tab edge (group padding), so
+   4px + padding + half the dot = half of --tab-collapsed-width, the tab
+   icon's center. The gap after the dot is the tab's icon-to-title gap
+   plus the difference between the dot and a 16px icon, so the name lines
+   up with tab titles.
+   Bebas Neue has one weight, so no bold (it would be faked). */
+:root:not(#lf) #tabbrowser-tabs {
+  --lf-group-dot: 12px;
+  --lf-label-size: calc(12px / 0.7);
+}
+
+:root:not(#lf) #tabbrowser-tabs .tab-group-label {
+  display: block !important;
+  position: relative !important;
+  top: 1px !important;
+  padding-inline: calc(var(--tab-collapsed-width) / 2 - 4px - var(--lf-group-dot) / 2) 8px !important;
+  color: light-dark(rgba(0, 0, 0, 0.62), rgba(255, 255, 255, 0.68)) !important;
+  font-family: "LiquidFox Bebas", "Bebas Neue", sans-serif !important;
+  font-size: var(--lf-label-size) !important;
+  font-weight: normal !important;
+  /* No extra spacing: the compressed look of the pinned names. */
+  letter-spacing: 0 !important;
+}
+
+/* Glass dot: lit colored glass rather than a glossy bead. No rim and no
+   white sheen.
+   - Body: the group's two colors (below), slightly see-through at the top
+     left (75%) and solid at the bottom right, so it reads as glass without
+     losing brightness.
+   - Glow: a soft halo in the deeper color, as if lit from behind.
+   A group color without its own pair falls back to Firefox's color. */
+:root:not(#lf) #tabbrowser-tabs .tab-group-label {
+  --lf-group-base: light-dark(var(--tab-group-color), var(--tab-group-color-invert));
+}
+
+:root:not(#lf) #tabbrowser-tabs .tab-group-label::before {
+  content: "";
+  display: inline-block;
+  width: var(--lf-group-dot);
+  height: var(--lf-group-dot);
+  margin-inline-end: calc(var(--tab-icon-end-margin, 7.5px) + (16px - var(--lf-group-dot)) / 2);
+  border-radius: 50%;
+  background-image: linear-gradient(135deg,
+    color-mix(in oklab, var(--lf-g1, var(--lf-group-base)) 75%, transparent),
+    var(--lf-g2, var(--lf-group-base)));
+  box-shadow: 0 0 6px color-mix(in oklab, var(--lf-g2, var(--lf-group-base)) 50%, transparent);
+  /* Bottom edge (it has no text, so that's its baseline) this far below
+     the text's baseline: centers the dot on the 0.7em capitals. */
+  vertical-align: calc(0.35em - var(--lf-group-dot) / 2);
+}
+
+/* Two colors per group, in OKLCH so they match each other: a light one
+   (top left) and a deeper one (bottom right, and the glow), with a small hue
+   shift between them (e.g. peach and rose for red). All at about the same
+   brightness and saturation, so none sticks out. Yellow is lighter because
+   a dark yellow turns mustard.
+   Firefox doesn't mark a group's color with an attribute, only in its inline
+   style (--tab-group-color: var(--tab-group-red)), so that's what these
+   match. */
+#tabbrowser-tabs tab-group[style*="var(--tab-group-red)"]    { --lf-g1: oklch(0.86 0.10 45);  --lf-g2: oklch(0.72 0.17 18); }
+#tabbrowser-tabs tab-group[style*="var(--tab-group-orange)"] { --lf-g1: oklch(0.90 0.10 80);  --lf-g2: oklch(0.77 0.16 52); }
+#tabbrowser-tabs tab-group[style*="var(--tab-group-yellow)"] { --lf-g1: oklch(0.96 0.11 108); --lf-g2: oklch(0.87 0.15 85); }
+#tabbrowser-tabs tab-group[style*="var(--tab-group-green)"]  { --lf-g1: oklch(0.91 0.13 135); --lf-g2: oklch(0.76 0.16 158); }
+#tabbrowser-tabs tab-group[style*="var(--tab-group-cyan)"]   { --lf-g1: oklch(0.92 0.09 185); --lf-g2: oklch(0.77 0.13 220); }
+#tabbrowser-tabs tab-group[style*="var(--tab-group-blue)"]   { --lf-g1: oklch(0.88 0.09 228); --lf-g2: oklch(0.70 0.16 258); }
+#tabbrowser-tabs tab-group[style*="var(--tab-group-purple)"] { --lf-g1: oklch(0.87 0.10 325); --lf-g2: oklch(0.71 0.17 295); }
+#tabbrowser-tabs tab-group[style*="var(--tab-group-pink)"]   { --lf-g1: oklch(0.90 0.09 355); --lf-g2: oklch(0.74 0.17 5); }
+#tabbrowser-tabs tab-group[style*="var(--tab-group-gray)"]   { --lf-g1: oklch(0.93 0.01 250); --lf-g2: oklch(0.72 0.02 250); }
+
+:root:not(#lf) #tabbrowser-tabs .tab-group-overflow-count {
+  color: var(--lf-text-muted) !important;
+}
+
+/* Closed sidebar: the label is just the dot (the theme showed a clipped
+   first letter). The name is made transparent rather than shrunk: Firefox
+   shrinks it to nothing (font-size-adjust: 0) and draws the first letter
+   in the system font, and either would move the text's baseline, which
+   the dot hangs off, so the dot would jump when the sidebar opens. */
+#tabbrowser-tabs[orient="vertical"]:not([expanded]) tab-group:not(#lf) {
+  border-block: none !important;
+}
+
+#tabbrowser-tabs[orient="vertical"]:not([expanded]) .tab-group-label:not(#lf) {
+  padding-block: 0 !important;
+  padding-inline-end: 0 !important;
+  color: transparent !important;
+  font-size-adjust: none !important;
+  text-align: start !important;
+}
+
+#tabbrowser-tabs[orient="vertical"]:not([expanded]) .tab-group-label:not(#lf)::first-letter {
+  font: inherit !important;
+  line-height: inherit !important;
+}
+
+/* The transparent name still has its full width, which made the label
+   ask for more room than the closed column has: the group box grew to the
+   column's right edge (46px instead of 42px, lopsided). Firefox ignores
+   the name's width when the sidebar is open (contain: inline-size); do
+   the same here, so the box keeps its 4px insets and the name is clipped. */
+#tabbrowser-tabs[orient="vertical"]:not([expanded]) .tab-group-label-container:not(#lf) {
+  contain: inline-size !important;
+}
+
+#tabbrowser-tabs[orient="vertical"]:not([expanded]) .tab-group-label:not(#lf)::before {
+  margin-inline-end: 0;
+}
+
+/* --- 9. Window buttons (traffic lights) --------------------------------------
+   Hidden. macOS places the close/minimize/zoom buttons over this box; when
+   the box isn't shown, Firefox moves them above the top of the window,
+   out of sight (it does the same in full screen).
+   Without them: Cmd+W closes a tab, Cmd+Shift+W the window, Cmd+M
+   minimizes, Ctrl+Cmd+F toggles full screen, and double-clicking an empty
+   part of the toolbar zooms (or minimizes, per System Settings > Desktop &
+   Dock). The window can still be dragged by the toolbar. Delete this block
+   to bring them back. */
+.titlebar-buttonbox-container {
+  display: none !important;
+}
+
+/* In their place: a small rounded square in the Firefox logo's colors.
+   Three layers, like the logo: a diagonal base from orange at the top
+   right through red and pink to purple at the bottom left, a yellow glow in
+   the top-right corner (the flame's hot spot), and a purple glow in the
+   bottom-left corner (the globe). The glows are soft radial falloffs, so
+   the colors blend in curves instead of straight diagonal bands, which is
+   what made the plain diagonal look like pixel steps at 14px on a standard
+   (non-Retina) screen. The base blends in OKLab, which keeps the middle
+   colors bright (plain RGB blending goes muddy between orange and purple).
+   No border, sheen, or outer glow; whole-pixel 4px corners.
+   The toolbar keeps a column clear at its left the width of the closed
+   sidebar up to the page: 4px margin + a --tab-collapsed-width column of tab
+   icons (50px) + the 4px gap before the page = 58px. The square sits in the
+   middle of that column (29px, the same line as the tab icons and group
+   dots below it), and the toolbar starts exactly where the page starts: the
+   first button's hover background lines up with the page's left edge.
+   (The toolbar spans the whole window with no padding of its own, and
+   Firefox pads the first button by --toolbar-padding-inline, so that's
+   subtracted.) The square ignores clicks, so the window can still be
+   dragged from there. --lf-logo-size sets its size. */
+#nav-bar {
+  --lf-rail: calc(8px + var(--tab-collapsed-width, 50px));
+  --lf-logo-size: 14px;
+  padding-inline-start: 0 !important;
+}
+
+#nav-bar::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  margin-block: auto;
+  inset-inline-start: calc(var(--lf-rail) / 2 - var(--lf-logo-size) / 2);
+  width: var(--lf-logo-size);
+  height: var(--lf-logo-size);
+  border-radius: round(calc(var(--lf-logo-size) / 4 + 0.01px), 1px);
+  /* First version: for a Firefox that can't blend gradients in OKLab (the
+     second one is then ignored) */
+  background-image:
+    radial-gradient(circle calc(var(--lf-logo-size) * 0.6) at 95% 5%,
+      rgb(255 233 79 / 0.9), rgb(255 233 79 / 0.58) 25%, rgb(255 233 79 / 0.32) 50%,
+      rgb(255 233 79 / 0.11) 75%, rgb(255 233 79 / 0) 100%),
+    radial-gradient(circle calc(var(--lf-logo-size) * 0.7) at 0% 100%,
+      rgb(106 60 255 / 0.6), rgb(106 60 255 / 0.42) 25%, rgb(106 60 255 / 0.26) 50%,
+      rgb(106 60 255 / 0.11) 75%, rgb(106 60 255 / 0) 100%),
+    linear-gradient(225deg, #ffa20e 0%, #ff3d50 45%, #e31587 75%, #8c4bff 100%);
+  background-image:
+    radial-gradient(circle calc(var(--lf-logo-size) * 0.6) at 95% 5%,
+      rgb(255 233 79 / 0.9), rgb(255 233 79 / 0.58) 25%, rgb(255 233 79 / 0.32) 50%,
+      rgb(255 233 79 / 0.11) 75%, rgb(255 233 79 / 0) 100%),
+    radial-gradient(circle calc(var(--lf-logo-size) * 0.7) at 0% 100%,
+      rgb(106 60 255 / 0.6), rgb(106 60 255 / 0.42) 25%, rgb(106 60 255 / 0.26) 50%,
+      rgb(106 60 255 / 0.11) 75%, rgb(106 60 255 / 0) 100%),
+    linear-gradient(225deg in oklab, #ffa20e 0%, #ff3d50 45%, #e31587 75%, #8c4bff 100%);
+  pointer-events: none;
+}
+
+#nav-bar-customization-target {
+  margin-inline-start: calc(var(--lf-rail) - var(--toolbar-padding-inline, 6px)) !important;
+}

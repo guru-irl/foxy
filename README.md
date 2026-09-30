@@ -48,6 +48,40 @@ If you removed the address-bar rule after installing, restore it in your Firefox
 profile's `chrome/userChrome.css` (section 5) from
 `chrome/userChrome.css.bak-before-newtab` (made right before the rule is removed).
 
+## Theme
+
+`theme/` holds the browser theme: `userChrome.css` styles Firefox's interface,
+`userContent.css` provides content-page styling, and `user.js` sets the theme's
+Firefox preferences. These files are separate from the add-on and are not in its
+package. Fonts are shared from `extension/fonts/`; `theme/fonts` links there too,
+so relative font URLs work from either location.
+
+Quit Firefox with Cmd+Q, then run from the repo:
+
+    python3 scripts/install_theme.py
+
+The script finds the default profile through `profiles.ini` in
+`~/Library/Application Support/Firefox`. To choose a profile or a different
+Firefox directory:
+
+    python3 scripts/install_theme.py --profile "/path/to/profile"
+    python3 scripts/install_theme.py --firefox-dir "/path/to/Firefox"
+
+Existing `chrome/userChrome.css`, `chrome/userContent.css`, `chrome/fonts`
+(including a real font directory or an old symlink), and `user.js` are moved to
+`<profile>/chrome/backup-YYYYMMDD-HHMMSS/`. If that backup name already exists, a
+numeric suffix keeps it separate. Only replaced entries are backed up; an empty
+profile needs no backup. The originals are replaced by absolute symlinks to the
+repo's theme files and `extension/fonts/`. Running it again with the correct
+links in place changes nothing. Keep the repo at that location while using the
+theme. Reopen Firefox to load it; CSS changes also need a full restart.
+
+To undo, quit Firefox, delete only the four installed symlinks above, and move
+`userChrome.css`, `userContent.css` and `fonts` from your backup back into
+`<profile>/chrome/`. Move the backed-up `user.js` to `<profile>/user.js`, not into
+`chrome/`. Restore only entries present in the backup; if there was no original,
+leave that link removed. Then reopen Firefox.
+
 ## Licences
 
 Danfo and Bebas Neue are under the SIL Open Font License; see `fonts/*-OFL.txt`.
