@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Headless screenshots of the new tab page with fake tabs (preview/fixtures.js).
 
-Uses a throwaway Firefox profile in .preview-profile/, never your own profile.
+Uses a throwaway Firefox profile in .spider/scratch/preview-profile/, never your own profile.
 Writes dist/preview/<name>.png.
 
 Usage: python3 scripts/preview.py [name ...]   (no names: all scenarios)
@@ -12,13 +12,13 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIREFOX = "/Applications/Firefox.app/Contents/MacOS/firefox"
-PROFILE = ROOT / ".preview-profile"
+PROFILE = ROOT / ".spider" / "scratch" / "preview-profile"
 OUT = ROOT / "dist" / "preview"
-PAGE = ROOT / ".preview.html"
+PAGE = ROOT / "extension" / ".preview.html"
 MAIN_SCRIPT = '<script type="module" src="src/main.js"></script>'
 INJECT = (
-    '<link rel="stylesheet" href="preview/preview.css">\n'
-    '<script type="module" src="preview/fake-browser.js"></script>\n'
+    '<link rel="stylesheet" href="../preview/preview.css">\n'
+    '<script type="module" src="../preview/fake-browser.js"></script>\n'
 )
 
 # name: (query string, window width, window height)
@@ -36,14 +36,14 @@ SCENARIOS = {
 
 def build_page():
     """Copy newtab.html next to itself with the fake API loaded before main.js."""
-    html = (ROOT / "newtab.html").read_text()
+    html = (ROOT / "extension" / "newtab.html").read_text()
     if MAIN_SCRIPT not in html:
         sys.exit("newtab.html no longer loads src/main.js as expected; update scripts/preview.py")
     PAGE.write_text(html.replace(MAIN_SCRIPT, INJECT + MAIN_SCRIPT))
 
 
 def ensure_profile():
-    PROFILE.mkdir(exist_ok=True)
+    PROFILE.mkdir(parents=True, exist_ok=True)
     (PROFILE / "user.js").write_text(
         # file:// pages may import sibling ES modules only with this off.
         'user_pref("security.fileuri.strict_origin_policy", false);\n'

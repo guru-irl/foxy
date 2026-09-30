@@ -14,19 +14,19 @@ export async function activateTab(api, targetTabId, selfTabId, { close = true } 
   try {
     await api.tabs.update(targetTabId, { active: true });
   } catch (error) {
-    console.warn("Default New Tab: could not switch to tab", targetTabId, error);
+    console.warn("Foxy: could not switch to tab", targetTabId, error);
     return false;
   }
   if (!close) return true;
   try {
     await api.runtime.sendMessage(CLOSE_MESSAGE);
   } catch (error) {
-    console.warn("Default New Tab: could not ask to close the page, closing it directly", error);
+    console.warn("Foxy: could not ask to close the page, closing it directly", error);
     try {
       await api.tabs.remove(selfTabId);
     } catch (closeError) {
       // The switch already happened, so a failed close only leaves this page open behind the tab.
-      console.warn("Default New Tab: could not close the new tab page", selfTabId, closeError);
+      console.warn("Foxy: could not close the new tab page", selfTabId, closeError);
     }
   }
   return true;

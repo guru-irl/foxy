@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 import sys
+import tempfile
 import unittest
 import urllib.error
 from unittest import mock
@@ -14,7 +15,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import sign  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SCRATCH = ROOT / "dist" / "test-sign"
+SCRATCH = ROOT / ".spider" / "scratch" / "task-1" / "test-sign"
 
 
 def b64decode(part):
@@ -120,9 +121,9 @@ class SignFlowTest(unittest.TestCase):
         progress.start()
         self.addCleanup(progress.stop)
         SCRATCH.mkdir(parents=True, exist_ok=True)
-        self.xpi = SCRATCH / "x.zip"
+        self.xpi = SCRATCH / "foxy-1.0.0.zip"
         self.xpi.write_bytes(b"PK")
-        self.out = SCRATCH / "x-signed.xpi"
+        self.out = SCRATCH / "foxy-1.0.0-signed.xpi"
         self.part = self.out.with_suffix(".xpi.part")
         self.out.unlink(missing_ok=True)
         self.part.unlink(missing_ok=True)
@@ -145,7 +146,7 @@ class SignFlowTest(unittest.TestCase):
         self.assertTrue(upload_type.startswith("multipart/form-data; boundary="))
         self.assertIn(b'Content-Disposition: form-data; name="channel"\r\n\r\nunlisted\r\n', upload_body)
         self.assertIn(
-            b'Content-Disposition: form-data; name="upload"; filename="x.zip"\r\n'
+            b'Content-Disposition: form-data; name="upload"; filename="foxy-1.0.0.zip"\r\n'
             b'Content-Type: application/zip\r\n\r\nPK\r\n',
             upload_body,
         )
@@ -292,6 +293,38 @@ class SignFlowTest(unittest.TestCase):
             sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
         self.assertIn("upload offline", str(ctx.exception))
         self.assertFalse(self.out.exists())
+
+
+class MainTest(unittest.TestCase):
+    def test_main_signs_the_foxy_zip_using_the_extension_manifest(self):
+        SCRATCH.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as directory:
+            root = pathlib.Path(directory)
+            (root / "extension").mkdir()
+            (root / "extension" / "manifest.json").write_text(json.dumps({
+                "version": "2.3.4",
+                "browser_specific_settings": {"gecko": {"id": "{abc}"}},
+            }))
+            (root / "dist").mkdir()
+            xpi = root / "dist" / "foxy-2.3.4.zip"
+            xpi.write_bytes(b"PK")
+            with (
+                mock.patch.object(sign, "ROOT", root),
+                mock.patch.object(sign, "read_credentials", return_value=("issuer", "test-secret")) as credentials,
+                mock.patch.object(sign, "Amo") as client,
+                mock.patch.object(sign, "sign") as sign_addon,
+            ):
+                sign.main()
+            credentials.assert_called_once_with()
+            client.assert_called_once_with("issuer", "test-secret")
+            sign_addon.assert_called_once_with(
+                client.return_value, xpi, "{abc}", "2.3.4",
+                root / "dist" / "foxy-2.3.4-signed.xpi",
+            )
+            self.assertEqual(
+                sign.CREDENTIALS,
+                pathlib.Path.home() / ".config" / "liquidfox-newtab" / "amo.env",
+            )
 
 
 if __name__ == "__main__":

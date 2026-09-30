@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { blankAndClose, handleMessage } from "../src/close.js";
+import { blankAndClose, handleMessage } from "../extension/src/close.js";
 
 function fakeApi({ updateFails = false, discardFails = false, discardHangs = false, removeFails = false, onUpdate } = {}) {
   const calls = [];
@@ -141,7 +141,7 @@ test("a hung discard times out, warns and removes the tab without leaving a time
   await completesSoon(blankAndClose(api, 7, { timeoutMs: 10000, discardTimeoutMs: 20 }));
   assert.deepEqual(api.calls, [["addListener", FILTER], ["update", 7, BLANK], ...AFTER_BLANK]);
   assert.equal(warn.mock.callCount(), 1);
-  assert.deepEqual(warn.mock.calls[0].arguments, ["Default New Tab: flushing the page's state timed out, closing it anyway", 7]);
+  assert.deepEqual(warn.mock.calls[0].arguments, ["Foxy: flushing the page's state timed out, closing it anyway", 7]);
   assert.equal(pending.size, 0, "discard timer must not stay pending after closing");
 });
 
@@ -160,7 +160,7 @@ test("a failed blank warns, removes the listener and closes without waiting for 
   }
   assert.deepEqual(api.calls, [["addListener", FILTER], ["update", 7, BLANK], ["removeListener"], ["remove", 7]]);
   assert.equal(warn.mock.callCount(), 1);
-  assert.deepEqual(warn.mock.calls[0].arguments.slice(0, 2), ["Default New Tab: could not blank the page before closing it", 7]);
+  assert.deepEqual(warn.mock.calls[0].arguments.slice(0, 2), ["Foxy: could not blank the page before closing it", 7]);
   assert.match(warn.mock.calls[0].arguments[2].message, /Cannot blank tab/);
 });
 
@@ -172,7 +172,7 @@ test("a failed close warns and resolves after cleaning up", async (t) => {
   await completesSoon(blankAndClose(api, 7, { timeoutMs: 10000 }));
   assert.deepEqual(api.calls, [["addListener", FILTER], ["update", 7, BLANK], ...AFTER_BLANK]);
   assert.equal(warn.mock.callCount(), 1);
-  assert.deepEqual(warn.mock.calls[0].arguments.slice(0, 2), ["Default New Tab: could not close the new tab page", 7]);
+  assert.deepEqual(warn.mock.calls[0].arguments.slice(0, 2), ["Foxy: could not close the new tab page", 7]);
   assert.match(warn.mock.calls[0].arguments[2].message, /Cannot remove tab/);
 });
 
@@ -184,7 +184,7 @@ test("a failed discard warns and still removes the tab", async (t) => {
   await completesSoon(blankAndClose(api, 7, { timeoutMs: 10000 }));
   assert.deepEqual(api.calls, [["addListener", FILTER], ["update", 7, BLANK], ...AFTER_BLANK]);
   assert.equal(warn.mock.callCount(), 1);
-  assert.deepEqual(warn.mock.calls[0].arguments.slice(0, 2), ["Default New Tab: could not flush the page's state before closing it", 7]);
+  assert.deepEqual(warn.mock.calls[0].arguments.slice(0, 2), ["Foxy: could not flush the page's state before closing it", 7]);
   assert.match(warn.mock.calls[0].arguments[2].message, /Cannot flush tab/);
 });
 

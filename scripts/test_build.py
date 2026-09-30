@@ -1,6 +1,7 @@
 import json
 import pathlib
 import sys
+import tempfile
 import unittest
 import zipfile
 
@@ -8,7 +9,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import build  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-OUT_DIR = ROOT / "dist" / "test-build"
+SCRATCH = ROOT / ".spider" / "scratch" / "task-1"
+OUT_DIR = SCRATCH / "test-build"
 
 
 class BuildTest(unittest.TestCase):
@@ -24,18 +26,40 @@ class BuildTest(unittest.TestCase):
             self.assertIn(required, names)
         for name in names:
             self.assertFalse(
-                name.startswith(("test/", "preview/", "docs/", "scripts/", "dist/", ".")),
+                name.startswith(("extension/", "theme/", "test/", "preview/", "docs/", "scripts/", "dist/", ".")),
                 name,
             )
             self.assertNotIn("/.", name)
 
     def test_zip_is_named_after_the_version_and_holds_the_package_files(self):
         out = build.build(out_dir=OUT_DIR)
-        version = json.loads((ROOT / "manifest.json").read_text())["version"]
-        self.assertEqual(out.name, f"liquidfox-newtab-{version}.zip")
+        version = json.loads((ROOT / "extension" / "manifest.json").read_text())["version"]
+        self.assertEqual(out.name, f"foxy-{version}.zip")
         with zipfile.ZipFile(out) as zf:
             self.assertEqual(sorted(zf.namelist()), build.package_files())
-            self.assertEqual(zf.read("manifest.json"), (ROOT / "manifest.json").read_bytes())
+            self.assertIn("manifest.json", zf.namelist())
+            self.assertFalse(any(name.startswith("extension/") for name in zf.namelist()))
+            self.assertEqual(zf.read("manifest.json"), (ROOT / "extension" / "manifest.json").read_bytes())
+
+    def test_build_uses_extension_under_the_supplied_repository_root(self):
+        SCRATCH.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as directory:
+            root = pathlib.Path(directory)
+            extension = root / "extension"
+            (extension / "src").mkdir(parents=True)
+            (extension / "manifest.json").write_text('{"version": "2.3.4"}')
+            (extension / "src" / "main.js").write_text('// page module\n')
+            (extension / ".preview.html").write_text('preview only')
+            (root / "manifest.json").write_text('{"version": "0.0.0"}')
+            (root / "theme").mkdir()
+            (root / "theme" / "userChrome.css").write_text('theme only')
+            self.assertEqual(build.package_files(root), ["manifest.json", "src/main.js"])
+            out = build.build(root)
+            self.assertEqual(out, root / "dist" / "foxy-2.3.4.zip")
+            with zipfile.ZipFile(out) as zf:
+                self.assertEqual(zf.namelist(), ["manifest.json", "src/main.js"])
+                self.assertEqual(zf.read("manifest.json"), b'{"version": "2.3.4"}')
+                self.assertEqual(zf.read("src/main.js"), b'// page module\n')
 
     def test_zip_is_reproducible(self):
         first = build.build(out_dir=OUT_DIR).read_bytes()
