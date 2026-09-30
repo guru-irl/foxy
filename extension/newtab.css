@@ -152,7 +152,8 @@ button:focus-visible {
    raster cap ratio gives 0.375em - 6px (0px at 16px), aligning its 12px fill
    with the flat cap tops and baseline. The restored sidebar glow extends
    outside the fill and is excluded from the row measurement. */
-.dot {
+.dot,
+button.dot {
   display: inline-block;
   width: 12px;
   height: 12px;

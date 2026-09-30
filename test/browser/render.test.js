@@ -361,3 +361,21 @@ test("onOpen closes only a history-free page and activates remote tabs and follo
     await new Promise(resolve => win.requestAnimationFrame(resolve));
   } finally { frame.remove(); }
 });
+
+
+test("generic button interaction fills do not erase the group-dot colour", async () => {
+  const node = await draw();
+  const dot = node.querySelector(".dot");
+  // Synthetic key events cannot set Firefox's trusted focus-visible state.
+  // Substitute an equal-specificity class in the actual rule, not a mock fill,
+  // so the real stylesheet, source order and Firefox cascade are exercised.
+  const sheet = [...document.styleSheets].find(sheet => sheet.href?.endsWith("/extension/newtab.css"));
+  const rule = [...sheet.cssRules].find(rule => rule.selectorText?.includes("button:focus-visible"));
+  const selector = rule.selectorText;
+  try {
+    assert.ok(getComputedStyle(dot).backgroundImage.includes("gradient"));
+    rule.selectorText = selector.replace("button:focus-visible", "button.focus-test");
+    dot.classList.add("focus-test");
+    assert.ok(getComputedStyle(dot).backgroundImage.includes("gradient"), "generic focus fill must not erase the group colour");
+  } finally { rule.selectorText = selector; }
+});
