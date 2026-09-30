@@ -152,7 +152,7 @@ Algorithms (Firefox 157 facts: `tabs.move` inserts the tab next to the tab curre
 - `indexBefore(tab, before)`: `before.index - 1` when the tab is in the same window and before it, otherwise `before.index`.
 - **`dropTab`, kind `group`:**
   1. Unpin if pinned.
-  2. `tabs.group({ tabIds: [tabId], groupId })` if not already a member.
+  2. If the tab is in another window than the group, first `tabs.move(tabId, { windowId: group.windowId, index: -1 })` (Firefox 157 calls `moveTabsBefore` across windows otherwise, which is undefined; the fake rejects it). Then `tabs.group({ tabIds: [tabId], groupId })` if not already a member (the tab is now in the group's window, so it is appended to the group or moved to its front, never across windows).
   3. With a `beforeTabId` that is not the tab itself, re-read both tabs. If `before` is still in the group, `tabs.move(tabId, { index: indexBefore(tab, before) })`. The tab is already a member, so the neighbour it lands next to is a member too and it stays in the group.
   4. With `beforeTabId: null` and the tab not the group's last member, move it to the index of the group's last tab.
   5. Correct: re-read; if `groupId` differs, `tabs.group` again.
