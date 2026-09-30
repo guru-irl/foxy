@@ -572,8 +572,27 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
    ============================================ */
 
 @font-face {
-  font-family: "LiquidFox Bebas";
-  src: local("Bebas Neue"), local("BebasNeue-Regular"), url("fonts/BebasNeue-Regular.ttf");
+  font-family: "Foxy Sans";
+  src: url("fonts/GoogleSansFlex.ttf") format("truetype");
+  font-weight: 1 1000;
+  font-stretch: 25% 151%;
+  font-style: oblique 0deg 10deg;
+}
+
+@font-face {
+  font-family: "Foxy Mono";
+  src: url("fonts/CascadiaMono.ttf") format("truetype");
+  font-weight: 200 700;
+}
+
+/* Zero specificity lets the URL/status rules below keep their monospace.
+   Limit the default to the main window, not DevTools or other documents.
+   ROND is the font's roundness axis, not the radius of UI surfaces. */
+@-moz-document url("chrome://browser/content/browser.xhtml") {
+  :where(*) {
+    font-family: "Foxy Sans", system-ui, sans-serif !important;
+    font-variation-settings: "ROND" 0 !important;
+  }
 }
 
 /* --- 0. Neutral palette -------------------------------------------------
@@ -774,7 +793,9 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
   border-end-end-radius: var(--urlbar-background-border-top-radius-open) !important;
 }
 
-/* Placeholder: "SEARCH" in Bebas Neue instead of "Search with Google or enter address" */
+/* Placeholder: condensed upright "SEARCH" instead of the long prompt.
+   With line-height 1, the capital centre is 0.482em below the line top:
+   (1 + 0.966 ascent - 0.286 descent - 0.716 cap height) / 2. */
 #urlbar .urlbar-input::placeholder {
   color: transparent !important;
 }
@@ -784,29 +805,32 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
   position: absolute;
   inset-inline-start: 0;
   top: 50%;
-  translate: 0 -45%;
-  font-family: "LiquidFox Bebas", "Bebas Neue", sans-serif;
-  font-size: 17px;
-  font-weight: normal;
-  letter-spacing: 0.08em;
+  translate: 0 -48.2%;
+  font-family: "Foxy Sans", system-ui, sans-serif !important;
+  font-size: 17px !important;
+  font-weight: 800 !important;
+  font-stretch: 50% !important;
+  font-style: normal !important;
+  font-variation-settings: "ROND" 0 !important;
+  letter-spacing: 0 !important;
   line-height: 1;
   color: var(--toolbar-field-text-color);
   opacity: 0.5;
   pointer-events: none;
 }
 
-/* The page's URL in a monospace font: Cascadia Mono, or the installed
-   Cascadia Code NF with its programming ligatures turned off (that is what
-   Cascadia Mono is), so "//", "==" or "&&" in a URL stay separate
-   characters. Only while the bar shows the current page's address
+/* The page's URL in bundled Cascadia Mono, with programming ligatures
+   off so "//", "==" or "&&" stay separate characters. Only while the bar shows the current page's address
    (pageproxystate="valid"); typed text and searches keep the normal font,
    and it switches back on the first keystroke. The dropdown's URLs (the
    grey address after a title, and rows whose title is an address, e.g.
-   "Visit") use it too; titles and search suggestions don't. */
+   "Visit") and the link status line use it too; titles and search
+   suggestions don't. */
 #urlbar[pageproxystate="valid"]:not([usertyping]) .urlbar-input:not(:placeholder-shown),
 .urlbarView-url,
-.urlbarView-title[is-url] {
-  font-family: "Cascadia Mono", "Cascadia Mono NF", "Cascadia Code NF", "Cascadia Code", ui-monospace, monospace !important;
+.urlbarView-title[is-url],
+#statuspanel-label {
+  font-family: "Foxy Mono", "Cascadia Mono", ui-monospace, monospace !important;
   font-variant-ligatures: none !important;
   font-feature-settings: "calt" 0, "liga" 0 !important;
 }
@@ -1056,32 +1080,37 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
 }
 
 /* Pinned tabs in the open sidebar: a short site name in the group labels'
-   Bebas Neue and color (YOUTUBE, GMAIL) instead of the page title.
+   condensed heavy font and color, but upright (YOUTUBE, GMAIL), instead
+   of the page title.
    userChrome.css can't see a tab's address, only its title (the label
    attribute), so a site is recognized by how its titles end ("... -
    YouTube", "... - Gmail"); the title is shrunk to nothing and the name
    drawn in its place. Other pinned sites show their title in the same
    font. To add a site, add it to both lists below.
-   Nudged down 1px like the group labels, which centers the capitals on
-   the icon. */
+   No top nudge with the new font: its rasterised capitals are centred
+   like the group labels. */
 :root:not(#lf) #pinned-tabs-container[orient="vertical"] .tabbrowser-tab .tab-label {
   position: relative !important;
-  top: 1px !important;
+  top: 0px !important;
   color: light-dark(rgba(0, 0, 0, 0.62), rgba(255, 255, 255, 0.68)) !important;
-  font-family: "LiquidFox Bebas", "Bebas Neue", sans-serif !important;
+  font-family: "Foxy Sans", system-ui, sans-serif !important;
   font-size: var(--lf-label-size) !important;
-  font-weight: normal !important;
-  /* No extra spacing: Bebas's own tight fit, as on the group names. */
+  font-weight: 800 !important;
+  font-stretch: 50% !important;
+  font-style: normal !important;
+  font-variation-settings: "ROND" 0 !important;
+  /* Keep mixed-case titles in capitals with the font's compressed fit. */
+  text-transform: uppercase !important;
   letter-spacing: 0 !important;
 }
 
 :root:not(#lf) #pinned-tabs-container[orient="vertical"] .tabbrowser-tab:is([label$="YouTube"], [label$="Gmail"]) .tab-label {
   font-size: 0 !important;
 
-  /* The label's own 1px nudge (above) moves this too; nudging it again
-     put the name 1px below the icon's center. */
+  /* The label's own nudge moves this too; don't apply it twice.
+     Font weight, width, style and roundness inherit from the label. */
   &::before {
-    font-size: var(--lf-label-size);
+    font-size: var(--lf-label-size) !important;
   }
 }
 
@@ -1266,42 +1295,46 @@ toolbarseparator.proton-zap::before {
 }
 
 /* Label row: a gradient dot in the group color, centered on the
-   tab icon column, then the name in Bebas Neue starting where tab titles
-   start.
+   tab icon column, then the condensed Google Sans Flex name starting
+   where tab titles start. Weight 800, width 50%, slant -10, roundness 0.
    --lf-group-dot sets the dot's size; everything else follows it.
-   --lf-label-size is the name's size: 12px / 0.7, so Bebas Neue's
-   capitals (0.7em) are exactly 12px, the dot's height, and both have
-   whole-pixel edges.
-   Vertical: the dot hangs off the text's baseline (vertical-align), so the
-   dot and the capitals are placed from the same position and round to the
-   same pixels; with 12px capitals the dot's bottom is the baseline. The
-   label has a 32px line (the theme's line-height). Firefox rounds the
-   font's ascent and descent to whole pixels (15px and 5px at this size,
-   from 0.9em and 0.3em), which puts the capitals exactly 1px above the
-   middle of the line, so the label is nudged down 1px to center both on
-   the row. The closed sidebar hides the name without changing the font
-   (see the end of this section), so the dot stays put when it opens.
+   Google Sans Flex's nominal cap height is 1432 / 2000 = 0.716em.
+   At weight 800, width 50%, slant -10 and automatic optical size, the
+   headless replica gives 12 whole pixel rows at 16px (effective raster
+   cap height 0.75em). Dividing 12px by 0.75 sets --lf-label-size.
+   Vertical: the dot hangs off the text baseline (vertical-align) at
+   half the measured cap height minus half the dot. Ascent 0.966em and
+   descent 0.286em round up to 16px and 5px at this size, placing the
+   baseline at (32 + 16 - 5) / 2 = 21.5px. Raster snapping to 22px
+   puts the capitals and dot at rows 10..21, centred at 16px in the
+   32px row. No top nudge is needed. Rounded letters have the font's
+   normal faint antialiased overshoot beyond the flat capital edges.
+   The closed sidebar hides the name without changing the font (see the
+   end of this section), so the dot stays put when it opens.
    Horizontal: the label starts 4px in from the tab edge (group padding), so
    4px + padding + half the dot = half of --tab-collapsed-width, the tab
    icon's center. The gap after the dot is the tab's icon-to-title gap
    plus the difference between the dot and a 16px icon, so the name lines
-   up with tab titles.
-   Bebas Neue has one weight, so no bold (it would be faked). */
+   up with tab titles. */
 :root:not(#lf) #tabbrowser-tabs {
   --lf-group-dot: 12px;
-  --lf-label-size: calc(12px / 0.7);
+  --lf-label-size: calc(12px / 0.75);
 }
 
 :root:not(#lf) #tabbrowser-tabs .tab-group-label {
   display: block !important;
   position: relative !important;
-  top: 1px !important;
+  top: 0px !important;
   padding-inline: calc(var(--tab-collapsed-width) / 2 - 4px - var(--lf-group-dot) / 2) 8px !important;
   color: light-dark(rgba(0, 0, 0, 0.62), rgba(255, 255, 255, 0.68)) !important;
-  font-family: "LiquidFox Bebas", "Bebas Neue", sans-serif !important;
+  font-family: "Foxy Sans", system-ui, sans-serif !important;
   font-size: var(--lf-label-size) !important;
-  font-weight: normal !important;
-  /* No extra spacing: the compressed look of the pinned names. */
+  font-weight: 800 !important;
+  font-stretch: 50% !important;
+  font-style: oblique 10deg !important;
+  font-variation-settings: "ROND" 0 !important;
+  /* Capitals, with no extra spacing: the compressed look of pinned names. */
+  text-transform: uppercase !important;
   letter-spacing: 0 !important;
 }
 
@@ -1328,8 +1361,8 @@ toolbarseparator.proton-zap::before {
     var(--lf-g2, var(--lf-group-base)));
   box-shadow: 0 0 6px color-mix(in oklab, var(--lf-g2, var(--lf-group-base)) 50%, transparent);
   /* Bottom edge (it has no text, so that's its baseline) this far below
-     the text's baseline: centers the dot on the 0.7em capitals. */
-  vertical-align: calc(0.35em - var(--lf-group-dot) / 2);
+     the text's baseline: centres the dot on the measured 0.75em capitals. */
+  vertical-align: calc(0.375em - var(--lf-group-dot) / 2) !important;
 }
 
 /* Two colors per group, in OKLCH so they match each other: a light one

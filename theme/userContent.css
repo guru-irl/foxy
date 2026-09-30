@@ -6,10 +6,19 @@
  * plus section 5 of userChrome.css, which drops the backstop behind blank pages.
  */
 
-/* Unique family name so it can't collide with a website's own "Bebas Neue" */
+/* Unique family names shared with the chrome theme and extension page. */
 @font-face {
-  font-family: "LiquidFox Bebas";
-  src: local("Bebas Neue"), local("BebasNeue-Regular"), url("fonts/BebasNeue-Regular.ttf");
+  font-family: "Foxy Sans";
+  src: url("fonts/GoogleSansFlex.ttf") format("truetype");
+  font-weight: 1 1000;
+  font-stretch: 25% 151%;
+  font-style: oblique 0deg 10deg;
+}
+
+@font-face {
+  font-family: "Foxy Mono";
+  src: url("fonts/CascadiaMono.ttf") format("truetype");
+  font-weight: 200 700;
 }
 
 @-moz-document url-prefix("about:newtab"), url-prefix("about:home") {
@@ -36,12 +45,11 @@
     padding-inline-start: 24px !important;
   }
 
-  /* "SEARCH" in Bebas Neue instead of "Search with Google or enter address".
-     The original text stays in place but invisible, so Firefox's blinking
-     caret keeps its normal position. The label is laid over it, centered on
-     the box: with line-height 1, Bebas Neue's capitals are centered 0.45em
-     from the top of the line (font metrics: ascent 0.9, descent 0.3, cap
-     height 0.7), so it's moved up by 45% of its own height. */
+  /* Condensed upright "SEARCH" instead of the long prompt. The original
+     text stays in place but invisible, keeping Firefox's caret position.
+     With line-height 1, Google Sans Flex's capital centre is 0.482em from
+     the line top: (1 + 0.966 ascent - 0.286 descent - 0.716 cap height) / 2.
+     Move it up by 48.2% of its own height to centre it on the box. */
   .fake-textbox {
     visibility: hidden !important;
   }
@@ -52,11 +60,14 @@
     top: 50%;
     /* padding above + the text box's own start margin */
     inset-inline-start: calc(24px + var(--space-xsmall, 4px));
-    translate: 0 -45%;
-    font-family: "LiquidFox Bebas", "Bebas Neue", sans-serif;
-    font-size: 24px;
-    font-weight: normal;
-    letter-spacing: 0.08em;
+    translate: 0 -48.2%;
+    font-family: "Foxy Sans", system-ui, sans-serif !important;
+    font-size: 24px !important;
+    font-weight: 800 !important;
+    font-stretch: 50% !important;
+    font-style: normal !important;
+    font-variation-settings: "ROND" 0 !important;
+    letter-spacing: 0 !important;
     line-height: 1;
     white-space: nowrap;
     opacity: 0.54;
