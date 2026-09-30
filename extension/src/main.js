@@ -40,17 +40,34 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let actionsInFlight = 0;
   let requestedEditGroupId = null;
   const held = () => actionsInFlight > 0 || ui.dragging || ui.editing || ui.editGroupId != null;
+  // An editor holds board reads/renders, but must not hide its own removal.
+  const canCheckEdit = () => actionsInFlight === 0 && !ui.dragging && ui.editGroupId != null;
+  function releaseMissingEdit() {
+    ui.editGroupId = null;
+    ui.editing = false;
+    ++generation;
+  }
 
   async function refresh(retry = true) {
-    if (held()) { pending = true; return; }
-    const mine = ++generation;
     try {
+      if (held()) {
+        pending = true;
+        if (!canCheckEdit()) return;
+        const editId = ui.editGroupId, editGeneration = generation;
+        const groups = await api.tabGroups.query({});
+        // Do not let an older existence check end a newer interaction.
+        if (generation !== editGeneration || ui.editGroupId !== editId || !canCheckEdit() ||
+            groups.some(group => group.id === editId)) return;
+        releaseMissingEdit();
+      }
+      const mine = ++generation;
+      pending = false;
       const [windows, tabs, groups, current] = await Promise.all([
         api.windows.getAll({ windowTypes: ["normal"] }), api.tabs.query({}),
         api.tabGroups.query({}), api.tabs.getCurrent(),
       ]);
       if (held()) { pending = true; return; }
-      if (mine !== generation) return;
+      if (mine !== generation) { pending = true; return; }
       const nextBoard = buildBoard({ windows, tabs, groups, currentWindowId: current.windowId,
         selfTabId: current.id, selfUrl: location.origin + location.pathname });
       self = current;
@@ -58,7 +75,8 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       // Introduce a newly created column/editor in the final action snapshot.
       // Once published, editGroupId holds every subsequent refresh.
       if (requestedEditGroupId != null) {
-        ui.editGroupId = requestedEditGroupId;
+        ui.editGroupId = board.columns.some(column => column.id === requestedEditGroupId)
+          ? requestedEditGroupId : null;
         requestedEditGroupId = null;
       }
       const key = JSON.stringify({ board, ui });
@@ -68,8 +86,8 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
         restoreView(root, saved);
         lastRenderedKey = key;
       }
-      pending = false;
     } catch (error) {
+      pending = true;
       console.warn("Foxy: could not refresh board", error);
       // One bounded retry re-reads after a transient API error. Further events
       // can retry again, without a permanent failure creating a frame loop.
@@ -79,13 +97,13 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
 
   function schedule(retry = true) {
     pending = true;
-    if (held()) return;
+    if (held() && !canCheckEdit()) return;
     if (queued) { retryQueued ||= retry; return; }
     queued = true;
     retryQueued = retry;
     requestAnimationFrame(() => {
       queued = false;
-      if (held() || !pending) return;
+      if ((held() && !canCheckEdit()) || !pending) return;
       refresh(retryQueued);
     });
   }
@@ -93,7 +111,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   function interaction(key, active) {
     ui[key] = active;
     if (active) { ++generation; pending = true; }
-    else if (!held() && pending) schedule();
+    else if ((!held() || canCheckEdit()) && pending) schedule();
   }
 
   async function action(run) {
@@ -132,6 +150,10 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   };
 
   const onChange = () => schedule();
+  const onGroupRemoved = group => {
+    if (group.id === ui.editGroupId) releaseMissingEdit();
+    schedule();
+  };
   try {
     api.tabs.onUpdated.addListener(onChange, {
       properties: ["favIconUrl", "groupId", "hidden", "pinned", "title", "url"],
@@ -146,7 +168,11 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     api.tabs.onMoved, api.tabs.onAttached, api.tabs.onDetached, api.tabs.onActivated,
     api.tabGroups.onCreated, api.tabGroups.onUpdated, api.tabGroups.onMoved, api.tabGroups.onRemoved,
     api.windows.onCreated, api.windows.onRemoved, api.windows.onFocusChanged]) {
-    event?.addListener(onChange);
+    try { event?.addListener(event === api.tabGroups.onRemoved ? onGroupRemoved : onChange); }
+    catch (error) {
+      console.warn("Foxy: could not listen to board changes", error);
+      schedule();
+    }
   }
   return { refresh, schedule, handlers, ui };
 }

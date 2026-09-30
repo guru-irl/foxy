@@ -379,6 +379,41 @@ test("controller holds updates during drag and edit including in-flight reads", 
   assert.equal(node.querySelector('[data-tab-id="23"] .row-label').textContent, "https://example.com/after-edit");
 });
 
+test("review round 2: a favicon event during an in-flight read gets a second read", async () => {
+  const { ff, node } = await controller();
+  const query = ff.browser.tabs.query;
+  const icon = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="6" fill="gray"/></svg>';
+  let currentIcon;
+  let release, markStarted;
+  const gate = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { markStarted = resolve; });
+  let first = true;
+  ff.browser.tabs.query = async options => {
+    const snapshot = await query(options);
+    // The fake has no favicon-write API. Keep its real tab snapshot and events,
+    // supplying only this browser-owned field at the query boundary.
+    snapshot.find(tab => tab.id === 23).favIconUrl = currentIcon;
+    if (first) { first = false; markStarted(); await gate; }
+    return snapshot;
+  };
+  ff.calls.length = 0;
+  try {
+    await ff.browser.tabs.update(23, { url: "https://example.com/title-before-icon" });
+    await ff.settle();
+    await started;
+    currentIcon = icon;
+    ff.fire("tabs.onUpdated", 23, { favIconUrl: icon });
+    await ff.settle();
+    // Resolve the old read before the favicon event's queued frame executes.
+    release();
+    await flush(ff);
+    assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 2,
+      "the event delivered during a read must trigger a second read");
+    assert.equal(node.querySelector('[data-tab-id="23"] img')?.getAttribute("src"), icon,
+      "the second read must draw the newest favicon");
+  } finally { release(); ff.browser.tabs.query = query; await flush(ff); }
+});
+
 test("controller ignores an older snapshot after a newer refresh finishes", async () => {
   const { ff, node, control } = await controller();
   const query = ff.browser.tabs.query;
@@ -435,6 +470,171 @@ test("review important 3: new-group edit ID holds refreshes until onEditEnd", as
   assert.equal(rebuilds(), 1, "release coalesced editor updates once");
   assert.equal(node.querySelector('[data-tab-id="14"] .row-label').textContent, "https://example.com/during-new-group-edit");
 });
+
+test("review round 2: a group gone before the final drop read never holds an editor", async () => {
+  const { ff, node, control } = await controller();
+  const group = ff.browser.tabs.group;
+  let vanishedId;
+  ff.browser.tabs.group = async options => {
+    vanishedId = await group(options);
+    // Another browser action removes the new group before the drop returns.
+    await ff.browser.tabs.ungroup(options.tabIds);
+    return vanishedId;
+  };
+  try {
+    const result = await control.handlers.onTabDrop(23, { zone: "new-group" });
+    await flush(ff);
+    assert.equal(result.ok, true);
+    assert.equal(node.querySelector(`.column[data-group-id="${vanishedId}"]`), null);
+    assert.equal(control.ui.editGroupId, null, "a missing column must not publish an editor ID");
+    const rebuilds = countRebuilds(node);
+    ff.calls.length = 0;
+    await ff.browser.tabs.update(14, { url: "https://example.com/no-vanished-editor" });
+    await flush(ff);
+    assert.equal(rebuilds(), 1, "later changes must not be held by the vanished editor");
+    assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
+    assert.equal(node.querySelector('[data-tab-id="14"] .row-label').textContent,
+      "https://example.com/no-vanished-editor");
+  } finally { ff.browser.tabs.group = group; await flush(ff); }
+});
+
+test("review round 2: removing the edited group clears both edit holds and refreshes once", async () => {
+  const { ff, node, control } = await controller();
+  await control.handlers.onTabDrop(23, { zone: "new-group" });
+  await flush(ff);
+  const editId = control.ui.editGroupId;
+  assert.ok(node.querySelector(`.column[data-group-id="${editId}"]`));
+  control.handlers.onEditState(true);
+  const row = node.querySelector('[data-tab-id="14"]');
+  const rebuilds = countRebuilds(node);
+  await ff.browser.tabs.ungroup(13); // A different group's removal must not end this editor.
+  await flush(ff);
+  assert.equal(control.ui.editGroupId, editId);
+  assert.equal(control.ui.editing, true);
+  assert.equal(node.querySelector('[data-tab-id="14"]'), row);
+  assert.equal(rebuilds(), 0);
+  ff.calls.length = 0;
+  await ff.browser.tabs.ungroup(23);
+  await ff.browser.tabs.update(14, { url: "https://example.com/edited-group-removed" });
+  await flush(ff);
+  assert.equal(control.ui.editGroupId, null, "the removed group's editor must release its ID hold");
+  assert.equal(control.ui.editing, false, "the removed group's active editor must also end");
+  assert.equal(node.querySelector(`.column[data-group-id="${editId}"]`), null);
+  assert.ok(node.querySelector('.rows[data-zone="tabs"] [data-tab-id="23"]'));
+  assert.equal(node.querySelector('[data-tab-id="14"] .row-label').textContent,
+    "https://example.com/edited-group-removed");
+  assert.equal(rebuilds(), 1, "coalesce removal and pending changes into one rebuild");
+  assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
+});
+
+for (const dragging of [false, true]) {
+  test(`review round 2: tab events release a missing edited group without a group removal signal${dragging ? " after dragend" : ""}`, async () => {
+    const ff = createFirefox(setup());
+    filteredTabUpdates(ff);
+    // Exercise a browser that delivers only the tab events for this removal.
+    ff.browser.tabGroups.onRemoved.addListener = () => {};
+    const node = await root();
+    const { createController } = await import("../../extension/src/main.js");
+    const control = createController(node, ff.browser);
+    await control.refresh();
+    await control.handlers.onTabDrop(23, { zone: "new-group" });
+    await flush(ff);
+    const editId = control.ui.editGroupId;
+    assert.ok(node.querySelector(`.column[data-group-id="${editId}"]`));
+    control.handlers.onEditState(true);
+    const rebuilds = countRebuilds(node);
+    ff.calls.length = 0;
+    if (dragging) control.handlers.onDragState(true);
+    await ff.browser.tabs.ungroup(23);
+    await ff.browser.tabs.update(14, { url: "https://example.com/tab-only-group-removal" });
+    await flush(ff);
+    if (dragging) {
+      assert.equal(control.ui.editGroupId, editId, "even existence checks must wait for dragend");
+      assert.equal(rebuilds(), 0);
+      assert.equal(ff.calls.filter(call => call.api === "tabGroups.query").length, 0);
+      control.handlers.onDragState(false);
+      await flush(ff);
+    }
+    assert.equal(control.ui.editGroupId, null, "the next read attempt must detect the missing edited group");
+    assert.equal(control.ui.editing, false);
+    assert.equal(node.querySelector(`.column[data-group-id="${editId}"]`), null);
+    assert.equal(node.querySelector('[data-tab-id="14"] .row-label').textContent,
+      "https://example.com/tab-only-group-removal");
+    assert.equal(rebuilds(), 1);
+    assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1,
+      "existence checks must not produce an intermediate board read");
+  });
+}
+
+test("review round 2: failed group-removal registration is logged and tab events still release the editor", async () => {
+  const ff = createFirefox(setup());
+  filteredTabUpdates(ff);
+  ff.browser.tabGroups.onRemoved.addListener = () => { throw new Error("Removal event unavailable"); };
+  const node = await root();
+  const { createController } = await import("../../extension/src/main.js");
+  const warnings = [], warn = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  try {
+    const control = createController(node, ff.browser);
+    await flush(ff);
+    assert.ok(warnings.some(args => args[0].startsWith("Foxy:")));
+    assert.ok(node.querySelector('[data-tab-id="23"]'), "subscription failure must still schedule a read");
+    await control.handlers.onTabDrop(23, { zone: "new-group" });
+    await flush(ff);
+    const editId = control.ui.editGroupId;
+    assert.ok(node.querySelector(`.column[data-group-id="${editId}"]`));
+    const rebuilds = countRebuilds(node);
+    ff.calls.length = 0;
+    await ff.browser.tabs.ungroup(23);
+    await flush(ff);
+    assert.equal(control.ui.editGroupId, null);
+    assert.equal(node.querySelector(`.column[data-group-id="${editId}"]`), null);
+    assert.ok(node.querySelector('.rows[data-zone="tabs"] [data-tab-id="23"]'));
+    assert.equal(rebuilds(), 1);
+    assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
+  } finally { console.warn = warn; }
+});
+
+for (const failures of [1, Infinity]) {
+  test(`review round 2: ${failures === 1 ? "transient" : "persistent"} editor-existence failures are logged and retried once`, async () => {
+    const { ff, node, control } = await controller();
+    await control.handlers.onTabDrop(23, { zone: "new-group" });
+    await flush(ff);
+    const editId = control.ui.editGroupId;
+    control.handlers.onEditState(true);
+    const row = node.querySelector('[data-tab-id="14"]');
+    const rebuilds = countRebuilds(node);
+    const query = ff.browser.tabGroups.query;
+    let attempts = 0;
+    ff.browser.tabGroups.query = async options => {
+      if (++attempts <= failures) throw new Error("Existence read interrupted");
+      return query(options);
+    };
+    const warnings = [], warn = console.warn;
+    console.warn = (...args) => warnings.push(args);
+    ff.calls.length = 0;
+    try {
+      await control.refresh();
+      await flush(ff);
+      await nextFrame();
+      assert.equal(attempts, 2, "an existence failure gets one bounded retry, not a frame loop");
+      assert.equal(warnings.length, failures === 1 ? 1 : 2);
+      assert.ok(warnings.every(args => args[0].startsWith("Foxy:")));
+      assert.equal(control.ui.editGroupId, editId, "a failed query must not discard a valid editor");
+      assert.equal(control.ui.editing, true);
+      assert.equal(node.querySelector('[data-tab-id="14"]'), row);
+      assert.equal(rebuilds(), 0);
+      assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 0);
+      ff.browser.tabGroups.query = query;
+      await ff.browser.tabs.ungroup(23);
+      await flush(ff);
+      assert.equal(control.ui.editGroupId, null, "a later removal must recover from query failures");
+      assert.equal(control.ui.editing, false);
+      assert.equal(rebuilds(), 1);
+      assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
+    } finally { ff.browser.tabGroups.query = query; console.warn = warn; await flush(ff); }
+  });
+}
 
 test("controller catches failed reads, logs Foxy and re-reads once", async () => {
   const ff = createFirefox(setup());
