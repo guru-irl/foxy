@@ -293,27 +293,62 @@ test("interleaved pins keep per-window relative order and a second full pass mak
   assert.deepEqual(writes(f.ff), []);
 });
 
-test("a new pin with no earlier same-window pin appends after other windows' bookmarks", async () => {
+test("two-sided insertion: a new first pin goes before its later same-window neighbour without an echo", async () => {
   const f = await interleavedPins();
   const pin = await f.api.tabs.create({ windowId: 2, index: 0, pinned: true, active: false, url: url("new-pin") });
   await f.outbound.syncTab(pin.id);
-  assert.deepEqual(await f.pages(f.state.pinnedId), [
-    { title: "P1", url: url("p1") }, { title: "P3", url: url("p3") },
-    { title: "P2", url: url("p2") }, { title: "P4", url: url("p4") },
-    { title: url("new-pin"), url: url("new-pin") },
-  ]);
+  const expected = [
+    { title: "P1", url: url("p1") }, { title: url("new-pin"), url: url("new-pin") },
+    { title: "P3", url: url("p3") }, { title: "P2", url: url("p2") }, { title: "P4", url: url("p4") },
+  ];
+  assert.deepEqual(await f.pages(f.state.pinnedId), expected);
   assert.deepEqual(writes(f.ff).map(call => call.api), ["bookmarks.create"]);
   f.ff.calls.length = 0;
   await f.outbound.syncTab(pin.id);
-  assert.deepEqual(await f.pages(f.state.pinnedId), [
-    { title: "P1", url: url("p1") }, { title: url("new-pin"), url: url("new-pin") },
-    { title: "P3", url: url("p3") }, { title: "P2", url: url("p2") }, { title: "P4", url: url("p4") },
-  ]);
-  assert.deepEqual(writes(f.ff).map(call => call.api), ["bookmarks.move"]);
+  assert.deepEqual(await f.pages(f.state.pinnedId), expected);
+  assert.deepEqual(writes(f.ff), []);
   f.ff.calls.length = 0;
   for (const id of [8, 3, pin.id, 6, 2]) await f.outbound.syncTab(id);
   assert.deepEqual(writes(f.ff), []);
 });
+
+for (const entering of [false, true]) for (const pinned of [false, true]) {
+  test(`two-sided insertion: ${entering ? "entering" : "new"} ${pinned ? "pin" : "group bookmark"} goes after an unmapped front bookmark and before its later neighbour`, async () => {
+    const f = await synced(), originalId = f.state.tabs[30].bookmarkId;
+    let folderId = f.folder();
+    if (pinned) {
+      for (const id of [10, 20]) {
+        await f.api.tabs.update(id, { pinned: true });
+        await f.outbound.syncTab(id);
+      }
+      folderId = f.state.pinnedId;
+    } else if (entering) {
+      await f.api.bookmarks.move(originalId, { parentId: f.state.pinnedId });
+      f.state.tabs[30].folderId = f.state.pinnedId;
+    }
+    if (!entering) {
+      await f.api.bookmarks.remove(originalId);
+      delete f.state.tabs[30];
+    }
+    if (pinned) {
+      await f.api.tabs.update(30, { pinned: true });
+      await f.api.tabs.move(30, { index: 0 });
+    }
+    await f.api.bookmarks.create({ parentId: folderId, index: 0, title: "X", url: "about:config" });
+    await saveState(f.api, f.state);
+    f.ff.calls.length = 0;
+    await f.outbound.syncTab(30);
+    const expected = [{ title: "X", url: "about:config" }, ...abc];
+    assert.deepEqual(await f.pages(folderId), expected);
+    assert.deepEqual(writes(f.ff).map(call => call.api), [entering ? "bookmarks.move" : "bookmarks.create"]);
+    if (entering) assert.equal(f.state.tabs[30].bookmarkId, originalId);
+    assert.equal(f.state.tabs[30].folderId, folderId);
+    f.ff.calls.length = 0;
+    for (const id of [30, 10, 20]) await f.outbound.syncTab(id);
+    assert.deepEqual(await f.pages(folderId), expected);
+    assert.deepEqual(writes(f.ff), []);
+  });
+}
 
 test("an existing out-of-order pin moves right after its same-window predecessor using the final index", async () => {
   const f = await interleavedPins();
@@ -588,6 +623,34 @@ test("bookmark creation rejection is logged and does not abort the group's other
   assert.ok(warn.mock.calls.some(call => /^Foxy:/.test(call.arguments[0])));
 });
 
+for (const pinned of [false, true]) test(`inverted neighbours: repeated middle ${pinned ? "pin" : "group tab"} sync does not oscillate and a full pass converges`, async () => {
+  const f = await synced();
+  if (pinned) {
+    for (const id of [30, 10, 20]) {
+      await f.api.tabs.update(id, { pinned: true });
+      await f.outbound.syncTab(id);
+    }
+  }
+  const folderId = pinned ? f.state.pinnedId : f.folder(), before = structuredClone(f.state.tabs);
+  await f.api.bookmarks.move(f.state.tabs[20].bookmarkId, { index: 0 });
+  await f.api.bookmarks.move(f.state.tabs[10].bookmarkId, { index: 1 });
+  assert.deepEqual(await f.pages(folderId), [abc[2], abc[1], abc[0]]);
+  f.ff.calls.length = 0;
+  for (let repeat = 0; repeat < 3; repeat++) {
+    await f.outbound.syncTab(10);
+    assert.deepEqual(await f.pages(folderId), [abc[2], abc[1], abc[0]]);
+    assert.deepEqual(writes(f.ff), []);
+  }
+  for (const id of [30, 10, 20]) await f.outbound.syncTab(id);
+  assert.deepEqual(await f.pages(folderId), abc);
+  assert.deepEqual(f.state.tabs, before);
+  assert.deepEqual(writes(f.ff).map(call => call.api), ["bookmarks.move", "bookmarks.move"]);
+  f.ff.calls.length = 0;
+  for (const id of [30, 10, 20]) await f.outbound.syncTab(id);
+  assert.deepEqual(await f.pages(folderId), abc);
+  assert.deepEqual(writes(f.ff), []);
+});
+
 for (const pinned of [true, false]) for (const index of [1, 0]) {
   test(`relative order: ${pinned ? "pin" : "group tab"} moved backward to ${index} writes once then stabilizes`, async () => {
     const f = pinned ? await fixture({ groups: [], tabs: [
@@ -688,6 +751,19 @@ for (const missing of ["tab", "bookmark", "group during flush"]) test(`expected 
   assert.equal(warn.mock.callCount(), 0);
 });
 
+for (const readApi of ["tabs", "bookmarks", "tabGroups"]) test(`outbound read diagnostic: unexpected ${readApi}.get failure logs debug, not warn, and does not escape`, async (t) => {
+  const f = await synced(), before = structuredClone(f.state), tree = await f.api.bookmarks.getTree();
+  const error = new Error("unexpected API failure"), debug = t.mock.method(console, "debug", () => {});
+  const warn = t.mock.method(console, "warn", () => {});
+  t.mock.method(f.api[readApi], "get", async () => { throw error; });
+  await assert.doesNotReject(readApi === "tabGroups" ? f.outbound.syncGroup(7) : f.outbound.syncTab(10));
+  assert.deepEqual(debug.mock.calls.map(call => call.arguments), [["Foxy: outbound read skipped", error]]);
+  assert.equal(warn.mock.callCount(), 0);
+  assert.deepEqual(f.state, before);
+  assert.deepEqual(await f.api.bookmarks.getTree(), tree);
+  assert.deepEqual(writes(f.ff), []);
+});
+
 for (const failure of ["getState", "schedule", "save", "save rejection"]) test(`guarded tabRemoved: ${failure} never escapes the listener and logs Foxy`, async (t) => {
   const f = await synced(), error = new Error(failure), warn = t.mock.method(console, "warn", () => {});
   const outbound = createOutbound({ api: f.api,
@@ -729,6 +805,36 @@ async function rejectedCreateFixture(t) {
   f.ff.calls.length = 0;
   return { ...f, warn };
 }
+
+for (const isWindowClosing of [false, true]) test(`failed create cleanup: ${isWindowClosing ? "window-closing" : "ordinary"} tab removal prunes and persists the rejected URL`, async (t) => {
+  const f = await rejectedCreateFixture(t);
+  f.state.failedCreates[123] = "data:text/plain,another";
+  await saveState(f.api, f.state);
+  const before = structuredClone(f.state), tree = await f.api.bookmarks.getTree();
+  f.ff.calls.length = 0;
+  await f.api.tabs.remove(1);
+  assert.doesNotThrow(() => f.outbound.tabRemoved(1, { isWindowClosing }));
+  await f.ff.settle();
+  assert.deepEqual(f.state, { ...before, failedCreates: { 123: "data:text/plain,another" } });
+  assert.deepEqual(await loadState(f.api), f.state);
+  assert.deepEqual(await f.api.bookmarks.getTree(), tree);
+  assert.deepEqual(writes(f.ff), []);
+  assert.equal(f.warn.mock.callCount(), 1);
+  f.ff.calls.length = 0;
+  f.outbound.tabRemoved(1, { isWindowClosing });
+  await f.ff.settle();
+  assert.equal(f.ff.calls.some(call => call.api === "storage.local.set"), false);
+});
+
+test("failed create cleanup: rejected save is contained by the tabRemoved listener", async (t) => {
+  const f = await rejectedCreateFixture(t), error = new Error("cleanup save failed");
+  t.mock.method(f.api.storage.local, "set", async () => { throw error; });
+  assert.doesNotThrow(() => f.outbound.tabRemoved(1));
+  await f.ff.settle();
+  assert.deepEqual(f.state.failedCreates, {});
+  assert.equal(f.warn.mock.callCount(), 2);
+  assert.deepEqual(f.warn.mock.calls[1].arguments, ["Foxy: outbound sync failed", error]);
+});
 
 test("failed create: identical URL is suppressed across wake and a changed URL can create", async (t) => {
   const f = await rejectedCreateFixture(t);

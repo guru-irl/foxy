@@ -76,6 +76,40 @@ test("legacy state without either new outbound field preserves maps", async () =
   assert.deepEqual(await loadState(ff.browser), { ...legacy, pendingRemovals: {}, failedCreates: {} });
 });
 
+test("disposable outbound state: malformed fields default to empty without losing durable state", async (t) => {
+  const cases = [
+    ["pendingRemovals", "array", []],
+    ["pendingRemovals", "null", null],
+    ["pendingRemovals", "string", "broken"],
+    ["pendingRemovals", "null entry", { 9: null }],
+    ["pendingRemovals", "missing bookmark", { 9: { folderId: "folder-b", due: 105 } }],
+    ["pendingRemovals", "wrong folder", { 9: { bookmarkId: "bookmark-b", folderId: 1, due: 105 } }],
+    ["pendingRemovals", "wrong deadline", { 9: { bookmarkId: "bookmark-b", folderId: "folder-b", due: "soon" } }],
+    ["pendingRemovals", "non-finite deadline", { 9: { bookmarkId: "bookmark-b", folderId: "folder-b", due: Infinity } }],
+    ["pendingRemovals", "mixed valid and invalid", { 9: populated().pendingRemovals[9], 42: null }],
+    ["failedCreates", "array", []],
+    ["failedCreates", "null", null],
+    ["failedCreates", "number", 42],
+    ["failedCreates", "wrong URL", { 15: null }],
+    ["failedCreates", "mixed valid and invalid", { 15: "data:text/plain,rejected", 42: false }],
+  ];
+  for (const [field, name, value] of cases) await t.test(`${field}: ${name}`, async () => {
+    const ff = createFirefox();
+    await ff.browser.storage.local.set({ foxySync: { ...populated(), [field]: value } });
+    ff.calls.length = 0;
+    const restored = await loadState(ff.browser);
+    assert.deepEqual(restored, { ...populated(), [field]: {} });
+    assert.equal(ff.calls.some(call => call.api === "storage.local.set"), false);
+    restored[field][123] = "local-only";
+    assert.deepEqual(await loadState(ff.browser), { ...populated(), [field]: {} });
+  });
+  await t.test("both malformed", async () => {
+    const ff = createFirefox();
+    await ff.browser.storage.local.set({ foxySync: { ...populated(), pendingRemovals: null, failedCreates: [] } });
+    assert.deepEqual(await loadState(ff.browser), { ...populated(), pendingRemovals: {}, failedCreates: {} });
+  });
+});
+
 test("corrupt top-level and nested state gives a fresh empty state", async (t) => {
   const cases = [
     ["null", null], ["string", "broken"], ["array", []], ["empty object", {}],
@@ -99,13 +133,6 @@ test("corrupt top-level and nested state gives a fresh empty state", async (t) =
     ["deferred wrong member", { ...populated(), deferred: [false] }],
     ["quietUntil not map", { ...populated(), quietUntil: [] }],
     ["quietUntil wrong timestamp", { ...populated(), quietUntil: { 1: "soon" } }],
-    ["pendingRemovals not map", { ...populated(), pendingRemovals: [] }],
-    ["pendingRemovals null entry", { ...populated(), pendingRemovals: { 9: null } }],
-    ["pendingRemovals missing bookmark", { ...populated(), pendingRemovals: { 9: { folderId: "folder-b", due: 105 } } }],
-    ["pendingRemovals wrong folder", { ...populated(), pendingRemovals: { 9: { bookmarkId: "bookmark-b", folderId: 1, due: 105 } } }],
-    ["pendingRemovals wrong deadline", { ...populated(), pendingRemovals: { 9: { bookmarkId: "bookmark-b", folderId: "folder-b", due: "soon" } } }],
-    ["failedCreates not map", { ...populated(), failedCreates: [] }],
-    ["failedCreates wrong URL", { ...populated(), failedCreates: { 15: null } }],
   ];
   for (const [name, value] of cases) await t.test(name, async () => {
     const ff = createFirefox();

@@ -13,8 +13,9 @@ export async function loadState(api) {
     const stored = await api.storage.local.get(STATE_KEY);
     const state = stored[STATE_KEY];
     if (!validState(state)) return emptyState();
-    state.pendingRemovals ??= {};
-    state.failedCreates ??= {};
+    if (!entries(state.pendingRemovals, entry => record(entry)
+      && string(entry.bookmarkId) && string(entry.folderId) && Number.isFinite(entry.due))) state.pendingRemovals = {};
+    if (!entries(state.failedCreates, string)) state.failedCreates = {};
     return state;
   } catch (error) {
     console.warn("Foxy: could not load sync state", error);
@@ -73,8 +74,5 @@ function validState(value) {
     && entries(value.tabs, entry => record(entry) && string(entry.bookmarkId) && string(entry.folderId)
       && string(entry.url) && string(entry.title))
     && strings(value.openFolders) && strings(value.missing) && strings(value.deferred)
-    && entries(value.cantReopen, strings) && entries(value.quietUntil, Number.isFinite)
-    && (value.pendingRemovals === undefined || entries(value.pendingRemovals, entry => record(entry)
-      && string(entry.bookmarkId) && string(entry.folderId) && Number.isFinite(entry.due)))
-    && (value.failedCreates === undefined || entries(value.failedCreates, string));
+    && entries(value.cantReopen, strings) && entries(value.quietUntil, Number.isFinite);
 }

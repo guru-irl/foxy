@@ -18,7 +18,8 @@ export function createOutbound({
   };
   async function read(fn) {
     // Tabs, groups and bookmarks may disappear between queued events.
-    try { return await fn(); } catch { return null; }
+    try { return await fn(); }
+    catch (error) { console.debug("Foxy: outbound read skipped", error); return null; }
   }
 
   function scheduleRemoval(tabId) {
@@ -53,6 +54,8 @@ export function createOutbound({
     const previous = await neighbour(members.filter(other => other.index < tab.index).sort((a, b) => b.index - a.index));
     const next = await neighbour(members.filter(other => other.index > tab.index).sort((a, b) => a.index - b.index));
     if (bookmark?.parentId === folderId) {
+      // No position satisfies inverted neighbours. Their own sync repairs them.
+      if (previous && next && previous.index > next.index) return bookmark.index;
       // Firefox move() interprets index AFTER removing the moving bookmark.
       if (previous && bookmark.index < previous.index) return previous.index;
       if (next && bookmark.index > next.index) return next.index;
@@ -60,6 +63,7 @@ export function createOutbound({
       return bookmark.index;
     }
     if (previous) return previous.index + 1;
+    if (next) return next.index;
     return tab.pinned ? (await api.bookmarks.getChildren(folderId)).length : 0;
   }
 
@@ -150,8 +154,10 @@ export function createOutbound({
 
   function tabRemoved(tabId, removeInfo = {}) {
     try {
+      const state = getState(), failed = state.failedCreates[tabId] !== undefined;
+      if (failed) delete state.failedCreates[tabId];
       const saved = removeInfo.isWindowClosing ? cancelRemoval(tabId) : scheduleRemoval(tabId);
-      Promise.resolve(saved).catch(warn);
+      Promise.resolve(saved ?? (failed ? save() : undefined)).catch(warn);
     } catch (error) { warn(error); }
   }
 
