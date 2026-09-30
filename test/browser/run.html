@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Foxy browser tests</title>
+</head>
+<body>
+  <div id="fixture"></div>
+  <script type="module">
+    import { test, runTests } from "./harness.js";
+
+    const files = (new URLSearchParams(location.search).get("files") ?? "")
+      .split(",").filter(Boolean);
+    if (!files.length) test("browser test discovery", () => { throw new Error("no test files selected"); });
+    for (const file of files) {
+      try {
+        await import(file);
+      } catch (error) {
+        test(file, () => { throw error; });
+      }
+    }
+    const results = await runTests();
+    try {
+      const response = await fetch("/results", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ results }),
+      });
+      if (!response.ok) throw new Error(`results POST returned ${response.status}`);
+    } catch (error) {
+      console.error("Foxy: could not post browser test results", error);
+    }
+  </script>
+</body>
+</html>

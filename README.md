@@ -25,6 +25,7 @@ The build packages only the add-on, with `manifest.json` at the root of
 `dist/foxy-<version>.zip`.
 
     npm test                          # node --test and the Python tests; no npm packages
+    npm run test:browser               # DOM tests in headless Firefox (throwaway profile)
     python3 scripts/preview.py        # headless screenshots in dist/preview/ (throwaway profile)
 
 Before pushing: the scan reads files from the working tree, so commit (or stash) first, then run `python3 scripts/check_private.py` (patterns stay outside the repo in `~/.config/foxy/scan-patterns.txt`).
