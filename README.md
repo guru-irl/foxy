@@ -20,6 +20,8 @@ Design: `docs/superpowers/specs/2026-09-30-newtab-design.md`.
     npm test                          # node --test and the Python tests; no npm packages
     python3 scripts/preview.py        # headless screenshots in dist/preview/ (throwaway profile)
 
+Before pushing: run `python3 scripts/check_private.py` (patterns stay outside the repo in `~/.config/foxy/scan-patterns.txt`).
+
 ## Sign and install
 
 1. Create an API key at https://addons.mozilla.org/developers/addon/api/key/ and save it.

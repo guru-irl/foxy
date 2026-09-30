@@ -36,6 +36,10 @@ class ThemeTestCase(unittest.TestCase):
             (self.profile / "user.js", self.repo / "theme" / "user.js"),
         ]
 
+    def link_state(self, source):
+        info = source.lstat()
+        return info.st_ino, info.st_mtime_ns, os.readlink(source)
+
     def write_ini(self, text):
         (self.firefox / "profiles.ini").write_text(text)
 
@@ -116,12 +120,17 @@ class InstallTest(ThemeTestCase):
     def test_second_install_changes_nothing_and_creates_no_backup(self):
         self.make_old_files()
         install_theme.install(self.repo, self.profile, NOW)
-        before = {source: source.lstat() for source, _ in self.links}
+        before = {source: self.link_state(source) for source, _ in self.links}
+        # Reading a link may refresh atime on Linux; it is not an install change.
+        for source, _ in self.links:
+            info = source.lstat()
+            os.utime(source, ns=(info.st_atime_ns + 1_000_000_000, info.st_mtime_ns),
+                     follow_symlinks=False)
         backup = self.profile / "chrome" / "backup-20261001-020304"
         result = install_theme.install(self.repo, self.profile, datetime(2026, 10, 2))
         self.assertEqual(result, [])
         self.assert_links()
-        self.assertEqual({source: source.lstat() for source, _ in self.links}, before)
+        self.assertEqual({source: self.link_state(source) for source, _ in self.links}, before)
         self.assertEqual(list((self.profile / "chrome").glob("backup-*")), [backup])
 
     def test_missing_chrome_is_created_without_backup(self):
@@ -146,9 +155,13 @@ class InstallTest(ThemeTestCase):
         (self.repo / "extension" / "fonts").rmdir()
         install_theme.install(self.repo, self.profile, NOW)
         self.assertFalse((self.profile / "chrome" / "fonts").exists())
-        before = (self.profile / "chrome" / "fonts").lstat()
+        source = self.profile / "chrome" / "fonts"
+        before = self.link_state(source)
+        info = source.lstat()
+        os.utime(source, ns=(info.st_atime_ns + 1_000_000_000, info.st_mtime_ns),
+                 follow_symlinks=False)
         self.assertEqual(install_theme.install(self.repo, self.profile, NOW), [])
-        self.assertEqual((self.profile / "chrome" / "fonts").lstat(), before)
+        self.assertEqual(self.link_state(source), before)
         self.assert_links()
         self.assertEqual(list((self.profile / "chrome").glob("backup-*")), [])
 
