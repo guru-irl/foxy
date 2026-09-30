@@ -49,12 +49,12 @@ for (const [slot, beforeTabId] of [[0, 11], [1, 12], [2, null], [3, null], [4, n
   });
 }
 
-test("a column's top targets its first row's window even when the current window has no rows", async () => {
+test("a column's top stays local when the current window has no rows", async () => {
   const board = await fixture();
   board.tabs.shift();
   board.pinned.shift();
   assert.deepEqual(resolveTabTarget(board, { zone: "tabs", slot: 0, tabId: 13 }, 1), {
-    kind: "tabs", windowId: 2, beforeTabId: 26,
+    kind: "tabs", windowId: 1, beforeTabId: null,
   });
   assert.deepEqual(resolveTabTarget(board, { zone: "pinned", slot: 0, tabId: 13 }, 1), {
     kind: "pinned", windowId: 1, beforeTabId: null,
@@ -112,6 +112,16 @@ test("the final loose tab is a no-op at the end, but moves windows at the bounda
   assert.equal(resolveTabTarget(board, { zone: "tabs", slot: 5, tabId: 36 }, 1), null);
   assert.deepEqual(resolveTabTarget(board, { zone: "tabs", slot: 4, tabId: 36 }, 1), {
     kind: "tabs", windowId: 2, beforeTabId: null,
+  });
+});
+
+test("the last local pin is a no-op when foreign pin slots redirect to the local end", async () => {
+  const board = await fixture();
+  for (const slot of [2, 3, 4, 5]) {
+    assert.equal(resolveTabTarget(board, { zone: "pinned", slot, tabId: 12 }, 1), null);
+  }
+  assert.deepEqual(resolveTabTarget(board, { zone: "pinned", slot: 4, tabId: 11 }, 1), {
+    kind: "pinned", windowId: 1, beforeTabId: null,
   });
 });
 

@@ -1,4 +1,17 @@
-/** Resolve a row insertion slot to a move target; null means no change. */
+/**
+ * @typedef {Object} TabDrop
+ * @property {"group"|"tabs"|"pinned"|"new-group"} zone
+ * @property {number} tabId The dragged tab; required to suppress no-op drops.
+ * @property {number} [slot] Insertion slot (not needed for new-group).
+ * @property {number} [groupId] Group column ID when zone is group.
+ */
+
+/**
+ * Resolve a row insertion slot to a move target; null means no change.
+ * @param {Object} board
+ * @param {TabDrop} drop
+ * @param {number} currentWindowId
+ */
 export function resolveTabTarget(board, drop, currentWindowId) {
   if (drop.zone === "new-group") return { kind: "new-group", windowId: currentWindowId };
 
@@ -15,6 +28,9 @@ export function resolveTabTarget(board, drop, currentWindowId) {
     rows = board[drop.zone].flatMap(section => section.rows);
     const { windowId, beforeId } = adjacentTarget(rows, drop.slot, currentWindowId);
     target = { kind: drop.zone, windowId, beforeTabId: beforeId };
+    if (drop.zone === "tabs" && drop.slot === 0 && board.tabs[0]?.windowId !== currentWindowId) {
+      target = { kind: "tabs", windowId: currentWindowId, beforeTabId: null };
+    }
     if (drop.zone === "pinned" && windowId !== currentWindowId) {
       target = { kind: "pinned", windowId: currentWindowId, beforeTabId: null };
     }
@@ -25,6 +41,10 @@ export function resolveTabTarget(board, drop, currentWindowId) {
   // Check the resolved window, not just the row position: a foreign pin must
   // still move here, even when it sits just above the original drop slot.
   if (drop.tabId != null) {
+    if (target.kind === "pinned" && target.windowId === currentWindowId && target.beforeTabId === null &&
+        board.pinned.find(section => section.windowId === currentWindowId)?.rows.at(-1)?.id === drop.tabId) {
+      return null;
+    }
     const above = rows[drop.slot - 1];
     if (target.beforeTabId === drop.tabId ||
         (above?.id === drop.tabId && above.windowId === target.windowId)) return null;
