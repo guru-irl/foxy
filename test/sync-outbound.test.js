@@ -132,6 +132,25 @@ for (const reason of ["ungrouped", "closed"]) test(`${reason} tab removes one bo
   assert.deepEqual(await loadState(f.api), f.state);
 });
 
+for (const reason of ["ungrouped", "closed", "unsyncable"]) test(`${reason} removal asks the controller to schedule a queue-owned flush with removeDelayMs`, async () => {
+  const scheduled = [];
+  const f = await synced({ removeDelayMs: 5, schedule: ms => scheduled.push(ms) });
+  if (reason === "closed") {
+    await f.api.tabs.remove(10);
+    f.outbound.tabRemoved(10, { isWindowClosing: false });
+  } else {
+    if (reason === "ungrouped") await f.api.tabs.ungroup(10);
+    else await f.api.tabs.update(10, { url: "about:blank" });
+    await f.outbound.syncTab(10);
+  }
+  assert.deepEqual(scheduled, [5]);
+  assert.deepEqual(await f.pages(), abc);
+  assert.deepEqual(writes(f.ff), []);
+  f.tick(5);
+  await f.outbound.flush();
+  assert.deepEqual(await f.pages(), [abc[0], abc[2]]);
+});
+
 test("completed navigation updates URL and title in one delta and records lastSynced", async () => {
   const f = await synced(), bookmarkId = f.state.tabs[10].bookmarkId;
   await f.api.tabs.update(10, { url: url("new") });
@@ -229,12 +248,77 @@ test("new pinned tabs in two windows share one Pinned folder with window-local p
   ] });
   for (const id of [8, 3, 6, 2]) await f.outbound.syncTab(id);
   assert.deepEqual(await f.pages(f.state.pinnedId), [
-    { title: "P3", url: url("p3") }, { title: "P4", url: url("p4") },
     { title: "P1", url: url("p1") }, { title: "P2", url: url("p2") },
+    { title: "P3", url: url("p3") }, { title: "P4", url: url("p4") },
   ]);
   assert.equal(Object.keys(f.state.tabs).length, 4);
   assert.ok(Object.values(f.state.tabs).every(entry => entry.folderId === f.state.pinnedId));
   assert.equal(writes(f.ff).length, 4);
+});
+
+async function interleavedPins() {
+  const f = await fixture({ windows: [{ id: 1, focused: true }, { id: 2 }], groups: [], tabs: [
+    { id: 8, windowId: 1, pinned: true, url: url("p1"), title: "P1" },
+    { id: 3, windowId: 1, pinned: true, url: url("p2"), title: "P2" },
+    { id: 6, windowId: 2, pinned: true, url: url("p3"), title: "P3" },
+    { id: 2, windowId: 2, pinned: true, url: url("p4"), title: "P4" },
+  ] });
+  // Simulate a shared tree with bookmarks interleaved by window, as inbound
+  // matching can supply. Window 1 is P1, P2; window 2 is P3, P4.
+  for (const id of [8, 6, 3, 2]) {
+    const tab = await f.api.tabs.get(id);
+    const bookmark = await f.api.bookmarks.create({ parentId: f.state.pinnedId, url: tab.url, title: tab.title });
+    f.state.tabs[id] = { bookmarkId: bookmark.id, folderId: f.state.pinnedId, url: tab.url, title: tab.title };
+  }
+  await saveState(f.api, f.state);
+  f.ff.calls.length = 0;
+  return f;
+}
+
+test("interleaved pins keep per-window relative order and a second full pass makes no bookmark calls", async () => {
+  const f = await interleavedPins();
+  const expected = [
+    { title: "P1", url: url("p1") }, { title: "P3", url: url("p3") },
+    { title: "P2", url: url("p2") }, { title: "P4", url: url("p4") },
+  ];
+  for (const id of [8, 3, 6, 2]) await f.outbound.syncTab(id);
+  assert.deepEqual(await f.pages(f.state.pinnedId), expected);
+  assert.deepEqual(writes(f.ff), []);
+  f.ff.calls.length = 0;
+  for (const id of [8, 3, 6, 2]) await f.outbound.syncTab(id);
+  assert.deepEqual(await f.pages(f.state.pinnedId), expected);
+  assert.deepEqual(writes(f.ff), []);
+});
+
+test("a new pin with no earlier same-window pin appends after other windows' bookmarks", async () => {
+  const f = await interleavedPins();
+  const pin = await f.api.tabs.create({ windowId: 2, index: 0, pinned: true, active: false, url: url("new-pin") });
+  await f.outbound.syncTab(pin.id);
+  assert.deepEqual(await f.pages(f.state.pinnedId), [
+    { title: "P1", url: url("p1") }, { title: "P3", url: url("p3") },
+    { title: "P2", url: url("p2") }, { title: "P4", url: url("p4") },
+    { title: url("new-pin"), url: url("new-pin") },
+  ]);
+  assert.deepEqual(writes(f.ff).map(call => call.api), ["bookmarks.create"]);
+  f.ff.calls.length = 0;
+  await f.outbound.syncTab(pin.id);
+  assert.deepEqual(writes(f.ff), []);
+});
+
+test("an existing out-of-order pin moves right after its same-window predecessor using the final index", async () => {
+  const f = await interleavedPins();
+  await f.api.bookmarks.move(f.state.tabs[3].bookmarkId, { index: 0 });
+  f.ff.calls.length = 0;
+  await f.outbound.syncTab(3);
+  assert.deepEqual(await f.pages(f.state.pinnedId), [
+    { title: "P1", url: url("p1") }, { title: "P2", url: url("p2") },
+    { title: "P3", url: url("p3") }, { title: "P4", url: url("p4") },
+  ]);
+  assert.deepEqual(writes(f.ff), [{ api: "bookmarks.move", args: [f.state.tabs[3].bookmarkId,
+    { parentId: f.state.pinnedId, index: 1 }] }]);
+  f.ff.calls.length = 0;
+  for (const id of [8, 3, 6, 2]) await f.outbound.syncTab(id);
+  assert.deepEqual(writes(f.ff), []);
 });
 
 test("window close keeps pins, group bookmarks and tab entries, cancelling already pending removals", async () => {

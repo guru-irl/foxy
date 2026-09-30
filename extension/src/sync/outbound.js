@@ -4,11 +4,13 @@ import { folderOfGroup, groupOfFolder } from "./state.js";
 /**
  * Call every method through the controller's serial queue, including flush().
  * Removal deadlines are drained by flush, not by an out-of-queue timer. The
- * controller schedules that drain after removeDelayMs. Inbound owns quietUntil
+ * schedule(delayMs) asks the controller to enqueue that drain, without awaiting
+ * the controller's queue from inside a job. Inbound owns quietUntil
  * (and uses quietMs when it navigates or creates a tab).
  */
 export function createOutbound({
   api, getState, save, now = Date.now, removeDelayMs = 2000, quietMs = 10000, extensionBaseUrl,
+  schedule = () => {},
 }) {
   const pending = new Map();
   const warn = error => console.warn("Foxy: outbound sync failed", error);
@@ -23,6 +25,7 @@ export function createOutbound({
     const entry = getState().tabs[tabId];
     if (!entry || pending.has(tabId)) return;
     pending.set(tabId, { bookmarkId: entry.bookmarkId, folderId: entry.folderId, due: now() + removeDelayMs });
+    schedule(removeDelayMs);
   }
 
   // Query current positions, never the numeric-key order of state.tabs.
@@ -36,8 +39,17 @@ export function createOutbound({
       const nodes = await read(() => api.bookmarks.get(state.tabs[other.id].bookmarkId));
       const previous = nodes?.[0];
       if (!previous || previous.parentId !== folderId) continue;
+      // Pins share one folder across windows. Already-correct relative order
+      // must not be tightened into adjacency, which would make windows fight.
+      if (tab.pinned && bookmark?.parentId === folderId && bookmark.index > previous.index) {
+        return bookmark.index;
+      }
       // Firefox move() interprets index AFTER removing the moving bookmark.
       return previous.index + 1 - Number(bookmark?.parentId === folderId && bookmark.index < previous.index);
+    }
+    if (tab.pinned) {
+      if (bookmark?.parentId === folderId) return bookmark.index;
+      return (await api.bookmarks.getChildren(folderId)).length;
     }
     return 0;
   }
