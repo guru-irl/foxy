@@ -54,8 +54,8 @@ export function createOutbound({
     const previous = await neighbour(members.filter(other => other.index < tab.index).sort((a, b) => b.index - a.index));
     const next = await neighbour(members.filter(other => other.index > tab.index).sort((a, b) => a.index - b.index));
     if (bookmark?.parentId === folderId) {
-      // No position satisfies inverted neighbours. Their own sync repairs them.
-      if (previous && next && previous.index > next.index) return bookmark.index;
+      // No position satisfies inverted neighbours. Follow the earlier tab's bookmark.
+      if (previous && next && previous.index > next.index) return bookmark.index < previous.index ? previous.index : previous.index + 1;
       // Firefox move() interprets index AFTER removing the moving bookmark.
       if (previous && bookmark.index < previous.index) return previous.index;
       if (next && bookmark.index > next.index) return next.index;

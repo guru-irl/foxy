@@ -461,6 +461,50 @@ test("newtab, home, blank and every extension page are skipped without bookmarks
   assert.equal(writes(f.ff).length, 2);
 });
 
+function* permutations(items) {
+  if (!items.length) { yield []; return; }
+  for (const [index, item] of items.entries()) {
+    for (const rest of permutations(items.filter((_, i) => i !== index))) yield [item, ...rest];
+  }
+}
+
+for (const pinned of [false, true]) test(`bookmark permutations: ${pinned ? "pins" : "group tabs"} converge and isolated middle sync writes at most once`, async (t) => {
+  for (const size of [3, 4, 5]) {
+    const labels = ["A", "B", "C", "D", "E"].slice(0, size);
+    for (const order of permutations(labels)) await t.test(order.join(""), async () => {
+      const members = labels.map((title, index) => ({ id: index + 1, windowId: 1,
+        ...(pinned ? { pinned: true } : { groupId: 7 }), title, url: url(title.toLowerCase()) }));
+      const f = await fixture({ groups: pinned ? [] : [group], tabs: members });
+      if (pinned) for (const tab of members) await f.outbound.syncTab(tab.id);
+      else await f.outbound.syncGroup(7);
+      const folderId = pinned ? f.state.pinnedId : f.folder();
+      const before = structuredClone(f.state.tabs);
+      async function resetOrder() {
+        for (const [index, label] of order.entries()) {
+          await f.api.bookmarks.move(f.state.tabs[labels.indexOf(label) + 1].bookmarkId, { index });
+        }
+        await f.ff.settle();
+        f.ff.calls.length = 0;
+      }
+      await resetOrder();
+      const middleId = members[Math.floor(size / 2)].id;
+      for (let repeat = 0; repeat < 5; repeat++) await f.outbound.syncTab(middleId);
+      assert.ok(writes(f.ff).length <= 1, `isolated middle sync wrote ${writes(f.ff).length} times`);
+      await resetOrder();
+      let stable = false;
+      for (let pass = 0; pass < 5; pass++) {
+        f.ff.calls.length = 0;
+        for (const tab of members) await f.outbound.syncTab(tab.id);
+        if (!writes(f.ff).length) { stable = true; break; }
+      }
+      assert.ok(stable, "must reach a no-write pass within five passes");
+      assert.deepEqual((await f.children(folderId)).map(node => node.title), labels,
+        `starting order ${order.join("")} got stuck`);
+      assert.deepEqual(f.state.tabs, before);
+    });
+  }
+});
+
 for (const pinned of [false, true]) for (const unsyncable of ["about:blank", "about:newtab", "about:home", "moz-extension://foxy-test/newtab.html"]) {
   test(`unsyncable URL: ${unsyncable} in the same ${pinned ? "pinned" : "group"} folder keeps its entry and bookmark`, async (t) => {
     const f = await synced();
@@ -638,8 +682,8 @@ for (const pinned of [false, true]) test(`inverted neighbours: repeated middle $
   f.ff.calls.length = 0;
   for (let repeat = 0; repeat < 3; repeat++) {
     await f.outbound.syncTab(10);
-    assert.deepEqual(await f.pages(folderId), [abc[2], abc[1], abc[0]]);
-    assert.deepEqual(writes(f.ff), []);
+    assert.deepEqual(await f.pages(folderId), [abc[2], abc[0], abc[1]]);
+    assert.deepEqual(writes(f.ff).map(call => call.api), ["bookmarks.move"]);
   }
   for (const id of [30, 10, 20]) await f.outbound.syncTab(id);
   assert.deepEqual(await f.pages(folderId), abc);
