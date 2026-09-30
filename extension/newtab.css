@@ -1,5 +1,5 @@
-/* Foxy. Neutral glass: no borders, outlines or shadows; color
-   only in the small group dots. The page is transparent so the window's glass
+/* Foxy. Neutral glass: no borders, outlines or panel shadows; color
+   and glow only in the small group dots. The page is transparent so the window's glass
    (Liquid Fox userChrome.css) shows through. */
 
 @font-face {
@@ -184,17 +184,18 @@ button:focus-visible {
 }
 
 /* The dot's center lines up with the row icons below it: 10px + 6px here,
-   8px + 8px in the rows. At weight 800, width 50 and automatic optical size,
-   14.5px gives capitals exactly 12 raster rows tall in the Firefox preview.
-   Rounded ascent/descent are 15px/5px: on the 32px line the baseline is
-   21px down, so the baseline-aligned dot needs no additional row nudge. */
+   8px + 8px in the rows. At weight 800, stretch 50%, oblique 10deg and auto
+   optical size, flat HEIN capitals at 16px cover 12 rows in the Firefox
+   preview (>=50% coverage): a measured raster cap ratio of 12/16 = 0.75.
+   Both caps and dot fill occupy rows 400-411 in the 32px header (390-421),
+   centered without a top nudge. Round-letter overshoot is not cap height. */
 .card-title {
   height: var(--row);
   margin: 0;
   padding-inline: 10px 8px;
   overflow: hidden;
   font-family: "Foxy Sans", system-ui, sans-serif;
-  font-size: 14.5px;
+  font-size: 16px;
   line-height: var(--row);
   font-weight: 800;
   font-stretch: 50%;
@@ -210,17 +211,19 @@ button:focus-visible {
   min-width: 0;
 }
 
-/* The empty inline dot's baseline is its bottom edge. The nominal half-cap
-   offset is -0.809px at 14.5px; Firefox rounds both dot and capital edges
-   to the same 12 pixel rows. Verified with scripts/preview.py two-groups. */
+/* The empty inline dot's baseline is its bottom edge. Half the measured
+   raster cap ratio gives 0.375em - 6px (0px at 16px), aligning its 12px fill
+   with the flat cap tops and baseline. The restored sidebar glow extends
+   outside the fill and is excluded from the row measurement. */
 .dot {
   display: inline-block;
   width: 12px;
   height: 12px;
   margin-inline-end: 10px;
-  vertical-align: calc(0.358em - 6px);
+  vertical-align: calc(0.375em - 6px);
   border-radius: 50%;
   background-image: linear-gradient(135deg, color-mix(in oklab, var(--g1) 75%, transparent), var(--g2));
+  box-shadow: 0 0 6px color-mix(in oklab, var(--g2) 50%, transparent);
 }
 
 .card[data-color="red"] { --g1: oklch(0.86 0.10 45); --g2: oklch(0.72 0.17 18); }

@@ -105,7 +105,7 @@ test("group titles are heavy, condensed, slanted capitals without extra letter s
   assert.equal(title["letter-spacing"], "0");
 });
 
-test("no typography role overrides the default zero roundness or slants other text", () => {
+test("no typography role overrides the default zero roundness or sets a slant axis", () => {
   for (const selector of ["body", ".clock-time", ".clock-date", ".card-title"]) {
     const settings = rule(selector)["font-variation-settings"] ?? "";
     for (const match of settings.matchAll(/"ROND"\s+(-?\d*\.?\d+)/gi)) {
@@ -113,7 +113,26 @@ test("no typography role overrides the default zero roundness or slants other te
     }
     assert.doesNotMatch(settings, /"slnt"/i);
   }
-  assert.equal(rule(".dot").width, "12px");
-  assert.equal(rule(".dot").height, "12px");
-  assert.equal(rule(".dot")["box-shadow"], undefined);
+});
+
+test("only group titles have oblique or italic styling in any style rule", () => {
+  const slanted = [];
+  const source = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const match of source.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selector = match[1].trim();
+    // Font-face descriptors expose available styles, not styles applied to text.
+    if (selector.startsWith("@")) continue;
+    const styles = declarations(match[2]);
+    if (/\b(?:oblique|italic)\b/i.test(`${styles["font-style"] ?? ""} ${styles.font ?? ""}`)) {
+      slanted.push(...selector.split(",").map((part) => part.trim()));
+    }
+  }
+  assert.deepEqual(slanted, [".card-title"]);
+});
+
+test("the 12px group dot keeps the sidebar's original glow", () => {
+  const dot = rule(".dot");
+  assert.equal(dot.width, "12px");
+  assert.equal(dot.height, "12px");
+  assert.equal(dot["box-shadow"], "0 0 6px color-mix(in oklab, var(--g2) 50%, transparent)");
 });
