@@ -8,10 +8,12 @@ import os
 from pathlib import Path
 import queue
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 from urllib.parse import urlencode, urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -90,22 +92,37 @@ class ResultsHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
     def do_POST(self):
-        if urlsplit(self.path).path != "/results":
+        route = urlsplit(self.path).path
+        if route not in ("/results", "/progress"):
             self.send_error(404)
             return
         try:
             size = int(self.headers.get("Content-Length", "0"))
             if not 0 < size <= 2_000_000:
                 raise ValueError("invalid result size")
-            parsed = parse_results(self.rfile.read(size))
+            body = self.rfile.read(size)
+            if route == "/progress":
+                progress = json.loads(body)
+                if not isinstance(progress, dict) or not isinstance(progress.get("name"), str):
+                    raise ValueError("expected a progress test name")
+                self.server.last_test = progress["name"]
+                self.send_response(204)
+                self.end_headers()
+                return
+            parsed = parse_results(body)
         except (ValueError, UnicodeError) as error:
             self.send_error(400, str(error))
+            if route == "/results":
+                self.report(str(error))
             return
         self.send_response(204)
         self.end_headers()
-        # Only the first valid report belongs to this run.
+        self.report(parsed)
+
+    def report(self, outcome):
+        # The first report, including an invalid payload, completes the run.
         try:
-            self.server.results.put_nowait(parsed)
+            self.server.results.put_nowait(outcome)
         except queue.Full:
             pass
 
@@ -136,6 +153,7 @@ def run(root, files, *, firefox=FIREFOX, timeout=120):
     handler = functools.partial(ResultsHandler, directory=str(root))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     server.results = queue.Queue(maxsize=1)
+    server.last_test = None
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     process = None
@@ -149,29 +167,57 @@ def run(root, files, *, firefox=FIREFOX, timeout=120):
             temp.mkdir()
             url = (f"http://127.0.0.1:{server.server_port}/test/browser/run.html?"
                    + urlencode({"files": ",".join(files)}))
+            log_path = directory / "firefox.log"
+            retain_log = False
             try:
-                process = subprocess.Popen(
-                    [str(firefox), "--headless", "--no-remote", "-profile", str(profile), url],
-                    env={**os.environ, "TMPDIR": str(temp)},
-                    start_new_session=True,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                )
-            except OSError as error:
-                print(f"Foxy: could not launch Firefox: {error}")
-                return 2
-            try:
-                passed, failed, lines = server.results.get(timeout=timeout)
-            except queue.Empty:
-                print(f"Foxy: browser tests timed out after {timeout:g} s")
-                return exit_code(0, 0, True)
+                with log_path.open("wb") as log:
+                    try:
+                        process = subprocess.Popen(
+                            [str(firefox), "--headless", "--no-remote", "-profile", str(profile), url],
+                            env={**os.environ, "TMPDIR": str(temp)},
+                            start_new_session=True, stdout=log, stderr=log,
+                        )
+                    except OSError as error:
+                        retain_log = True
+                        print(f"Foxy: could not launch Firefox: {error}")
+                        return 2
+                    try:
+                        deadline = time.monotonic() + timeout
+                        while True:
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0:
+                                retain_log = True
+                                detail = f"; last test started: {server.last_test}" if server.last_test else ""
+                                print(f"Foxy: browser tests timed out after {timeout:g} s{detail}")
+                                return 2
+                            try:
+                                outcome = server.results.get(timeout=min(0.1, remaining))
+                                break
+                            except queue.Empty:
+                                if process.poll() is not None:
+                                    retain_log = True
+                                    print(f"Foxy: Firefox exited before reporting results (exit {process.returncode})")
+                                    return 2
+                        if isinstance(outcome, str):
+                            retain_log = True
+                            print(f"Foxy: invalid browser results: {outcome}")
+                            return 2
+                        passed, failed, lines = outcome
+                        if files and passed + failed == 0:
+                            failed, lines = 1, ["✗ browser test discovery: no tests registered"]
+                        for line in lines:
+                            print(line)
+                        print(f"{passed} passed, {failed} failed")
+                        return exit_code(passed, failed, False)
+                    finally:
+                        # Kill before deleting the profile and TMPDIR, on every exit path.
+                        terminate_firefox(process)
+                        process = None
             finally:
-                # Kill before deleting the profile and TMPDIR, on every exit path.
-                terminate_firefox(process)
-                process = None
-            for line in lines:
-                print(line)
-            print(f"{passed} passed, {failed} failed")
-            return exit_code(passed, failed, False)
+                if retain_log:
+                    saved_log = scratch / (directory.name + ".log")
+                    shutil.copyfile(log_path, saved_log)
+                    print(f"Foxy: Firefox log: {saved_log}")
     finally:
         if process is not None:
             terminate_firefox(process)
@@ -180,7 +226,7 @@ def run(root, files, *, firefox=FIREFOX, timeout=120):
         thread.join()
 
 
-def main(argv=None):
+def _main(argv, firefox):
     argv = sys.argv[1:] if argv is None else argv
     files = []
     for name in argv:
@@ -195,7 +241,25 @@ def main(argv=None):
         except ValueError:
             print(f"Foxy: test file is outside the worktree: {name}")
             return 2
-    return run(ROOT, files if argv else test_files(ROOT))
+    return run(ROOT, files if argv else test_files(ROOT), firefox=firefox)
+
+
+def main(argv=None, *, firefox=FIREFOX):
+    previous = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGHUP)}
+
+    def interrupted(sig, frame):
+        # A second termination signal must not interrupt cleanup.
+        for handled in previous:
+            signal.signal(handled, signal.SIG_IGN)
+        raise SystemExit(128 + sig)
+
+    try:
+        for sig in previous:
+            signal.signal(sig, interrupted)
+        return _main(argv, firefox)
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
 
 
 if __name__ == "__main__":
