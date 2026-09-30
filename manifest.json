@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Liquid Fox New Tab",
+  "version": "1.0.0",
+  "description": "A clock with the current window's pinned tabs and tab groups on the new tab page.",
+  "permissions": ["tabs", "tabGroups"],
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "chrome_settings_overrides": {
+    "homepage": "newtab.html"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "{4408f971-7930-41ea-9f93-b01231e40861}",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  }
+}

@@ -1,0 +1,65 @@
+/* Liquid Fox New Tab. Neutral glass: no borders, outlines or shadows; color
+   only in the small group dots. The page is transparent so the window's glass
+   (Liquid Fox userChrome.css) shows through. */
+
+@font-face {
+  font-family: "LF Danfo";
+  src: url("fonts/Danfo.ttf") format("truetype");
+  font-display: block;
+}
+
+@font-face {
+  font-family: "LF Bebas";
+  src: url("fonts/BebasNeue-Regular.ttf") format("truetype");
+  font-display: block;
+}
+
+:root {
+  color-scheme: light dark;
+  --text: light-dark(rgba(0, 0, 0, 0.85), rgba(255, 255, 255, 0.92));
+  --text-muted: light-dark(rgba(0, 0, 0, 0.55), rgba(255, 255, 255, 0.6));
+  --gap: 12px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  background: transparent;
+}
+
+body {
+  color: var(--text);
+  font: 13px system-ui, sans-serif;
+}
+
+.page {
+  width: min(860px, 100% - 64px);
+  margin: 10vh auto 64px;
+  container-type: inline-size;
+}
+
+/* --- Clock ------------------------------------------------------------- */
+
+.clock {
+  text-align: center;
+}
+
+/* Danfo is a heavy display face with one weight: no synthetic bold. */
+.clock-time {
+  display: block;
+  font: normal clamp(88px, 11vw, 160px) / 1 "LF Danfo", serif;
+}
+
+/* text-indent matches the trailing letter-spacing after the last letter, so
+   the date's letters are centered, not the letters plus one trailing gap. */
+.clock-date {
+  margin-top: 8px;
+  font: normal 22px / 1 "LF Bebas", sans-serif;
+  letter-spacing: 0.12em;
+  text-indent: 0.12em;
+  color: var(--text-muted);
+}
