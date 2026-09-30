@@ -1,0 +1,154 @@
+/*
+ * Liquid Fox companion: transparent new tab page.
+ *
+ * Requires (user.js in the profile folder):
+ *   browser.tabs.allow_transparent_browser = true
+ * plus section 5 of userChrome.css, which drops the backstop behind blank pages.
+ */
+
+/* Unique family names shared with the chrome theme and extension page. */
+@font-face {
+  font-family: "Foxy Sans";
+  src: url("fonts/GoogleSansFlex.ttf") format("truetype");
+  font-weight: 1 1000;
+  font-stretch: 25% 151%;
+  font-style: oblique 0deg 10deg;
+}
+
+@font-face {
+  font-family: "Foxy Mono";
+  src: url("fonts/CascadiaMono.ttf") format("truetype");
+  font-weight: 200 700;
+}
+
+@-moz-document url-prefix("about:newtab"), url-prefix("about:home") {
+  /* --- Let the window's glass show through --- */
+  :root,
+  body {
+    background: transparent !important;
+  }
+
+  /* --- Search box: glass pill matching the toolbar address bar --- */
+  content-search-handoff-ui {
+    --content-search-handoff-ui-background-color: light-dark(rgba(255, 255, 255, 0.30), rgba(255, 255, 255, 0.06)) !important;
+    --content-search-handoff-ui-fakefocus-border-color: light-dark(rgba(0, 0, 0, 0.20), rgba(255, 255, 255, 0.22)) !important;
+    --content-search-handoff-ui-fakefocus-box-shadow-inner: transparent !important;
+    --content-search-handoff-ui-fakefocus-box-shadow-outer: transparent !important;
+    /* No search engine logo */
+    --content-search-handoff-ui-engine-icon: none !important;
+  }
+
+  /* (inside the search box's shadow DOM; user styles reach into it) */
+  .search-handoff-button {
+    box-shadow: none !important;
+    /* Was 48px to make room for the logo */
+    padding-inline-start: 24px !important;
+  }
+
+  /* Condensed upright "SEARCH" instead of the long prompt. The original
+     text stays in place but invisible, keeping Firefox's caret position.
+     With line-height 1, nominal Google Sans Flex metrics estimate the
+     capital centre at 0.482em from the line top:
+     (1 + 0.966 ascent - 0.286 descent - 0.716 nominal cap height) / 2.
+     Retain the 48.2% translation as an estimate, not the 16px sidebar
+     labels' 0.75em raster calibration; ink edges vary with size, axes
+     and pixel snapping. */
+  .fake-textbox {
+    visibility: hidden !important;
+  }
+
+  .search-handoff-button::after {
+    content: "SEARCH";
+    position: absolute;
+    top: 50%;
+    /* padding above + the text box's own start margin */
+    inset-inline-start: calc(24px + var(--space-xsmall, 4px));
+    translate: 0 -48.2%;
+    font-family: "Foxy Sans", system-ui, sans-serif !important;
+    font-size: 24px !important;
+    font-weight: 800 !important;
+    font-stretch: 50% !important;
+    font-style: normal !important;
+    font-variation-settings: "ROND" 0 !important;
+    letter-spacing: 0 !important;
+    line-height: 1;
+    white-space: nowrap;
+    opacity: 0.54;
+    pointer-events: none;
+  }
+  /* Customize (pencil) button in the corner. The same settings are in
+     Settings > Home. */
+  .personalizeButtonWrapper {
+    display: none !important;
+  }
+}
+
+/* --- Settings and other about: pages: no purple ------------------------------
+   Nova builds page backgrounds, cards, text, buttons, and the accent
+   (selected items, checkboxes, radio buttons, primary buttons, focus rings)
+   from violet and violet-tinted gray palettes. Each is replaced by a plain
+   gray of the same lightness, so contrast stays as designed. Same block as
+   section 0 of userChrome.css. Limited to Firefox's own pages (about:,
+   chrome:) so websites that happen to use the same variable names are left
+   alone. Original values in the comments. */
+@-moz-document url-prefix("about:"), url-prefix("chrome:") {
+  :root {
+    --color-gray-0: #fcfcfc !important; /* #fcfbff */
+    --color-gray-05: #f7f7f7 !important; /* #f7f6fb */
+    --color-gray-10: #eeeeee !important; /* #efedf2 */
+    --color-gray-15: #e3e3e3 !important; /* #e3e2e7 */
+    --color-gray-20: #d6d6d6 !important; /* #d6d5da */
+    --color-gray-25: #c7c7c7 !important; /* #c7c6cb */
+    --color-gray-30: #b7b7b7 !important; /* #b7b6ba */
+    --color-gray-35: #a5a5a5 !important; /* #a6a4a9 */
+    --color-gray-40: #939393 !important; /* #949297 */
+    --color-gray-45: #808080 !important; /* #817f84 */
+    --color-gray-50: #676767 !important; /* #67666a */
+    --color-gray-55: #515151 !important; /* #515054 */
+    --color-gray-60: #3f3f3f !important; /* #3f3e42 */
+    --color-gray-65: #303030 !important; /* #312f33 */
+    --color-gray-70: #252525 !important; /* #252428 */
+    --color-gray-75: #1c1c1c !important; /* #1d1b1f */
+    --color-gray-80: #161616 !important; /* #171519 */
+    --color-gray-85: #131313 !important; /* #131215 */
+    --color-gray-90: #121212 !important; /* #121114 */
+    --color-violet-0: #f0f0f0 !important; /* #f5ecff */
+    --color-violet-10: #e4e4e4 !important; /* #eaddff */
+    --color-violet-20: #cdcdcd !important; /* #d4c1ff */
+    --color-violet-30: #b0b0b0 !important; /* #b89cff */
+    --color-violet-40: #919191 !important; /* #9871ff */
+    --color-violet-50: #717171 !important; /* #764edd */
+    --color-violet-60: #545454 !important; /* #5939a8 */
+    --color-violet-70: #3b3b3b !important; /* #3e2976 */
+    --color-violet-80: #252525 !important; /* #271c48 */
+    --color-violet-90: #161616 !important; /* #161423 */
+    --color-violet-desaturated-0: #f1f1f1 !important; /* #f2f0f8 */
+    --color-violet-desaturated-10: #e5e5e5 !important; /* #e7e1f8 */
+    --color-violet-desaturated-20: #cecece !important; /* #d2c8ec */
+    --color-violet-desaturated-30: #b2b2b2 !important; /* #b6aad9 */
+    --color-violet-desaturated-40: #919191 !important; /* #9687c0 */
+    --color-violet-desaturated-50: #717171 !important; /* #75669f */
+    --color-violet-desaturated-60: #545454 !important; /* #584a7d */
+    --color-violet-desaturated-70: #3b3b3b !important; /* #3e315f */
+    --color-violet-desaturated-80: #252525 !important; /* #281d44 */
+    --color-violet-desaturated-90: #161616 !important; /* #180e30 */
+    --color-violet-100: #262626 !important; /* oklch(27% 0.1 290) */
+    --color-violet-110: #161616 !important; /* oklch(20% 0.05 290) */
+  }
+}
+
+/* --- Pages that rely on the default page color ---------------------------
+   With the pref above, a page that paints no background is see-through and
+   shows the white backstop from userChrome.css. That's what Firefox draws for
+   ordinary unstyled pages anyway, but plain-text files and view-source follow
+   dark mode and would end up as light text on white. Give them their normal
+   page color back. */
+:root:has(> head > link[href="resource://content-accessible/plaintext.css"]) {
+  background-color: Canvas;
+}
+
+@-moz-document url-prefix("view-source:") {
+  :root {
+    background-color: Canvas;
+  }
+}
