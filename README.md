@@ -60,6 +60,20 @@ They launch throwaway Firefox instances; `npm test` never launches Firefox.
 
 Before pushing: the scan reads files from the working tree, so commit (or stash) first, then run `python3 scripts/check_private.py` (patterns stay outside the repo in `~/.config/foxy/scan-patterns.txt`).
 
+## Smoke check in real Firefox
+
+Run `python3 scripts/smoke_firefox.py --keep-going` (or `npm run test:smoke`)
+to temporarily install the unpacked add-on in headless Firefox. Use `--firefox PATH`
+to select another Firefox executable. Without `--keep-going`, checks stop at the
+first failure; any failure exits 1. This is separate from `npm test`.
+
+The check covers the real newtab override, board and clock, bundled fonts,
+bookmark-backed sync startup and a grouped-tab round-trip. It prints extension
+console errors and warnings, and saves a board screenshot, console JSON and
+Firefox log under `.spider/scratch/smoke-<timestamp>/`. Its throwaway profile and
+artifacts are kept there. It never uses your real Firefox profile, signs the
+add-on or contacts AMO; external page loads are blocked and are not needed for sync.
+
 ## Sign and install
 
 1. Create an API key at https://addons.mozilla.org/developers/addon/api/key/ and save it.
