@@ -1,5 +1,5 @@
 import { test, assert, fixture, dispatchDrag, nextFrame } from "./harness.js";
-import { createFirefox } from "../fakes/firefox.js";
+import { createBoardFirefox as createFirefox } from "./controller.js";
 import { buildBoard } from "../../extension/src/board/model.js";
 
 const TAB = "application/x-foxy-tab", GROUP = "application/x-foxy-group";
@@ -578,3 +578,12 @@ for (const kind of ["tab", "group"]) {
     } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
   });
 }
+
+
+// Legacy tab-board tests should not exercise the absent saved-background error path.
+test("fix r1: legacy dnd controller helper reads without background warnings", async () => {
+  const warn = console.warn, warnings = [];
+  console.warn = (...args) => warnings.push(args);
+  try { await controller(); assert.deepEqual(warnings, []); }
+  finally { console.warn = warn; }
+});

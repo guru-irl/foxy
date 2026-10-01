@@ -29,7 +29,8 @@ function startClock(timeEl, dateEl) {
 }
 
 /** All board interactions share this state; DnD and editors set it via handlers. */
-export function createController(root, api, ui = { editGroupId: null, dragging: false, editing: false }) {
+export function createController(root, api, ui = { editGroupId: null, dragging: false, editing: false },
+  { maxWait = 30000 } = {}) {
   ui.confirmFolderId ??= null;
   ui.busy ??= new Set();
   let board;
@@ -40,6 +41,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let pendingSaved = false;
   let readsInFlight = 0;
   let savedReadsInFlight = 0;
+  let savedDirty = false;
   let savedGeneration = 0;
   let savedReply = { saved: [], missing: [] };
   let snapshot;
@@ -59,8 +61,9 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
 
   // Saved replies have their own request order: a bookmark-only read must not
   // invalidate an in-flight tab snapshot, nor can an old reply replace a new one.
-  async function readSaved() {
-    const mine = ++savedGeneration, viewGeneration = generation;
+  async function readSaved(retry = true) {
+    if (savedReadsInFlight) { savedDirty = true; return; }
+    const mine = ++savedGeneration;
     ++savedReadsInFlight;
     let reply;
     try {
@@ -75,23 +78,31 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
         console.warn("Foxy: could not read saved groups", error);
       }
     } finally { --savedReadsInFlight; }
-    if (mine !== savedGeneration) return;
-    if (viewGeneration !== generation || held()) {
-      pendingSaved = true;
-      enqueue();
-      return;
+    try {
+      if (mine === savedGeneration) {
+        if (held()) {
+          pendingSaved = true;
+          enqueue();
+        } else {
+          // Saved data is independent of the tab snapshot's generation.
+          savedReply = reply;
+          if (snapshot) {
+            board = buildBoard({ ...snapshot, ...savedReply });
+            publish();
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("Foxy: could not publish saved groups", error);
+      if (retry) schedule(false);
     }
-    savedReply = reply;
-    if (snapshot) {
-      board = buildBoard({ ...snapshot, ...savedReply });
-      publish();
-    }
+    if (savedDirty) { savedDirty = false; refreshSaved(retry); }
   }
 
-  function refreshSaved() {
+  function refreshSaved(retry = true) {
     if (held()) { pendingSaved = true; return; }
     pendingSaved = false;
-    return readSaved();
+    return readSaved(retry);
   }
 
   async function refresh(retry = true) {
@@ -111,7 +122,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       pending = false;
       pendingSaved = false;
       // Do not await the background: startup settling can take up to 20s.
-      readSaved();
+      readSaved(retry);
       reading = true;
       ++readsInFlight;
       const [windows, tabs, groups, current] = await Promise.all([
@@ -173,7 +184,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       queued = false;
       if ((held() && !(pending && canCheckEdit())) || (!pending && !pendingSaved)) return;
       if (pending) refresh(retryQueued);
-      else refreshSaved();
+      else refreshSaved(retryQueued);
     });
   }
 
@@ -206,13 +217,21 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     // Busy is a UI-only publication, deliberately not deferred by action holds.
     publish();
     return action(async () => {
+      let timer;
       try {
-        const reply = await api.runtime.sendMessage(message);
+        const reply = await Promise.race([
+          api.runtime.sendMessage(message),
+          new Promise((resolve, reject) => {
+            timer = setTimeout(() => reject(new Error(`${message.type} timed out`)), maxWait);
+          }),
+        ]);
         if (reply?.ok !== true) throw new Error(`${message.type} was not accepted`);
         return reply;
       } finally {
+        clearTimeout(timer);
         ui.busy.delete(id);
         if (deleting && ui.confirmFolderId === id) ui.confirmFolderId = null;
+        publish();
       }
     });
   }

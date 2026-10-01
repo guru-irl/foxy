@@ -1,5 +1,5 @@
 import { test, assert, fixture, nextFrame, dispatchDrag, withPseudoState } from "./harness.js";
-import { createFirefox } from "../fakes/firefox.js";
+import { createBoardFirefox as createFirefox } from "./controller.js";
 import { buildBoard } from "../../extension/src/board/model.js";
 import { renderBoard } from "../../extension/src/board/render.js";
 
@@ -521,4 +521,13 @@ test("opening an actual editor invalidates an in-flight snapshot without losing 
     assert.equal((await ff.browser.tabGroups.get(101)).title, "In progress");
     assert.equal(node.querySelector('[data-tab-id="23"] .row-label').textContent, "https://example.com/inflight-edit");
   } finally { release?.(); ff.browser.tabs.query = query; key(node.querySelector(".name-editor") ?? node, "Escape"); await flush(ff); }
+});
+
+
+// Legacy tab-board tests should not exercise the absent saved-background error path.
+test("fix r1: legacy edit controller helper reads without background warnings", async () => {
+  const warn = console.warn, warnings = [];
+  console.warn = (...args) => warnings.push(args);
+  try { await controller(); assert.deepEqual(warnings, []); }
+  finally { console.warn = warn; }
 });

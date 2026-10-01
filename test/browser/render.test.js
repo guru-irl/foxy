@@ -1,5 +1,5 @@
 import { test, assert, fixture, nextFrame, withPseudoState } from "./harness.js";
-import { createFirefox } from "../fakes/firefox.js";
+import { createBoardFirefox as createFirefox } from "./controller.js";
 import { buildBoard } from "../../extension/src/board/model.js";
 
 const setup = () => ({
@@ -924,4 +924,13 @@ test("generic button interaction fills do not erase the group-dot colour", async
     dot.classList.add("focus-test");
     assert.ok(getComputedStyle(dot).backgroundImage.includes("gradient"), "generic focus fill must not erase the group colour");
   } finally { rule.selectorText = selector; }
+});
+
+
+// Legacy tab-board tests should not exercise the absent saved-background error path.
+test("fix r1: legacy render controller helper reads without background warnings", async () => {
+  const warn = console.warn, warnings = [];
+  console.warn = (...args) => warnings.push(args);
+  try { await controller(); assert.deepEqual(warnings, []); }
+  finally { console.warn = warn; }
 });

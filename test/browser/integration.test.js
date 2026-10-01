@@ -33,13 +33,13 @@ async function background(ff) {
   await sync.idle();
   return sync;
 }
-function mount(ff) {
+function mount(ff, options) {
   const page = document.createElement("main");
   const root = document.createElement("div");
   root.className = "board";
   root.style.height = "400px";
   page.append(root); fixture().append(page);
-  return { page, root, control: createController(root, ff.browser) };
+  return { page, root, control: createController(root, ff.browser, undefined, options) };
 }
 async function drain(ff, sync) {
   await ff.settle();
@@ -50,9 +50,9 @@ async function drain(ff, sync) {
   await nextFrame();
   assert.deepEqual(ff.errors, [], "fake event handlers must not swallow test errors");
 }
-async function setup(open = false) {
+async function setup(open = false, options) {
   const input = config(open), ff = createFirefox(input), sync = await background(ff);
-  const view = mount(ff);
+  const view = mount(ff, options);
   await view.control.refresh();
   await drain(ff, sync);
   if (!open) assert.equal(view.root.querySelectorAll(".saved-row").length, 2, "saved folders must reach the controller board");
@@ -289,7 +289,7 @@ test("integration: a stale saved reply cannot overwrite a newer bookmark snapsho
     await started.promise;
     await ff.applyRemoteBookmarks([{ id: "dev", parentId: "foxy", index: 1, title: "🔴 Newest" }]);
     await drain(ff, sync);
-    assert.equal(row(root).querySelector(".row-label").textContent, "Newest");
+    assert.equal(row(root).querySelector(".row-label").textContent, "Dev", "the follow-up waits for the active saved request");
     held.release(); await drain(ff, sync);
     assert.equal(row(root).querySelector(".row-label").textContent, "Newest");
   } finally { held.release(); ff.browser.runtime.sendMessage = send; await drain(ff, sync); }
@@ -399,6 +399,8 @@ for (const hold of ["drag", "edit"]) {
     assert.ok(control.ui.busy.has("dev"));
     await running; await drain(ff, sync);
     assert.equal(control.ui.busy.size, 0);
+    assert.equal(row(root).classList.contains("busy"), false, "busy removal must publish during the hold");
+    assert.equal(row(root).getAttribute("aria-busy"), "false");
     if (hold === "drag") control.handlers.onDragState(false);
     else control.handlers.onEditEnd();
     await drain(ff, sync);
@@ -457,3 +459,167 @@ for (const failure of ["reject", "false"]) {
     });
   });
 }
+
+// Removing the flight guard queues one background request per tab-event frame.
+test("fix r1: twenty tab frames share one slow saved request and one follow-up", async () => {
+  const { ff, sync, root, control } = await setup();
+  const send = ff.browser.runtime.sendMessage, held = gate(), started = gate();
+  let first = true;
+  ff.browser.runtime.sendMessage = async message => {
+    const reply = await send(message);
+    if (message.type === "foxy:saved" && first) { first = false; started.release(); await held.promise; }
+    return reply;
+  };
+  ff.calls.length = 0;
+  try {
+    await control.refresh(); await started.promise;
+    for (let i = 0; i < 20; i++) {
+      ff.fire("tabs.onMoved", 10, { windowId: 1, fromIndex: 1, toIndex: 1 });
+      await drain(ff, sync);
+    }
+    assert.equal(messages(ff, "foxy:saved").length, 1, "only one saved request may remain in flight");
+    assert.ok(root.querySelector('[data-tab-id="10"]'), "tab frames must not wait for saved");
+    held.release(); await drain(ff, sync);
+    assert.equal(messages(ff, "foxy:saved").length, 2, "dirty frames produce exactly one follow-up");
+  } finally { held.release(); ff.browser.runtime.sendMessage = send; await drain(ff, sync); }
+});
+
+// Using the tab generation to discard saved replies hides them until tab reads stop.
+test("fix r1: a saved reply renders during an ordinary in-flight tab refresh", async () => {
+  const { ff, sync, root, control } = await setup();
+  const send = ff.browser.runtime.sendMessage, query = ff.browser.tabs.query;
+  const savedHeld = gate(), followupHeld = gate(), savedStarted = gate(), tabsHeld = gate(), tabsStarted = gate();
+  let first = true, reading;
+  ff.browser.runtime.sendMessage = async message => {
+    const reply = await send(message);
+    if (message.type === "foxy:saved") {
+      if (first) { first = false; savedStarted.release(); await savedHeld.promise; }
+      else await followupHeld.promise;
+    }
+    return reply;
+  };
+  try {
+    await ff.applyRemoteBookmarks([{ id: "dev", parentId: "foxy", index: 1, title: "🔴 During read" }]);
+    await drain(ff, sync); await savedStarted.promise;
+    ff.browser.tabs.query = async options => {
+      const tabs = await query(options); tabsStarted.release(); await tabsHeld.promise; return tabs;
+    };
+    reading = control.refresh(); await tabsStarted.promise;
+    savedHeld.release(); await drain(ff, sync);
+    assert.equal(row(root).querySelector(".row-label").textContent, "During read", "saved must publish without waiting for the pending tab snapshot");
+  } finally {
+    savedHeld.release(); followupHeld.release(); tabsHeld.release();
+    ff.browser.runtime.sendMessage = send; ff.browser.tabs.query = query;
+    await reading; await drain(ff, sync);
+  }
+});
+
+
+// Without a bounded wait, busy and the action hold survive a lost reply forever.
+for (const [handler, type, id] of [["onOpenSaved", "foxy:open-saved", "dev"],
+  ["onDeleteSaved", "foxy:delete-saved", "dev"], ["onRestoreAll", "foxy:restore-all", "banner"],
+  ["onDismissMissing", "foxy:dismiss-missing", "banner"]]) {
+  test(`fix r1: ${type} times out, releases its hold once and ignores a late reply`, async () => {
+    const { ff, sync, control } = await setup(false, { maxWait: 150 });
+    const send = ff.browser.runtime.sendMessage, held = gate(), started = gate();
+    ff.browser.runtime.sendMessage = async message => {
+      const reply = await send(message);
+      if (message.type === type) { started.release(); await held.promise; }
+      return reply;
+    };
+    await warningsDuring(async warnings => {
+      let running, timer;
+      try {
+        if (handler === "onDeleteSaved") control.handlers.onConfirmDelete(id);
+        ff.calls.length = 0;
+        running = control.handlers[handler](id);
+        await started.promise; await drain(ff, sync);
+        ff.calls.length = 0; // Real mutation events have now been delivered under the hold.
+        const completed = await Promise.race([running.then(() => true),
+          new Promise(resolve => { timer = setTimeout(() => resolve(false), 500); })]);
+        assert.ok(completed, "a lost action reply must settle within maxWait");
+        await drain(ff, sync);
+        assert.equal(control.ui.busy.size, 0);
+        assert.equal(warnings.length, 1); assert.ok(warnings[0][0].startsWith("Foxy:"));
+        assert.ok(String(warnings[0][1]).includes("timed out"));
+        assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1, "timeout must re-read once");
+        assert.equal(messages(ff, "foxy:saved").length, 1);
+        if (handler === "onDeleteSaved") assert.equal(control.ui.confirmFolderId, null);
+        control.handlers.onConfirmDelete("coverage");
+        ff.calls.length = 0;
+        held.release(); await drain(ff, sync);
+        assert.equal(control.ui.confirmFolderId, "coverage", "late replies cannot change the new UI");
+        assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 0, "late replies cannot re-read again");
+        assert.equal(warnings.length, 1, "late replies cannot log again");
+        ff.browser.runtime.sendMessage = send;
+        await ff.browser.tabs.update(10, { url: "https://loose.example/after-timeout" }); await drain(ff, sync);
+        assert.equal(control.ui.busy.size, 0);
+        assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1, "timeout must release actionsInFlight");
+      } finally {
+        clearTimeout(timer); held.release(); ff.browser.runtime.sendMessage = send;
+        await running; await drain(ff, sync);
+      }
+    });
+  });
+}
+
+
+// A saved-only publication failure must enter the same bounded refresh retry path.
+for (const failures of [1, Infinity]) {
+  test(`fix r1: ${failures === 1 ? "transient" : "persistent"} saved publication failures warn and retry once`, async () => {
+    const { ff, sync, root } = await setup();
+    const replace = root.replaceChildren.bind(root);
+    let attempts = 0;
+    root.replaceChildren = (...nodes) => {
+      if (++attempts <= failures) throw new Error("Saved render interrupted");
+      replace(...nodes);
+    };
+    await warningsDuring(async warnings => {
+      try {
+        ff.calls.length = 0;
+        await ff.applyRemoteBookmarks([{ id: "dev", parentId: "foxy", index: 1, title: "🔴 Retried" }]);
+        await drain(ff, sync); await nextFrame();
+        // The retry reads tabs and saved independently; both may attempt to publish.
+        assert.equal(attempts, failures === 1 ? 2 : 3, "saved render failure must not create a frame loop");
+        assert.equal(warnings.length, failures === 1 ? 1 : 3);
+        assert.ok(warnings.every(args => args[0].startsWith("Foxy:")));
+        assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
+        if (failures === 1) assert.equal(row(root).querySelector(".row-label").textContent, "Retried");
+      } finally { root.replaceChildren = replace; await drain(ff, sync); }
+    });
+  });
+}
+
+
+// Clearing only the Set leaves the first row visually busy until the second action settles.
+test("fix r1: concurrent saved actions publish each busy removal and refresh after the last", async () => {
+  const { ff, sync, root, control } = await setup();
+  const send = ff.browser.runtime.sendMessage, dev = gate(), coverage = gate();
+  const started = { dev: gate(), coverage: gate() };
+  ff.browser.runtime.sendMessage = async message => {
+    const reply = await send(message);
+    if (message.type === "foxy:open-saved") {
+      started[message.folderId].release();
+      await (message.folderId === "dev" ? dev : coverage).promise;
+    }
+    return reply;
+  };
+  let first, second;
+  try {
+    first = control.handlers.onOpenSaved("dev"); second = control.handlers.onOpenSaved("coverage");
+    await started.dev.promise; await started.coverage.promise; await drain(ff, sync);
+    ff.calls.length = 0;
+    dev.release(); await first; await drain(ff, sync);
+    assert.equal(control.ui.busy.has("dev"), false);
+    assert.equal(row(root).getAttribute("aria-busy"), "false", "first action must clear visible busy while the other is held");
+    assert.equal(row(root, "coverage").getAttribute("aria-busy"), "true");
+    assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 0);
+    coverage.release(); await second; await drain(ff, sync);
+    assert.equal(control.ui.busy.size, 0);
+    assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
+    assert.equal(row(root), undefined); assert.equal(row(root, "coverage"), undefined);
+  } finally {
+    dev.release(); coverage.release(); ff.browser.runtime.sendMessage = send;
+    await first; await second; await drain(ff, sync);
+  }
+});
