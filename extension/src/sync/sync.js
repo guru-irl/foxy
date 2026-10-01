@@ -99,7 +99,9 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       },
     },
   };
-  const inbound = createInbound({ api: inboundApi, getState: () => state, save, now, quietMs });
+  const inbound = createInbound({ api: inboundApi, getState: () => state, save, now, quietMs,
+    orderReleased: members => { for (const tab of members) syncMovedTab(tab.id); },
+  });
 
   async function rebuildMaps() {
     await rebuild({ api, state, outbound, inbound });
@@ -316,15 +318,21 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       let tab;
       try { tab = await api.tabs.get(id); } catch { continue; }
       if (tab.incognito) continue;
-      if (!tab.pinned && (tab.groupId == null || tab.groupId === -1)) { await syncTab(id); continue; }
+      if (!tab.pinned && (tab.groupId == null || tab.groupId === -1)) {
+        try { await syncTab(id); }
+        catch (error) { console.warn("Foxy: moved-tab sync failed", error); }
+        continue;
+      }
       strips.set(`${tab.windowId}:${tab.pinned ? "pinned" : tab.groupId}`, { windowId: tab.windowId,
         ...(tab.pinned ? { pinned: true } : { groupId: tab.groupId }) });
     }
     // A multi-drag can invert several neighbours before any event runs. One
     // final strip-order pass per batch publishes all shifted members' deltas.
     for (const query of strips.values()) {
-      const members = await api.tabs.query(query);
-      for (const member of members.sort((a, b) => a.index - b.index)) await syncTab(member.id);
+      try {
+        const members = await api.tabs.query(query);
+        for (const member of members.sort((a, b) => a.index - b.index)) await syncTab(member.id);
+      } catch (error) { console.warn("Foxy: moved-tab strip sync failed", error); }
     }
   }
   async function flush() {
@@ -343,19 +351,36 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     }
     await inbound.applyDeferred();
   }
+  async function remapMergedTabs(folderId, query) {
+    const nodes = (await api.bookmarks.getChildren(folderId)).filter(node => node.type === "bookmark");
+    const canonical = new Set(nodes.map(node => node.id)), returning = [];
+    for (const tab of await api.tabs.query(query)) {
+      const entry = state.tabs[tab.id];
+      if (tab.incognito || !entry) continue;
+      if (canonical.has(entry.bookmarkId)) {
+        entry.folderId = folderId; // The bookmark moved, retaining its GUID.
+        if (state.pendingRemovals[tab.id]) state.pendingRemovals[tab.id].folderId = folderId;
+      } else {
+        returning.push({ tabId: tab.id, url: tab.url });
+      }
+    }
+    const mapped = new Set(Object.values(state.tabs).map(entry => entry.bookmarkId));
+    const matches = matchTabs(returning, nodes.filter(node => !mapped.has(node.id)));
+    for (const { tabId, bookmarkId } of matches.pairs) {
+      Object.assign(state.tabs[tabId], { bookmarkId, folderId });
+      if (state.pendingRemovals[tabId]) Object.assign(state.pendingRemovals[tabId], { bookmarkId, folderId });
+    }
+  }
   async function changed(id, node) {
     if (node?.type === "folder" && ((id !== state.rootId && node.parentId === OTHER_BOOKMARKS && node.title === ROOT_TITLE)
       || (id !== state.pinnedId && node.parentId === state.rootId && isPinnedFolderTitle(node.title)))) {
-      const oldPinnedId = state.pinnedId;
       Object.assign(state, await mergeRoots(api, state.rootId));
-      // Moved pins retain their bookmark GUID and live tab identity. Never run
-      // a browser-session rebuild just because another device's root arrived.
-      for (const [tabId, entry] of Object.entries(state.tabs)) if (entry.folderId === oldPinnedId) {
-        const bookmark = await getNode(entry.bookmarkId);
-        if (bookmark?.parentId === state.pinnedId) {
-          entry.folderId = state.pinnedId;
-          if (state.pendingRemovals[tabId]) state.pendingRemovals[tabId].folderId = state.pinnedId;
-        }
+      // A same-URL bookmark retained in an extra folder did not move. Bind
+      // its live tab to an unused canonical counterpart before reconciling.
+      // Startup rebuild already matches the merged folders from scratch.
+      await remapMergedTabs(state.pinnedId, { pinned: true });
+      for (const [groupId, entry] of Object.entries(state.groups)) {
+        await remapMergedTabs(entry.folderId, { groupId: Number(groupId) });
       }
       await save();
       await inbound.reconcileFolder(state.pinnedId);

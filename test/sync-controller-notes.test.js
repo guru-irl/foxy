@@ -193,7 +193,93 @@ for (const source of ["remote move", "deferred retry", "shown remote move"]) tes
     await ff.browser.tabs.update((await ff.browser.tabs.query({})).find(t => t.url === "about:home").id, { active: true }); await drain(ff, sync);
   }
   assert.deepEqual((await ff.browser.tabs.query({ groupId: result.groupId })).map(t => t.url), ["https://extra/", "https://work/"]);
+  assert.equal((await loadState(ff.browser)).groups[result.groupId].pendingOrder, undefined, "successful completion releases publication without another activation");
   await stable(ff, sync);
+});
+
+for (const failure of ["tabs.move", "empty folder", "missing group", "folder children"]) test(`return order retries ${failure} failure on activation and resumes publication`, async t => {
+  const ff = createFirefox({ groups: [localSetup.groups[0]], tabs: [home, localSetup.tabs[3],
+    { id: 6, windowId: 1, groupId: 11, url: "https://extra/" }] });
+  let sync = wire(ff, { quietMs: 25, maxWaitMs: 60 });
+  await drain(ff, sync); ff.restart(); sync = wire(ff, { quietMs: 25, maxWaitMs: 60 }); await drain(ff, sync);
+  const result = await returning(ff, ["https://work/", "https://extra/"]); await drain(ff, sync);
+  const state = await loadState(ff.browser), folderId = state.groups[result.groupId].folderId;
+  await ff.browser.bookmarks.move(state.tabs[result.tabs[1].id].bookmarkId, { index: 0 }); await drain(ff, sync);
+  t.mock.method(console, "warn", () => {});
+  const [namespace, method] = failure === "tabs.move" ? ["tabs", "move"]
+    : failure === "missing group" ? ["tabGroups", "get"] : ["bookmarks", failure === "folder children" ? "getChildren" : "get"];
+  const original = ff.browser[namespace][method];
+  let failed = false;
+  t.mock.method(ff.browser[namespace], method, async (...args) => {
+    const entry = (await loadState(ff.browser)).groups[result.groupId];
+    if (!failed && entry?.pendingOrder && !Number.isFinite(entry.rebindUntil)
+      && (namespace !== "bookmarks" || args[0] === folderId)) {
+      failed = true;
+      if (failure === "empty folder") return [];
+      if (failure === "missing group") return undefined;
+      throw new Error(`injected ${failure} failure`);
+    }
+    return original(...args);
+  });
+  await delay(40); await drain(ff, sync);
+  assert.equal(failed, true, "failure occurs during completion reconciliation");
+  const held = await loadState(ff.browser);
+  assert.equal(held.groups[result.groupId].pendingOrder, true);
+  assert.ok(held.deferred.includes(folderId), "failed order has a durable activation retry");
+  // Simulate event-page suspension only after the return timer has completed.
+  sync = wire(ff, { quietMs: 0 }); await drain(ff, sync);
+  await ff.browser.tabs.create({ windowId: 1, url: "about:blank", active: true });
+  await drain(ff, sync);
+  assert.equal((await loadState(ff.browser)).groups[result.groupId].pendingOrder, undefined);
+  assert.deepEqual((await ff.browser.tabs.query({ groupId: result.groupId })).map(tab => tab.url), ["https://extra/", "https://work/"]);
+  await ff.browser.tabs.update(result.tabs[0].id, { url: "https://published/" }); await drain(ff, sync);
+  const added = await ff.browser.tabs.create({ windowId: 1, url: "https://new/", active: false });
+  await ff.browser.tabs.group({ groupId: result.groupId, tabIds: [added.id] }); await drain(ff, sync);
+  assert.deepEqual((await ff.browser.bookmarks.getChildren(folderId)).map(node => node.url), ["https://extra/", "https://published/", "https://new/"]);
+  await stable(ff, sync);
+});
+
+for (const sorted of [true, false]) test(`order release publishes held navigation ${sorted ? "without" : "with"} tab moves (probe 7b)`, async () => {
+  const ff = createFirefox({ groups: [localSetup.groups[0]], tabs: [home, localSetup.tabs[3],
+    { id: 6, windowId: 1, groupId: 11, url: "https://extra/" }] });
+  let sync = wire(ff, { quietMs: 25, maxWaitMs: 60 });
+  await drain(ff, sync); ff.restart(); sync = wire(ff, { quietMs: 25, maxWaitMs: 60 }); await drain(ff, sync);
+  const result = await returning(ff, ["https://work/", "https://extra/"]); await drain(ff, sync);
+  await ff.browser.tabs.update(result.tabs[0].id, { active: true }); await drain(ff, sync);
+  const state = await loadState(ff.browser), folderId = state.groups[result.groupId].folderId;
+  const bookmarkId = state.tabs[result.tabs[0].id].bookmarkId;
+  await ff.browser.bookmarks.move(state.tabs[result.tabs[1].id].bookmarkId, { index: 0 }); await drain(ff, sync);
+  await delay(40); await drain(ff, sync);
+  assert.equal((await loadState(ff.browser)).groups[result.groupId].pendingOrder, true);
+  if (sorted) await ff.browser.tabs.move(result.tabs[1].id, { index: result.tabs[0].index });
+  await ff.browser.tabs.update(result.tabs[0].id, { url: "https://held-navigation/" }); await drain(ff, sync);
+  assert.equal((await ff.browser.bookmarks.get(bookmarkId))[0].url, "https://work/", "publication is held until order releases");
+  await ff.browser.tabs.update((await ff.browser.tabs.query({})).find(tab => tab.url === "about:home").id, { active: true }); await drain(ff, sync);
+  assert.equal((await loadState(ff.browser)).groups[result.groupId].pendingOrder, undefined);
+  assert.deepEqual((await ff.browser.tabs.query({ groupId: result.groupId })).map(tab => tab.url), ["https://extra/", "https://held-navigation/"]);
+  assert.equal((await ff.browser.bookmarks.get(bookmarkId))[0].url, "https://held-navigation/", "release publishes suppressed local navigation even without move events");
+  assert.deepEqual((await ff.browser.bookmarks.getChildren(folderId)).map(node => node.url), ["https://extra/", "https://held-navigation/"]);
+  await stable(ff, sync);
+});
+
+test("move batch continues publishing later strips after one strip query fails", async t => {
+  const ff = createFirefox({ groups: localSetup.groups, tabs: [home, localSetup.tabs[3],
+    { id: 6, windowId: 1, groupId: 11, url: "https://work-extra/" }, localSetup.tabs[4],
+    { id: 7, windowId: 1, groupId: 12, url: "https://read-extra/" }] });
+  const sync = wire(ff); await drain(ff, sync);
+  const state = await loadState(ff.browser), query = ff.browser.tabs.query;
+  let failed = false;
+  const warn = t.mock.method(console, "warn", () => {});
+  t.mock.method(ff.browser.tabs, "query", async q => {
+    if (q.groupId === 11 && !failed) { failed = true; throw new Error("first strip unavailable"); }
+    return query(q);
+  });
+  await ff.browser.tabs.move(6, { index: 1 });
+  await ff.browser.tabs.move(7, { index: 3 });
+  await ff.settle(); await delay(5); await drain(ff, sync);
+  assert.equal(failed, true);
+  assert.deepEqual((await ff.browser.bookmarks.getChildren(state.groups[12].folderId)).map(node => node.url), ["https://read-extra/", "https://read/"], "a failed strip must not drop a later strip's local reorder");
+  assert.ok(warn.mock.calls.some(call => /^Foxy:/.test(call.arguments[0]) && call.arguments[1]?.message === "first strip unavailable"));
 });
 
 test("mapped tab joining an unsyncable-only new group removes its old bookmark", async () => {

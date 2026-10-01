@@ -2,7 +2,7 @@ import { decodeFolderTitle, encodeFolderTitle, isOpenableUrl } from "./codec.js"
 import { emptyState, groupOfFolder, tabsInFolder } from "./state.js";
 
 /** All methods run inside the controller's queue. Inner work never re-enqueues. */
-export function createInbound({ api, getState, save, now = Date.now, quietMs = 10000 }) {
+export function createInbound({ api, getState, save, now = Date.now, quietMs = 10000, orderReleased = () => {} }) {
   const warn = error => console.warn("Foxy: inbound sync failed", error);
   const attempt = async fn => {
     try { return await fn(); } catch (error) { warn(error); return null; }
@@ -227,6 +227,24 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
   }
 
   async function reconcileFolder(folderId, retryOrder = false) {
+    const state = getState(), groupId = groupOfFolder(state, folderId);
+    if (groupId !== null && (retryOrder || state.groups[groupId].pendingOrder)) {
+      state.groups[groupId].pendingOrder = true;
+      retryOrder = true;
+      if (!Number.isFinite(state.groups[groupId].rebindUntil)) {
+        state.deferred = state.deferred.filter(id => id !== folderId);
+      }
+    }
+    try {
+      await reconcileFolderContents(folderId, retryOrder);
+    } finally {
+      // Failed reads/applies and safety blocks all need a durable retry. Do
+      // not let a pending order silently suppress outbound forever.
+      if (state.groups[groupId]?.pendingOrder) defer(folderId);
+    }
+  }
+
+  async function reconcileFolderContents(folderId, retryOrder) {
     const state = getState(), pinned = folderId && folderId === state.pinnedId;
     const groupId = groupOfFolder(state, folderId);
     if (!pinned && groupId === null) return; // Saved here, never auto-open.
@@ -294,15 +312,27 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
         state.groups[groupId].title = title;
       }
       if (retryOrder) {
-        await orderMapped(folderId, nodes, await api.tabs.query({ windowId: group.windowId, groupId: group.id }));
-        if (!state.deferred.includes(folderId)) delete state.groups[groupId].pendingOrder;
+        let members;
+        const applied = await attempt(async () => {
+          members = await api.tabs.query({ windowId: group.windowId, groupId: group.id });
+          await orderMapped(folderId, nodes, members);
+          return true;
+        });
+        if (applied && !state.deferred.includes(folderId)) {
+          delete state.groups[groupId].pendingOrder;
+          orderReleased(members);
+        }
       }
     } else if (retryOrder) {
       // A deferred explicit pin move is retried per window. New pins already
       // use bookmark-relative placement; never move pins between windows.
       const pins = await api.tabs.query({ pinned: true });
       for (const windowId of new Set(pins.map(tab => tab.windowId))) {
-        await orderMapped(folderId, nodes, pins.filter(tab => tab.windowId === windowId));
+        const applied = await attempt(async () => {
+          await orderMapped(folderId, nodes, pins.filter(tab => tab.windowId === windowId));
+          return true;
+        });
+        if (!applied) defer(folderId);
       }
     }
   }

@@ -202,6 +202,42 @@ test("first-run independent roots merge into one managed oldest root and pinned 
   }
 });
 
+test("first-run same-URL pins and groups retain one canonical mapping across either restart", async () => {
+  const setup = { groups: [{ id: 11, windowId: 1, title: "Dev", color: "red" }],
+    tabs: [home, { id: 2, windowId: 1, pinned: true, url: "https://shared-pin/" },
+      { id: 3, windowId: 1, groupId: 11, url: "https://shared-group/" }] };
+  const a = createFirefox({ ...setup, bookmarkPrefix: "a" });
+  const b = createFirefox({ ...setup, bookmarkPrefix: "z",
+    bookmarks: [{ id: "older-root", title: "Foxy", dateAdded: 1 }] });
+  const server = createSyncServer({ deliveryOrder, seed: 42 });
+  for (const ff of [a, b]) { ff.sync = wire(ff); await drain(ff, ff.sync); server.attach(ff); }
+  const originals = await Promise.all([a, b].map(ff => loadState(ff.browser)));
+  async function check() {
+    await converge(server, a, b);
+    for (const ff of [a, b]) {
+      const state = await loadState(ff.browser), merged = await tree(ff);
+      assert.equal(state.rootId, "older-root");
+      assert.equal(state.pinnedId, originals[1].pinnedId);
+      assert.deepEqual((await ff.browser.tabs.query({ pinned: true })).map(t => t.url), ["https://shared-pin/"], "no second pin for the canonical bookmark");
+      assert.deepEqual(await urls(ff), ["https://shared-group/"]);
+      assert.deepEqual(merged.pinned.bookmarks.map(n => n.url), ["https://shared-pin/"]);
+      assert.deepEqual((await ff.browser.bookmarks.getChildren(state.groups[(await group(ff)).id].folderId)).map(n => n.url), ["https://shared-group/"]);
+      const pin = (await ff.browser.tabs.query({ pinned: true }))[0];
+      assert.equal(state.tabs[pin.id].bookmarkId, merged.pinned.bookmarks[0].id);
+      // Redundant GUIDs stay intact outside the canonical pin folder.
+      assert.deepEqual(merged.extraPinned.map(f => f.bookmarks.map(n => n.url)), [["https://shared-pin/"]]);
+      assert.equal(ff.calls.some(call => /^bookmarks\.remove/.test(call.api)), false);
+    }
+  }
+  await check();
+  assert.equal((await a.browser.tabs.get(2)).pinned, true, "keep the original local pin identity");
+  assert.equal((await a.browser.tabs.get(3)).groupId, 11);
+  for (const ff of [a, b]) {
+    ff.restart({ restore: true }); ff.sync = wire(ff); await drain(ff, ff.sync);
+    await check();
+  }
+});
+
 for (const kind of ["remote batch", "local multi-drag"]) test(`multi-move ${kind} converges on both devices and stays quiet`, async () => {
   const { a, b, server } = await orderedDevices();
   for (const url of ["https://three/", "https://four/", "https://five/"]) {
