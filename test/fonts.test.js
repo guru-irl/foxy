@@ -5,6 +5,7 @@ import { readdirSync, readFileSync } from "node:fs";
 
 const root = new URL("../extension/", import.meta.url);
 const css = readFileSync(new URL("newtab.css", root), "utf8");
+const main = readFileSync(new URL("src/main.js", root), "utf8");
 const fontFiles = [
   "CascadiaMono-OFL.txt",
   "CascadiaMono.ttf",
@@ -80,26 +81,41 @@ test("default text uses Foxy Sans at weight 400", () => {
   assert.equal(rule("body").font, '400 13px "Foxy Sans", system-ui, sans-serif');
 });
 
-test("the clock is heavy, upright and tabular at optical size 144, retaining its size clamp", () => {
+test("the clock is bold, upright and tabular at optical size 144, retaining its size clamp", () => {
   const clock = rule(".clock-time");
-  assert.equal(clock.font, 'normal 900 clamp(88px, 11vw, 160px) / 1 "Foxy Sans", system-ui, sans-serif');
+  assert.equal(clock.font, 'normal 700 clamp(88px, 11vw, 160px) / 1 "Foxy Sans", system-ui, sans-serif');
   assert.equal(clock["font-stretch"], "100%");
   assert.equal(clock["font-variation-settings"], '"opsz" 144');
   assert.equal(clock["font-variant-numeric"], "tabular-nums");
 });
 
-test("the date is upright weight 600 capitals with compensated trailing spacing", () => {
+test("the date is upright, slightly compressed weight 600 capitals", () => {
   const date = rule(".clock-date");
   assert.equal(date.font, 'normal 600 22px / 1 "Foxy Sans", system-ui, sans-serif');
+  assert.equal(date["font-stretch"], "85%");
   assert.equal(date["text-transform"], "uppercase");
   assert.equal(date["letter-spacing"], "0.12em");
-  assert.equal(date["text-indent"], "0.12em");
+  // Left-aligned: no centring compensation for the trailing letter gap.
+  assert.equal(date["text-indent"], undefined);
+});
+
+test("the clock and date are left-aligned with the board", () => {
+  assert.equal(rule(".clock")["text-align"], "start");
+  assert.equal(rule(".clock")["margin-inline"], rule(".board")["margin-inline"]);
+});
+
+test("the clock is pulled left by its lead digit's side bearing so the ink meets the board edge", () => {
+  // Measured in headless Firefox 157 at weight 700, width 100%, opsz 144, 160px.
+  for (const [digit, indent] of [["0", "-0.0375em"], ["1", "-0.075em"], ["2", "-0.056em"]]) {
+    assert.equal(rule(`.clock-time[data-lead="${digit}"]`)["text-indent"], indent, digit);
+  }
+  assert.match(main, /dataset\.lead\s*=/);
 });
 
 test("group titles are heavy, condensed, slanted capitals without extra letter spacing", () => {
   const title = rule(".column-header");
   assert.equal(title["font-family"], '"Foxy Sans", system-ui, sans-serif');
-  assert.equal(title["font-weight"], "800");
+  assert.equal(title["font-weight"], "700");
   assert.equal(title["font-stretch"], "50%");
   assert.equal(title["font-style"], "oblique 10deg");
   assert.equal(title["text-transform"], "uppercase");

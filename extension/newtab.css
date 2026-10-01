@@ -60,26 +60,45 @@ body {
 .clock {
   flex: none;
   margin-bottom: 40px;
-  text-align: center;
+  margin-inline: 24px;
+  text-align: start;
 }
 
-/* Only group titles slant; the clock keeps upright, heavy tabular figures. */
+/* Only group titles slant; the clock keeps upright, bold tabular figures. */
 .clock-time {
   display: block;
-  font: normal 900 clamp(88px, 11vw, 160px) / 1 "Foxy Sans", system-ui, sans-serif;
+  font: normal 700 clamp(88px, 11vw, 160px) / 1 "Foxy Sans", system-ui, sans-serif;
   font-stretch: 100%;
   font-variation-settings: "opsz" 144;
   font-variant-numeric: tabular-nums;
 }
 
-/* text-indent matches the trailing letter-spacing after the last letter, so
-   the date's letters are centered, not the letters plus one trailing gap. */
+/* Tabular figures sit inside equal-width slots, so the hour's first digit
+   starts with blank space that differs per digit. Pull the line left by
+   that digit's side bearing so its ink meets the board's left edge, like
+   the date below. Measured in headless Firefox 157 at weight 700, width
+   100% and opsz 144: 6px, 12px and 9px at 160px; em scales with the size
+   clamp (within 1px at 88px). The hour starts with 0, 1 or 2. */
+.clock-time[data-lead="0"] {
+  text-indent: -0.0375em;
+}
+
+.clock-time[data-lead="1"] {
+  text-indent: -0.075em;
+}
+
+.clock-time[data-lead="2"] {
+  text-indent: -0.056em;
+}
+
+/* Left-aligned with the clock and the board, so the trailing letter gap
+   after the last letter needs no compensation. */
 .clock-date {
   margin-top: 8px;
   font: normal 600 22px / 1 "Foxy Sans", system-ui, sans-serif;
+  font-stretch: 85%;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  text-indent: 0.12em;
   color: var(--text-muted);
 }
 
@@ -173,7 +192,7 @@ button:focus-visible {
 }
 
 /* The dot's center lines up with the row icons below it: 10px + 6px here,
-   8px + 8px in the rows. At weight 800, stretch 50%, oblique 10deg and auto
+   8px + 8px in the rows. At weight 700, stretch 50%, oblique 10deg and auto
    optical size, flat HEIN capitals at 16px cover 12 rows in the Firefox
    preview (>=50% coverage): a measured raster cap ratio of 12/16 = 0.75.
    Both caps and dot fill occupy rows 348-359 in the 32px header (338-369),
@@ -187,7 +206,7 @@ button:focus-visible {
   font-family: "Foxy Sans", system-ui, sans-serif;
   font-size: 16px;
   line-height: var(--row);
-  font-weight: 800;
+  font-weight: 700;
   font-stretch: 50%;
   font-style: normal;
   text-transform: uppercase;

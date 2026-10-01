@@ -144,7 +144,7 @@ class ThemeTypographyTest(unittest.TestCase):
 
     def assert_condensed_role(self, rule, style):
         for key, value in {
-            "font-family": SANS, "font-weight": "800", "font-stretch": "50%",
+            "font-family": SANS, "font-weight": "700", "font-stretch": "50%",
             "font-style": style, "letter-spacing": "0", 'font-variation-settings': '"ROND" 0',
         }.items():
             self.assertEqual(rule.get(key), value + " !important", key)

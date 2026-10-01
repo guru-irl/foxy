@@ -18,9 +18,9 @@ export function formatTime(date) {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-/** English capitals without the year, e.g. "WEDNESDAY 30 SEPTEMBER". */
+/** English capitals without the year, e.g. "WEDNESDAY, 30 SEPTEMBER". */
 export function formatDate(date) {
-  return `${WEEKDAYS[date.getDay()]} ${date.getDate()} ${MONTHS[date.getMonth()]}`;
+  return `${WEEKDAYS[date.getDay()]}, ${date.getDate()} ${MONTHS[date.getMonth()]}`;
 }
 
 /** Milliseconds until the next minute starts (1 to 60000). */

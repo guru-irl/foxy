@@ -811,7 +811,7 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
   translate: 0 -48.2%;
   font-family: "Foxy Sans", system-ui, sans-serif !important;
   font-size: 17px !important;
-  font-weight: 800 !important;
+  font-weight: 700 !important;
   font-stretch: 50% !important;
   font-style: normal !important;
   font-variation-settings: "ROND" 0 !important;
@@ -1102,7 +1102,7 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
   color: light-dark(rgba(0, 0, 0, 0.62), rgba(255, 255, 255, 0.68)) !important;
   font-family: "Foxy Sans", system-ui, sans-serif !important;
   font-size: var(--lf-label-size) !important;
-  font-weight: 800 !important;
+  font-weight: 700 !important;
   font-stretch: 50% !important;
   font-style: normal !important;
   font-variation-settings: "ROND" 0 !important;
@@ -1303,10 +1303,10 @@ toolbarseparator.proton-zap::before {
 
 /* Label row: a gradient dot in the group color, centered on the
    tab icon column, then the condensed Google Sans Flex name starting
-   where tab titles start. Weight 800, width 50%, slant -10, roundness 0.
+   where tab titles start. Weight 700, width 50%, slant -10, roundness 0.
    --lf-group-dot sets the dot's size; everything else follows it.
    Google Sans Flex's nominal cap height is 1432 / 2000 = 0.716em.
-   At weight 800, width 50%, slant -10 and automatic optical size, the
+   At weight 700, width 50%, slant -10 and automatic optical size, the
    headless replica gives 12 whole pixel rows at 16px (effective raster
    cap height 0.75em). Dividing 12px by 0.75 sets --lf-label-size.
    Vertical: the dot hangs off the text baseline (vertical-align) at
@@ -1339,7 +1339,7 @@ toolbarseparator.proton-zap::before {
   color: light-dark(rgba(0, 0, 0, 0.62), rgba(255, 255, 255, 0.68)) !important;
   font-family: "Foxy Sans", system-ui, sans-serif !important;
   font-size: var(--lf-label-size) !important;
-  font-weight: 800 !important;
+  font-weight: 700 !important;
   font-stretch: 50% !important;
   font-style: oblique 10deg !important;
   font-variation-settings: "ROND" 0 !important;

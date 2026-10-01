@@ -19,9 +19,9 @@ test("formatTime is 24-hour HH:MM with leading zeros", () => {
   assert.equal(formatTime(new Date(2026, 8, 30, 23, 59)), "23:59");
 });
 
-test("formatDate is WEEKDAY D MONTH in English capitals", () => {
-  assert.equal(formatDate(new Date(2026, 8, 30)), "WEDNESDAY 30 SEPTEMBER");
-  assert.equal(formatDate(new Date(2027, 0, 3)), "SUNDAY 3 JANUARY");
+test("formatDate is WEEKDAY, D MONTH in English capitals", () => {
+  assert.equal(formatDate(new Date(2026, 8, 30)), "WEDNESDAY, 30 SEPTEMBER");
+  assert.equal(formatDate(new Date(2027, 0, 3)), "SUNDAY, 3 JANUARY");
 });
 
 test("msUntilNextMinute counts to the next :00", () => {

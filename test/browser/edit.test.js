@@ -114,7 +114,7 @@ test("empty commit remains faint UNNAMED and long editor never widens a column",
   assert.ok(field.getBoundingClientRect().right <= column.getBoundingClientRect().right);
   const style = getComputedStyle(field);
   assert.ok(style.fontFamily.includes("Foxy Sans"));
-  assert.equal(style.fontWeight, "800"); assert.equal(style.fontStretch, "50%");
+  assert.equal(style.fontWeight, "700"); assert.equal(style.fontStretch, "50%");
   assert.equal(style.borderTopWidth, "0px"); assert.equal(style.outlineStyle, "none"); assert.equal(style.boxShadow, "none");
   field.value = " \t "; key(field, "Enter");
   assert.deepEqual(saved, [], "trimmed unchanged unnamed titles must not request an API write");

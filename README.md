@@ -4,8 +4,9 @@ A private Firefox add-on and browser theme. The add-on replaces the new tab page
 the home page with a clock, the date and a kanban board of tabs and tab groups from
 every normal, non-private window (Foxy 2.1.0). Groups and pins are saved in
 bookmarks, with Firefox Sync carrying them to your other devices.
-All page text uses Google Sans Flex: the clock is heavy and upright, the date upright,
-and group titles condensed, heavy and slanted. Clicking a tab switches to it; the page
+All page text uses Google Sans Flex: the clock is bold and upright, the date upright and
+slightly compressed, both left-aligned with the board, and group titles condensed, bold
+and slanted. Clicking a tab switches to it; the page
 closes only when it is its own tab's only history entry (`history.length === 1`).
 
 After a click on a page with only one history entry, it switches to the selected tab,

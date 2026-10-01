@@ -17,7 +17,9 @@ function startClock(timeEl, dateEl) {
   let timer = 0;
   const tick = () => {
     const now = new Date();
-    timeEl.textContent = formatTime(now);
+    const time = formatTime(now);
+    timeEl.textContent = time;
+    timeEl.dataset.lead = time[0];
     dateEl.textContent = formatDate(now);
     clearTimeout(timer);
     timer = setTimeout(tick, msUntilNextMinute(now));

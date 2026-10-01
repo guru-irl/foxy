@@ -80,9 +80,9 @@ everywhere. Only group titles are slanted.
 | Role | Settings |
 |---|---|
 | Default text (page and Firefox's UI) | wght 400, wdth 100, opsz automatic |
-| Clock | wght 900, wdth 100, opsz 144, tabular figures, upright |
-| Date | wght 600, capitals, letter-spacing 0.12em, upright |
-| Group titles (board columns, sidebar group names) | wght 800, wdth 50, slnt −10, capitals, letter-spacing 0 (compressed). The Bebas Neue look. |
+| Clock | wght 700, wdth 100, opsz 144, tabular figures, upright; left-aligned with the board, pulled left by the hour digit's side bearing so the ink meets the board edge |
+| Date | wght 600, wdth 85, capitals, letter-spacing 0.12em, upright, "WEEKDAY, D MONTH"; left-aligned |
+| Group titles (board columns, sidebar group names) | wght 700, wdth 50, slnt −10, capitals, letter-spacing 0 (compressed). The Bebas Neue look. |
 | Other column titles (PINNED, SAVED, TABS), sidebar pinned names, the "SEARCH" placeholder | Same as group titles, upright, letter-spacing 0 |
 | Subheadings ("OTHER WINDOWS") | wght 600, wdth 90, capitals, small, letter-spacing 0.12em, faint |
 | Actions ("+ NEW GROUP", "RESTORE ALL") | wght 700, wdth 80, capitals, upright |
@@ -106,14 +106,14 @@ everywhere. Only group titles are slanted.
 ## 5. Board layout
 
 ```
-            21:56
-      WEDNESDAY 30 SEPTEMBER
+ 21:56
+ WEDNESDAY, 30 SEPTEMBER
 
  PINNED │ SAVED   DEV SERVER   COVERAGE   (more…)   + NEW GROUP │ TABS
  fixed  │ ───────────── scrolls sideways ────────────────────── │ fixed
 ```
 
-- Clock and date on top, unchanged apart from the font.
+- Clock and date on top, left-aligned with the board's left edge.
 - PINNED is fixed on the left, TABS fixed on the right. Between them, a
   sideways-scrolling strip: SAVED (only when it has entries), the group
   columns, then "+ NEW GROUP".
