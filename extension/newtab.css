@@ -18,12 +18,23 @@
   font-display: block;
 }
 
+@font-face {
+  font-family: "Foxy Serif";
+  src: url("fonts/EBGaramond.ttf") format("truetype");
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: block;
+}
+
 :root {
   color-scheme: light dark;
   --text: light-dark(rgba(0, 0, 0, 0.85), rgba(255, 255, 255, 0.92));
   --text-muted: light-dark(rgba(0, 0, 0, 0.55), rgba(255, 255, 255, 0.6));
   --gap: 12px;
-  --card: light-dark(rgba(246, 246, 247, 0.85), rgba(22, 22, 24, 0.78));
+  --board-margin: 24px;
+  --column-padding: 8px;
+  --title-padding: 10px;
+  --card: light-dark(rgba(246, 246, 247, 0.7), rgba(22, 22, 24, 0.6));
   --label: light-dark(rgba(0, 0, 0, 0.62), rgba(255, 255, 255, 0.68));
   --unnamed: light-dark(rgba(0, 0, 0, 0.48), rgba(255, 255, 255, 0.48));
   --hover: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.08));
@@ -60,41 +71,53 @@ body {
 .clock {
   flex: none;
   margin-bottom: 40px;
-  margin-inline: 24px;
+  /* Board margin + column inset + title inset = the PINNED title's box. */
+  margin-inline: calc(var(--board-margin) + var(--column-padding) + var(--title-padding));
   text-align: start;
 }
 
-/* Only group titles slant; the clock keeps upright, bold tabular figures. */
+/* Firefox 157 flat lining-digit ink: 63/115px versus Sans 64/115px.
+   Scale the previous 88px / 11vw / 160px clamp by 1.1, not by line height.
+   Only group titles slant. The date stays Sans. */
 .clock-time {
   display: block;
-  font: normal 700 clamp(88px, 11vw, 160px) / 1 "Foxy Sans", system-ui, sans-serif;
-  font-stretch: 100%;
-  font-variation-settings: "opsz" 144;
-  font-variant-numeric: tabular-nums;
+  font: normal 600 clamp(96.8px, 12.1vw, 176px) / 1 "Foxy Serif", serif;
+  font-variant-numeric: lining-nums tabular-nums;
+  white-space: nowrap;
 }
 
-/* Tabular figures sit inside equal-width slots, so the hour's first digit
-   starts with blank space that differs per digit. Pull the line left by
-   that digit's side bearing so its ink meets the board's left edge, like
-   the date below. Measured in headless Firefox 157 at weight 700, width
-   100% and opsz 144: 6px, 12px and 9px at 160px; em scales with the size
-   clamp (within 1px at 88px). The hour starts with 0, 1 or 2. */
+/* case does not raise EB Garamond's colon. Its ink midpoint is 0.134em
+   below the flat lining digits' midpoint at both ends of the size clamp.
+   The 0.004em rightward nudge equalises its raster ink side bearings
+   within 1px. Adjacent digits have different bearings even with tnum. */
+.clock-colon {
+  display: inline-block;
+  text-indent: 0;
+  transform: translate(0.004em, -0.134em);
+}
+
+/* Garamond lining tabular wght 600 lead bearings, Firefox 157:
+   0/1/2 = 3/9/4px at 96.8px, 5/17/8px at 176px (50% coverage).
+   Pull left by the measured em bearing; keep the title's 1px ink inset.
+   This makes the clock, date and PINNED inks meet within one pixel. */
 .clock-time[data-lead="0"] {
-  text-indent: -0.0375em;
+  text-indent: calc(1px - 0.03em);
 }
 
 .clock-time[data-lead="1"] {
-  text-indent: -0.075em;
+  text-indent: calc(1px - 0.095em);
 }
 
 .clock-time[data-lead="2"] {
-  text-indent: -0.056em;
+  text-indent: calc(1px - 0.045em);
 }
 
-/* Left-aligned with the clock and the board, so the trailing letter gap
+/* Left-aligned with the clock and the title, so the trailing letter gap
    after the last letter needs no compensation. */
 .clock-date {
   margin-top: 8px;
+  /* PINNED's P ink starts 1px inside its title box in Firefox 157. */
+  text-indent: 1px;
   font: normal 600 22px / 1 "Foxy Sans", system-ui, sans-serif;
   font-stretch: 85%;
   text-transform: uppercase;
@@ -201,7 +224,7 @@ button:focus-visible {
 .column-title {
   height: var(--row);
   margin: 0;
-  padding-inline: 10px 8px;
+  padding-inline: var(--title-padding) var(--column-padding);
   overflow: hidden;
   font-family: "Foxy Sans", system-ui, sans-serif;
   font-size: 16px;
@@ -282,7 +305,7 @@ button.dot {
   flex: 1;
   min-height: 0;
   gap: var(--gap);
-  margin-inline: 24px;
+  margin-inline: var(--board-margin);
 }
 
 .strip {
@@ -304,7 +327,7 @@ button.dot {
   width: 264px;
   min-width: 0;
   min-height: 0;
-  padding: 8px;
+  padding: var(--column-padding);
   border-radius: 12px;
   background: var(--card);
 }
@@ -370,6 +393,40 @@ button.dot {
   min-height: 0;
   flex-direction: column;
   overflow-y: auto;
+}
+
+/* Masks fade the scrolling content itself, not an overlay or a shadow.
+   Missing edge attributes leave a full-strength edge; fitting content has
+   no mask at all. Hit testing and the DnD insertion geometry are unchanged. */
+.rows,
+.strip {
+  --fade-start: 0px;
+  --fade-end: 0px;
+}
+
+.rows[data-scroll-start],
+.strip[data-scroll-start] {
+  --fade-start: 24px;
+}
+
+.rows[data-scroll-end],
+.strip[data-scroll-end] {
+  --fade-end: 24px;
+}
+
+.strip[data-scroll-start],
+.strip[data-scroll-end] {
+  mask-image: linear-gradient(to right, transparent, black var(--fade-start), black calc(100% - var(--fade-end)), transparent);
+}
+
+.rows[data-scroll-start],
+.rows[data-scroll-end] {
+  mask-image: linear-gradient(to bottom, transparent, black var(--fade-start), black calc(100% - var(--fade-end)), transparent);
+}
+
+.board[data-dragging] .rows,
+.board[data-dragging] .strip {
+  mask-image: none;
 }
 
 .rows,

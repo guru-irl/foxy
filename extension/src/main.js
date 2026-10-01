@@ -1,6 +1,6 @@
 import { formatDate, formatTime, msUntilNextMinute } from "./model.js";
 import { buildBoard } from "./board/model.js";
-import { renderBoard } from "./board/render.js";
+import { renderBoard, updateScrollEdges } from "./board/render.js";
 import { resolveTabTarget, resolveGroupTarget } from "./board/targets.js";
 import { openTab, closeTabs, closeGroup, bringGroupHere, renameGroup, recolorGroup,
   dropTab, dropGroup } from "./board/moves.js";
@@ -18,8 +18,7 @@ function startClock(timeEl, dateEl) {
   const tick = () => {
     const now = new Date();
     const time = formatTime(now);
-    timeEl.textContent = time;
-    timeEl.dataset.lead = time[0];
+    renderTime(timeEl, time);
     dateEl.textContent = formatDate(now);
     clearTimeout(timer);
     timer = setTimeout(tick, msUntilNextMinute(now));
@@ -28,6 +27,21 @@ function startClock(timeEl, dateEl) {
     if (!document.hidden) tick();
   });
   tick();
+}
+
+// Separate the colon so CSS can centre its ink without moving the digits.
+export function renderTime(timeEl, time) {
+  const hours = document.createElement("span");
+  const colon = document.createElement("span");
+  const minutes = document.createElement("span");
+  hours.textContent = time.slice(0, 2);
+  colon.className = "clock-colon";
+  colon.textContent = ":";
+  minutes.textContent = time.slice(3);
+  timeEl.replaceChildren(hours, colon, minutes);
+  timeEl.dataset.lead = time[0];
+  timeEl.setAttribute("aria-label", time);
+  if (timeEl.localName === "time") timeEl.setAttribute("datetime", time);
 }
 
 /** All board interactions share this state; DnD and editors set it via handlers. */
@@ -400,4 +414,5 @@ function restoreView(root, { focus, left, tops }) {
   for (const list of root.querySelectorAll(".rows")) list.scrollTop = tops.get(rowsKey(list)) ?? 0;
   // A new group's input can be beyond the old horizontal viewport.
   editor?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  updateScrollEdges(root);
 }

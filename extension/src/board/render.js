@@ -7,7 +7,44 @@ const renameStarts = new WeakMap();
 const banners = new WeakMap();
 const confirmations = new WeakMap();
 
-const layouts = new WeakSet();
+const layouts = new WeakMap();
+
+function readEdge(node) {
+  const horizontal = node.classList.contains("strip");
+  const position = horizontal ? node.scrollLeft : node.scrollTop;
+  const extent = horizontal ? node.scrollWidth - node.clientWidth : node.scrollHeight - node.clientHeight;
+  // Integer extents and fractional offsets can disagree at the maximum.
+  // Less than one CSS pixel remaining is at-end; a full pixel gets a hint.
+  return { node, start: extent > 0 && position > 0, end: extent > 0 && extent - position >= 1 };
+}
+
+function writeEdge({ node, start, end }) {
+  node.toggleAttribute("data-scroll-start", start);
+  node.toggleAttribute("data-scroll-end", end);
+}
+
+export function updateScrollEdges(root) {
+  const edges = [...root.querySelectorAll(".strip, .rows")].map(readEdge);
+  for (const edge of edges) writeEdge(edge);
+}
+
+function watchLayout(root) {
+  // Each render replaces the scroll containers. Release the old observations
+  // before watching their replacements, including content size changes.
+  layouts.get(root)?.disconnect();
+  const observer = new ResizeObserver(() => {
+    alignColumns(root);
+    updateScrollEdges(root);
+  });
+  layouts.set(root, observer);
+  observer.observe(root);
+  for (const node of root.querySelectorAll(".strip, .rows")) {
+    node.addEventListener("scroll", () => writeEdge(readEdge(node)), { passive: true });
+    observer.observe(node);
+    for (const child of node.children) observer.observe(child);
+  }
+  updateScrollEdges(root);
+}
 function alignColumns(root) {
   const strip = root.querySelector(".strip");
   root.style.setProperty("--strip-scrollbar", `${strip.offsetHeight - strip.clientHeight}px`);
@@ -65,11 +102,7 @@ export function renderBoard(root, board, ui, handlers) {
     } else target = banners.get(root)?.querySelector(focus.selector);
     (target ?? strip).focus({ preventScroll: true });
   }
-  if (!layouts.has(root)) {
-    layouts.add(root);
-    // Width changes can add/remove a classic horizontal scrollbar.
-    new ResizeObserver(() => alignColumns(root)).observe(root);
-  }
+  watchLayout(root);
 }
 
 // SAVED and the sibling banner are not tab/group focus identities. Preserve

@@ -2,11 +2,13 @@
 
 A private Firefox add-on and browser theme. The add-on replaces the new tab page and
 the home page with a clock, the date and a kanban board of tabs and tab groups from
-every normal, non-private window (Foxy 2.1.0). Groups and pins are saved in
+every normal, non-private window (Foxy 2.1.2). Groups and pins are saved in
 bookmarks, with Firefox Sync carrying them to your other devices.
-All page text uses Google Sans Flex: the clock is bold and upright, the date upright and
-slightly compressed, both left-aligned with the board, and group titles condensed, bold
-and slanted. Clicking a tab switches to it; the page
+The clock uses EB Garamond SemiBold with upright lining tabular digits and an
+ink-centred colon. Its size is calibrated to the previous Google Sans Flex clock.
+The date stays upright, slightly compressed Google Sans Flex. Both start at the
+PINNED title's ink rather than the card edge. Other page text uses Google Sans Flex;
+group titles are condensed, bold and slanted. Clicking a tab switches to it; the page
 closes only when it is its own tab's only history entry (`history.length === 1`).
 
 After a click on a page with only one history entry, it switches to the selected tab,
@@ -24,9 +26,11 @@ Design: `docs/superpowers/specs/2026-10-01-foxy-design.md`.
 
 PINNED stays on the left and TABS on the right. SAVED (when it has entries), group
 columns and `+ NEW GROUP` scroll sideways between them; each column scrolls
-vertically. This window's tabs and groups come first, with other windows labelled
-below the headers or in separate sections. Empty group names show a faint `UNNAMED`;
-long names are cut with an ellipsis.
+vertically. A 24px content fade appears only at edges with more content offscreen,
+horizontally in the strip and vertically in each row list. Neutral glass card fills
+use alpha 0.6 in dark mode and 0.7 in light mode. This window's tabs and groups come
+first, with other windows labelled below the headers or in separate sections.
+Empty group names show a faint `UNNAMED`; long names are cut with an ellipsis.
 
 - Drag a tab to a group, TABS or PINNED at the insertion line. PINNED brings the tab
   into this window and pins it. Dropping on `+ NEW GROUP` creates a local group and
@@ -216,8 +220,10 @@ leave that link removed. Then reopen Firefox.
 
 ## Licences
 
-Google Sans Flex and Cascadia Mono are under the SIL Open Font License. The fonts
-and their licence files are bundled in `extension/fonts/`; see
-`GoogleSansFlex-OFL.txt`, `GoogleSansFlex-TRADEMARKS.md` and `CascadiaMono-OFL.txt`
-there. Cascadia Mono is declared as `"Foxy Mono"` for later monospace use;
-Google Sans Flex is `"Foxy Sans"`. Its roundness axis stays at the default 0.
+Google Sans Flex, EB Garamond and Cascadia Mono are under the SIL Open Font License.
+The fonts and their licence files are bundled in `extension/fonts/`; see
+`GoogleSansFlex-OFL.txt`, `GoogleSansFlex-TRADEMARKS.md`, `EBGaramond-OFL.txt` and
+`CascadiaMono-OFL.txt` there. EB Garamond is `"Foxy Serif"` (variable weight 400 to
+800), used at 600 for the clock with lining and tabular figures. Cascadia Mono is
+`"Foxy Mono"` for URLs and code-like text. Google Sans Flex is `"Foxy Sans"`, used
+for the date and other text. Its roundness axis stays at the default 0.

@@ -147,7 +147,7 @@ for (const scheme of ["light", "dark"]) {
   });
 }
 
-test("unnamed and long groups retain 264px glass columns with hard scroll cuts", async () => {
+test("unnamed and long groups retain 264px glass columns without masking short lists", async () => {
   const node = await draw();
   const unnamed = node.querySelector('[data-group-id="102"] .group-name');
   assert.equal(unnamed.textContent, "UNNAMED");
@@ -377,6 +377,8 @@ test("controller retains horizontal and vertical scroll and focus through rebuil
   assert.ok(node.querySelector('[data-tab-id="1000"]') !== row, "exercise a real rebuild");
   assert.equal(node.querySelector(".strip").scrollLeft, 90);
   assert.equal(node.querySelector('.rows[data-group-id="101"]').scrollTop, 120);
+  assert.equal(node.querySelector(".strip").hasAttribute("data-scroll-start"), true, "fade must reflect restored scroll before the next event");
+  assert.equal(node.querySelector('.rows[data-group-id="101"]').hasAttribute("data-scroll-start"), true);
   assert.equal(document.activeElement.dataset.tabId, "1000");
   const close = node.querySelector('[data-group-id="101"] .column-close');
   close.focus({ preventScroll: true });
