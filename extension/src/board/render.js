@@ -31,12 +31,18 @@ export function renderBoard(root, board, ui, handlers) {
   strip.append(create);
   root.replaceChildren(fixedColumn("pinned", "PINNED", board.pinned, handlers), strip,
     fixedColumn("tabs", "TABS", board.tabs, handlers));
-  banners.get(root)?.remove();
-  banners.delete(root);
-  if (board.missing?.length) {
-    const banner = missingBanner(board.missing.length, ui, handlers);
-    root.before(banner);
-    banners.set(root, banner);
+  const previousBanner = banners.get(root);
+  const missingCount = board.missing?.length ?? 0;
+  if (missingCount && previousBanner?.dataset.count === String(missingCount)) {
+    updateBanner(previousBanner, ui, handlers);
+  } else {
+    previousBanner?.remove();
+    banners.delete(root);
+    if (missingCount) {
+      const banner = missingBanner(missingCount, ui, handlers);
+      root.before(banner);
+      banners.set(root, banner);
+    }
   }
   attachDnd(root, handlers, board);
   alignColumns(root);
@@ -80,19 +86,30 @@ function savedFocus(root) {
 function missingBanner(count, ui, handlers) {
   const banner = el("div", "banner");
   banner.setAttribute("role", "status");
+  banner.dataset.count = String(count);
   const text = el("span", "banner-text");
   text.textContent = `${count} ${count === 1 ? "GROUP" : "GROUPS"} DIDN'T COME BACK`;
   const restore = button("banner-restore", "Restore all missing groups", "RESTORE ALL");
   const dismiss = button("banner-dismiss", "Dismiss missing groups", "DISMISS");
-  restore.addEventListener("click", () => {
-    if (!ui.busy?.has("banner")) handlers.onRestoreAll?.();
-  });
-  dismiss.addEventListener("click", () => {
-    if (!ui.busy?.has("banner")) handlers.onDismissMissing?.();
-  });
-  banner.append(text, restore, dismiss);
-  setBusy(banner, ui.busy?.has("banner"));
+  const separator = () => {
+    const node = el("span", "banner-separator");
+    node.textContent = "·";
+    node.setAttribute("aria-hidden", "true");
+    return node;
+  };
+  banner.append(text, separator(), restore, separator(), dismiss);
+  updateBanner(banner, ui, handlers);
   return banner;
+}
+
+function updateBanner(banner, ui, handlers) {
+  banner.querySelector(".banner-restore").onclick = () => {
+    if (!ui.busy?.has("banner")) handlers.onRestoreAll?.();
+  };
+  banner.querySelector(".banner-dismiss").onclick = () => {
+    if (!ui.busy?.has("banner")) handlers.onDismissMissing?.();
+  };
+  setBusy(banner, ui.busy?.has("banner"));
 }
 
 function savedColumn(root, saved, ui, handlers) {
@@ -115,7 +132,8 @@ function savedRow(root, group, ui, handlers) {
   const unnamed = group.title.trim() === "";
   const title = unnamed ? "Unnamed" : group.title;
   row.title = title;
-  const open = button("row-open", `Open saved group: ${title}`);
+  const blockedLabel = group.cantReopen.length ? `, ${group.cantReopen.length} can't reopen` : "";
+  const open = button("row-open", `Open saved group: ${title}, ${group.count} bookmarks${blockedLabel}`);
   const dot = el("span", "dot");
   dot.dataset.palette = colorKey(group.color);
   const label = el("span", "row-label");
@@ -184,7 +202,7 @@ function savedRow(root, group, ui, handlers) {
 function setBusy(node, busy) {
   node.classList.toggle("busy", Boolean(busy));
   node.setAttribute("aria-busy", String(Boolean(busy)));
-  for (const button of node.querySelectorAll("button")) button.disabled = Boolean(busy);
+  for (const button of node.querySelectorAll("button")) button.setAttribute("aria-disabled", String(Boolean(busy)));
 }
 
 function fixedColumn(zone, title, sections, handlers) {

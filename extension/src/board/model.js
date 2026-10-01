@@ -16,7 +16,8 @@ export function buildBoard({ windows, tabs, groups, currentWindowId, selfTabId, 
       return (recency.get(b) ?? 0) - (recency.get(a) ?? 0) || a - b;
     });
 
-  const board = { windowOrder, pinned: [], columns: [], tabs: [], saved, missing };
+  const board = { windowOrder, pinned: [], columns: [], tabs: [],
+    saved: normaliseSaved(saved), missing: normaliseSaved(missing) };
   for (const windowId of windowOrder) {
     const current = windowId === currentWindowId;
     const rows = tabs
@@ -46,6 +47,18 @@ export function buildBoard({ windows, tabs, groups, currentWindowId, selfTabId, 
     board.columns.push(...columns);
   }
   return board;
+}
+
+function normaliseSaved(entries) {
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .filter(entry => typeof entry?.folderId === "string" && entry.folderId !== "")
+    .map(entry => ({
+      ...entry,
+      title: typeof entry.title === "string" ? entry.title : "",
+      count: Number.isFinite(entry.count) ? entry.count : 0,
+      cantReopen: Array.isArray(entry.cantReopen) ? entry.cantReopen.filter(url => typeof url === "string") : [],
+    }));
 }
 
 function toRow(tab) {

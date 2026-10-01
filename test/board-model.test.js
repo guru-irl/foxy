@@ -265,10 +265,32 @@ test("saved and missing preserve folder order, literal titles and API colours wi
   const before = structuredClone({ ...input, saved, missing });
   const { saved: actualSaved, missing: actualMissing, ...zones } = buildBoard(freeze({ ...input, saved, missing }));
   assert.deepEqual(actualSaved, saved);
-  assert.deepEqual(actualMissing, missing);
+  assert.deepEqual(actualMissing, missing.map(group => ({ ...group, count: 0, cantReopen: [] })));
   const { saved: ignoredSaved, missing: ignoredMissing, ...originalZones } = buildBoard(input);
   assert.deepEqual(zones, originalZones);
   assert.deepEqual({ ...input, saved, missing }, before);
+});
+
+// Passing raw partial entries through leaves trim/length unsafe in the renderer.
+test("saved and missing normalise malformed entries and drop absent folder identities without mutation", () => {
+  const entries = [null, {}, { folderId: "" }, { folderId: 12 },
+    { folderId: "partial", title: 42, color: "grey", count: "4", cantReopen: null },
+    { folderId: "valid", title: "  Work  ", color: "red", count: 4, cantReopen: ["about:config", null] },
+    { folderId: "nonfinite", count: Infinity, cantReopen: "about:config" }];
+  const input = freeze({ windows: [], tabs: [], groups: [], saved: entries, missing: entries });
+  const before = structuredClone(input);
+  const board = buildBoard(input);
+  const expected = [
+    { folderId: "partial", title: "", color: "grey", count: 0, cantReopen: [] },
+    { folderId: "valid", title: "  Work  ", color: "red", count: 4, cantReopen: ["about:config"] },
+    { folderId: "nonfinite", title: "", count: 0, cantReopen: [] },
+  ];
+  assert.deepEqual(board.saved, expected); assert.deepEqual(board.missing, expected);
+  assert.deepEqual(input, before);
+  for (const malformed of [null, {}, "wrong"]) {
+    const empty = buildBoard({ windows: [], tabs: [], groups: [], saved: malformed, missing: malformed });
+    assert.deepEqual(empty.saved, []); assert.deepEqual(empty.missing, []);
+  }
 });
 
 test("no eligible windows gives an empty board, without inventing a current window", () => {

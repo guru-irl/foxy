@@ -62,9 +62,21 @@ test("SAVED rows retain literal titles, API identities, count and blocked URL de
   assert.equal(open.parentElement, remove.parentElement, "activation and delete must be siblings, not nested controls");
   assert.equal(first.getAttribute("role"), null);
   assert.equal(open.tabIndex, 0); assert.equal(remove.tabIndex, -1);
-  assert.equal(open.getAttribute("aria-label"), "Open saved group: <b>Dev server</b>");
+  assert.equal(open.getAttribute("aria-label"), "Open saved group: <b>Dev server</b>, 4 bookmarks, 2 can't reopen");
+  assert.equal(unnamed.querySelector(".row-open").getAttribute("aria-label"), "Open saved group: Unnamed, 0 bookmarks");
+  assert.equal(row(root, "f3").querySelector(".row-open").getAttribute("aria-label"), "Open saved group:   Coverage  , 2 bookmarks");
   assert.equal(remove.getAttribute("aria-label"), "Delete saved group: <b>Dev server</b>");
   assert.equal(first.draggable, false);
+});
+
+test("malformed saved replies render safe defaults and omit entries without folder IDs", async () => {
+  const malformed = [null, {}, { folderId: "partial", title: 42, count: "4", cantReopen: null }];
+  const { root, page } = await draw({ saved: malformed, missing: malformed });
+  assert.equal(root.querySelectorAll(".saved-row").length, 1);
+  assert.equal(row(root, "partial").querySelector(".row-label").textContent, "UNNAMED");
+  assert.equal(row(root, "partial").querySelector(".saved-count").textContent, "0");
+  assert.equal(row(root, "partial").querySelector(".cant-reopen"), null);
+  assert.equal(page.querySelector(".banner-text").textContent, "1 GROUP DIDN'T COME BACK");
 });
 
 for (const [count, text] of [[1, "1 GROUP DIDN'T COME BACK"], [3, "3 GROUPS DIDN'T COME BACK"]]) {
@@ -81,7 +93,18 @@ for (const [count, text] of [[1, "1 GROUP DIDN'T COME BACK"], [3, "3 GROUPS DIDN
     assert.equal(banner.querySelector(".banner-text").textContent, text);
     assert.equal(banner.querySelector(".banner-restore").textContent, "RESTORE ALL");
     assert.equal(banner.querySelector(".banner-dismiss").textContent, "DISMISS");
-    assert.equal(getComputedStyle(banner.querySelector(".banner-restore"), "::before").content, '"·"');
+    assert.deepEqual([...banner.children].map(node => node.className),
+      ["banner-text", "banner-separator", "banner-restore", "banner-separator", "banner-dismiss"]);
+    for (const separator of banner.querySelectorAll(".banner-separator")) {
+      assert.equal(separator.tagName, "SPAN"); assert.equal(separator.textContent, "·");
+      assert.equal(separator.getAttribute("aria-hidden"), "true");
+    }
+    for (const button of banner.querySelectorAll("button")) {
+      const style = getComputedStyle(button);
+      assert.equal(style.paddingInlineStart, style.paddingInlineEnd);
+      assert.ok(parseFloat(style.paddingInlineStart) > 0, "pill fills need padding on both sides");
+      assert.equal(getComputedStyle(button, "::before").content, "none");
+    }
     banner.querySelector(".banner-restore").click(); banner.querySelector(".banner-dismiss").click();
     assert.deepEqual(calls, ["restore", "dismiss"]);
   });
@@ -142,12 +165,38 @@ test("busy SAVED row and banner reject pointer and keyboard actions without disa
     assert.ok(el.classList.contains("busy"));
     assert.equal(getComputedStyle(el).opacity, "0.5");
     assert.equal(getComputedStyle(el).pointerEvents, "none");
-    for (const button of el.querySelectorAll("button")) { assert.equal(button.disabled, true); button.click(); key(button, "Enter"); }
+    for (const button of el.querySelectorAll("button")) {
+      assert.equal(button.disabled, false);
+      assert.equal(button.getAttribute("aria-disabled"), "true");
+      button.click(); key(button, "Enter"); key(button, " ");
+    }
   }
   busy.click(); key(busy.querySelector(".row-open"), "Delete");
   assert.deepEqual(calls, []);
   row(root, "f2").click(); assert.deepEqual(calls, ["f2"]);
 });
+
+// Native disabled controls cannot regain focus after the saved DOM rebuild.
+for (const selector of [".row-open", ".saved-delete", ".banner-restore", ".banner-dismiss"]) {
+  test(`${selector} keeps keyboard focus when becoming busy and rejects activation`, async () => {
+    const calls = [], ui = { busy: new Set(), confirmFolderId: "f1" };
+    const { root, page, board, handlers } = await draw({ missing: entries(), ui, handlers: {
+      onOpenSaved: () => calls.push("open"), onDeleteSaved: () => calls.push("delete"),
+      onConfirmDelete: () => calls.push("confirm"), onRestoreAll: () => calls.push("restore"),
+      onDismissMissing: () => calls.push("dismiss"),
+    } });
+    page.querySelector(selector).focus();
+    ui.busy.add(selector.startsWith(".banner") ? "banner" : "f1");
+    renderBoard(root, board, ui, handlers);
+    const control = page.querySelector(selector);
+    assert.equal(document.activeElement, control, "busy controls must keep keyboard focus");
+    control.click(); key(control, "Enter"); key(control, " "); key(control, "Delete");
+    assert.deepEqual(calls, []);
+    ui.busy.clear(); renderBoard(root, board, ui, handlers);
+    assert.equal(document.activeElement, page.querySelector(selector));
+    assert.equal(page.querySelector(selector).getAttribute("aria-disabled"), "false");
+  });
+}
 
 for (const scheme of ["light", "dark"]) {
   test(`SAVED and banner obey glass, palette and upright typography rules in ${scheme}`, async () => {
@@ -259,6 +308,28 @@ for (const selector of [".banner-restore", ".banner-dismiss"]) {
     assert.equal(document.activeElement, root.querySelector(".strip"));
   });
 }
+
+// Replacing a live status node or its text re-announces an unchanged count.
+test("unchanged missing count reuses the status banner without text mutations and updates its actions", async () => {
+  const calls = [];
+  const { root, page, board } = await draw({ missing: entries(), handlers: { onRestoreAll: () => calls.push("old") } });
+  const original = page.querySelector(".banner"), text = original.querySelector(".banner-text");
+  const observer = new MutationObserver(() => {});
+  observer.observe(original, { childList: true, characterData: true, subtree: true });
+  const ui = { busy: new Set(["banner"]) };
+  const handlers = { onRestoreAll: () => calls.push("new"), onDismissMissing: () => calls.push("dismiss") };
+  renderBoard(root, { ...board, saved: board.saved.slice(1), missing: entries().reverse() }, ui, handlers);
+  assert.equal(page.querySelector(".banner"), original, "unchanged count must reuse the live status node");
+  assert.equal(original.querySelector(".banner-text"), text);
+  assert.equal(observer.takeRecords().length, 0, "unrelated refresh must not rewrite status text");
+  original.querySelector(".banner-restore").click();
+  assert.deepEqual(calls, []);
+  renderBoard(root, board, { busy: new Set() }, handlers);
+  original.querySelector(".banner-restore").click(); original.querySelector(".banner-dismiss").click();
+  assert.deepEqual(calls, ["new", "dismiss"], "reused controls must use current UI and callbacks");
+  assert.equal(observer.takeRecords().length, 0);
+  observer.disconnect();
+});
 
 test("banner is updated once and removed when missing becomes empty", async () => {
   const { root, page, board } = await draw({ missing: entries() });

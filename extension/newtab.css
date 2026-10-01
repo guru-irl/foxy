@@ -119,10 +119,8 @@ body {
   border-radius: 999px;
 }
 
-.banner-restore::before,
-.banner-dismiss::before {
-  content: "·";
-  margin-inline: 12px;
+.banner-separator {
+  margin-inline: 4px;
   opacity: 0.5;
 }
 
@@ -143,6 +141,11 @@ button {
   color: inherit;
   font: inherit;
   cursor: pointer;
+}
+
+.banner-restore,
+.banner-dismiss {
+  padding-inline: 8px;
 }
 
 button:hover {
