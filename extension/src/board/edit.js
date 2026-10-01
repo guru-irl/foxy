@@ -8,11 +8,15 @@ export function openNameEditor(nameEl, { initial, onSave, onCancel }) {
   input.className = "group-name name-editor";
   input.type = "text";
   input.value = initial;
-  input.setAttribute("aria-label", "Group name");
+  input.setAttribute("aria-label", `Rename ${initial.trim() || "Unnamed"}`);
+  const header = nameEl.closest(".column-header");
+  const draggable = header.draggable;
+  header.draggable = false;
   let ended = false;
   function finish(save) {
     if (ended) return;
     ended = true;
+    header.draggable = draggable;
     input.removeEventListener("blur", blur);
     input.removeEventListener("keydown", keydown);
     const focused = document.activeElement === input;
@@ -21,6 +25,7 @@ export function openNameEditor(nameEl, { initial, onSave, onCancel }) {
       nameEl.textContent = title || "UNNAMED";
       nameEl.classList.toggle("unnamed", title === "");
       nameEl.title = nameEl.textContent;
+      nameEl.setAttribute("aria-label", `Rename ${title || "Unnamed"}`);
     }
     input.replaceWith(nameEl);
     if (focused) nameEl.focus({ preventScroll: true });
@@ -53,6 +58,9 @@ export function openColorPicker(dotEl, { current, onPick, onClose }) {
     ended = true;
     document.removeEventListener("click", outside, true);
     document.removeEventListener("keydown", keydown, true);
+    document.removeEventListener("focusout", focusout);
+    document.removeEventListener("visibilitychange", visibilitychange);
+    window.removeEventListener("blur", windowBlur);
     picker.remove();
     dotEl.setAttribute("aria-expanded", "false");
     if (restoreFocus && dotEl.isConnected) dotEl.focus({ preventScroll: true });
@@ -70,13 +78,18 @@ export function openColorPicker(dotEl, { current, onPick, onClose }) {
       event.stopPropagation();
       if (ended) return;
       // Start the API action before releasing the edit hold.
-      try { onPick(color); } finally { close(true); }
+      try { if (color !== current) onPick(color); } finally { close(true); }
     });
     picker.append(choice);
   }
   function outside(event) {
     if (!picker.contains(event.target) && !dotEl.contains(event.target)) close();
   }
+  function focusout(event) {
+    if (!picker.contains(event.relatedTarget) && !dotEl.contains(event.relatedTarget)) close();
+  }
+  function visibilitychange() { if (document.hidden) close(); }
+  function windowBlur() { close(); }
   function keydown(event) {
     if (event.key !== "Escape") return;
     event.preventDefault(); event.stopPropagation();
@@ -86,6 +99,9 @@ export function openColorPicker(dotEl, { current, onPick, onClose }) {
   dotEl.setAttribute("aria-expanded", "true");
   document.addEventListener("click", outside, true);
   document.addEventListener("keydown", keydown, true);
+  document.addEventListener("focusout", focusout);
+  document.addEventListener("visibilitychange", visibilitychange);
+  window.addEventListener("blur", windowBlur);
   (picker.querySelector('[aria-pressed="true"]') ?? picker.firstElementChild).focus({ preventScroll: true });
   return { close: () => close() };
 }

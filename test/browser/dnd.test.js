@@ -37,6 +37,26 @@ async function draw(set = setup(), width = 1600) {
   renderBoard(root, board, {}, handlers);
   return { root, board, calls, handlers, renderBoard };
 }
+// Firefox targets the draggable ancestor, not the input, on a real pointer drag.
+// Omitting the source-column editor guard starts a drag and fades this header.
+for (const editor of ["name", "colour"]) {
+  test(`${editor} editor blocks ancestor-target dragstart without fading or a drag hold`, async () => {
+    const { root, calls } = await draw();
+    const source = header(root);
+    source.querySelector(editor === "name" ? ".group-name" : ".dot").click();
+    const dt = start(source);
+    try {
+      assert.deepEqual(calls.states, [], "an open editor must not start a drag hold");
+      assert.equal(dt.getData(GROUP), "");
+      assert.equal(source.classList.contains("dragging"), false);
+      assert.equal(getComputedStyle(source).opacity, "1");
+    } finally {
+      dispatchDrag("dragend", source, { dataTransfer: dt });
+      document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    }
+  });
+}
+
 const tab = root => root.querySelector('[data-tab-id="15"]');
 const header = root => root.querySelector('.column[data-group-id="201"] .column-header');
 function start(source) { return dispatchDrag("dragstart", source).dataTransfer; }

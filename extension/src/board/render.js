@@ -70,9 +70,10 @@ function groupColumn(root, group, handlers) {
   column.dataset.color = group.color;
   const header = el("header", "column-header");
   header.draggable = true;
-  const dot = button("dot", "Group colour");
+  const groupName = group.title.trim() || "Unnamed";
+  const dot = button("dot", `Colour of ${groupName}`);
   dot.setAttribute("aria-expanded", "false");
-  const name = button("group-name", "Rename group");
+  const name = button("group-name", `Rename ${groupName}`);
   const unnamed = group.title.trim() === "";
   name.classList.toggle("unnamed", unnamed);
   name.textContent = unnamed ? "UNNAMED" : group.title;
@@ -91,11 +92,17 @@ function groupColumn(root, group, handlers) {
     active.finish = editor.save ?? editor.close;
     active.cancel = editor.cancel ?? editor.close;
   }
-  const rename = () => begin(end => openNameEditor(name, {
-    initial: name.classList.contains("unnamed") ? "" : name.textContent,
-    onSave: title => { try { handlers.onRename?.(group.id, title); } finally { end(); } },
-    onCancel: end,
-  }));
+  const rename = () => {
+    const initial = name.classList.contains("unnamed") ? "" : name.textContent;
+    begin(end => openNameEditor(name, {
+      initial,
+      onSave: title => {
+        try { if (title !== initial.trim()) handlers.onRename?.(group.id, title); }
+        finally { end(); }
+      },
+      onCancel: end,
+    }));
+  };
   renameStarts.set(name, rename);
   name.addEventListener("click", rename);
   dot.addEventListener("click", () => {
@@ -103,12 +110,12 @@ function groupColumn(root, group, handlers) {
     begin(end => openColorPicker(dot, { current: group.apiColor,
       onPick: color => handlers.onRecolor?.(group.id, color), onClose: end }));
   });
-  const close = button("column-close", "Close group", "×");
+  const close = button("column-close", `Close group: ${groupName}`, "×");
   close.addEventListener("click", () => handlers.onCloseGroup?.(group.id));
   header.append(dot, name);
   if (!group.current) {
     header.classList.add("remote");
-    const bring = button("bring-here", "Bring here");
+    const bring = button("bring-here", `Bring ${groupName} here`);
     bring.append(el("span", "bring-icon"));
     bring.addEventListener("click", () => handlers.onBringHere?.(group.id));
     header.append(bring);
@@ -149,18 +156,13 @@ function tabRow(tab, handlers) {
   if (tab.title === tab.url) label.classList.add("url");
   const open = button("row-open", tab.title);
   open.append(icon(tab.icon), label);
-  const close = button("row-close", "Close tab", "×");
+  const close = button("row-close", `Close tab: ${tab.title}`, "×");
   close.addEventListener("click", event => {
     event.stopPropagation();
     handlers.onCloseTab?.(tab.id);
   });
   row.addEventListener("click", event => {
     if (event.button !== 0 || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
-    handlers.onOpen?.(tab);
-  });
-  row.addEventListener("keydown", event => {
-    if (event.target !== row || (event.key !== "Enter" && event.key !== " ")) return;
-    event.preventDefault();
     handlers.onOpen?.(tab);
   });
   row.append(open, close);

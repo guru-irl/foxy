@@ -25,6 +25,7 @@
   --gap: 12px;
   --card: light-dark(rgba(246, 246, 247, 0.85), rgba(22, 22, 24, 0.78));
   --label: light-dark(rgba(0, 0, 0, 0.62), rgba(255, 255, 255, 0.68));
+  --unnamed: light-dark(rgba(0, 0, 0, 0.48), rgba(255, 255, 255, 0.48));
   --hover: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.08));
   --pressed: light-dark(rgba(0, 0, 0, 0.1), rgba(255, 255, 255, 0.12));
   --thumb: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.18));
@@ -262,7 +263,7 @@ button.dot {
 }
 
 .unnamed {
-  color: var(--text-muted);
+  color: var(--unnamed);
 }
 
 .column-close,
@@ -315,13 +316,27 @@ button.dot {
   cursor: pointer;
 }
 
-.row:hover {
+.row:hover,
+.column-header:hover {
   background: var(--hover);
 }
 
 .row:active,
-.row:focus-visible {
+.row:focus-visible,
+.row:has(.row-open:active),
+.row:has(.row-open:focus-visible),
+.column-header:has(.group-name:active),
+.column-header:has(.group-name:focus-visible) {
   background: var(--pressed);
+}
+
+.row-open:hover,
+.row-open:active,
+.row-open:focus-visible,
+button.group-name:hover,
+button.group-name:active,
+button.group-name:focus-visible {
+  background: transparent;
 }
 
 .row-close {
@@ -427,6 +442,7 @@ button.dot {
 }
 
 .name-editor {
+  cursor: text;
   box-sizing: border-box;
   width: calc(100% - 46px);
   height: var(--row);
@@ -461,8 +477,12 @@ button.dot {
   margin: 0;
 }
 
+.color-picker .dot[aria-pressed="true"] {
+  transform: scale(1.25);
+}
+
 .color-picker .dot:focus-visible {
-  opacity: 0.65;
+  transform: scale(1.5);
 }
 
 .bring-here {

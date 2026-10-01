@@ -67,6 +67,23 @@ export function dispatchDrag(type, target, { dataTransfer = new DataTransfer(), 
   return event;
 }
 
+// Inactive headless Firefox does not expose trusted hover/focus-visible from
+// synthetic events. Substitute equal-specificity classes in the real rules.
+export function withPseudoState(elements, pseudo, check) {
+  const sheet = [...document.styleSheets].find(sheet => sheet.href?.endsWith("/extension/newtab.css"));
+  const rules = [...sheet.cssRules].filter(rule => rule.selectorText?.includes(`:${pseudo}`));
+  const selectors = rules.map(rule => rule.selectorText);
+  const className = `test-${pseudo}`;
+  try {
+    rules.forEach(rule => { rule.selectorText = rule.selectorText.replaceAll(`:${pseudo}`, `.${className}`); });
+    elements.forEach(element => element.classList.add(className));
+    check();
+  } finally {
+    rules.forEach((rule, index) => { rule.selectorText = selectors[index]; });
+    elements.forEach(element => element.classList.remove(className));
+  }
+}
+
 export function nextFrame() {
   return new Promise(resolve => requestAnimationFrame(resolve));
 }

@@ -1,4 +1,4 @@
-import { test, assert, fixture, nextFrame } from "./harness.js";
+import { test, assert, fixture, nextFrame, withPseudoState } from "./harness.js";
 import { createFirefox } from "../fakes/firefox.js";
 import { buildBoard } from "../../extension/src/board/model.js";
 
@@ -99,11 +99,53 @@ test("rows expose drag identities, literal text and accessible close controls", 
   row.querySelector(".row-close").click();
   node.querySelector('[data-group-id="101"] .column-close').click();
   node.querySelector(".bring-here").click();
-  assert.deepEqual(opened, [12, 12, 12]);
+  assert.deepEqual(opened, [12], "the noninteractive row wrapper must ignore keydown; native buttons supply activation clicks");
   assert.deepEqual(closed, [12]);
   assert.deepEqual(groupsClosed, [101]);
   assert.deepEqual(brought, [201]);
 });
+
+test("close, bring, rename and colour labels identify their tab or group", async () => {
+  const node = await draw();
+  assert.equal(node.querySelector('[data-tab-id="12"] .row-close').getAttribute("aria-label"), "Close tab: <b>Literal title</b>");
+  const named = node.querySelector('[data-group-id="101"]');
+  assert.equal(named.querySelector(".column-close").getAttribute("aria-label"), "Close group: DEV SERVER");
+  assert.equal(named.querySelector(".group-name").getAttribute("aria-label"), "Rename DEV SERVER");
+  assert.equal(named.querySelector(".dot").getAttribute("aria-label"), "Colour of DEV SERVER");
+  const unnamed = node.querySelector('[data-group-id="102"]');
+  assert.equal(unnamed.querySelector(".column-close").getAttribute("aria-label"), "Close group: Unnamed");
+  assert.equal(unnamed.querySelector(".group-name").getAttribute("aria-label"), "Rename Unnamed");
+  assert.equal(unnamed.querySelector(".dot").getAttribute("aria-label"), "Colour of Unnamed");
+  assert.equal(node.querySelector(".bring-here").getAttribute("aria-label"),
+    "Bring Research with a very long name that must never widen its column here");
+});
+
+// Too little alpha separation makes UNNAMED look named; too little contrast
+// makes it unreadable against the composited neutral card.
+for (const scheme of ["light", "dark"]) {
+  test(`UNNAMED is clearly fainter but retains at least 3:1 contrast in ${scheme}`, async () => {
+    const node = await draw(); node.style.colorScheme = scheme;
+    const unnamed = node.querySelector(".unnamed"), named = node.querySelector('[data-group-id="101"] .group-name');
+    const canvas = document.createElement("canvas"); canvas.width = canvas.height = 1;
+    const ctx = canvas.getContext("2d");
+    const rgba = color => {
+      ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = color; ctx.fillRect(0, 0, 1, 1);
+      return [...ctx.getImageData(0, 0, 1, 1).data];
+    };
+    const alpha = element => rgba(getComputedStyle(element).color)[3] / 255;
+    assert.ok(alpha(named) - alpha(unnamed) >= 0.1, "UNNAMED needs a clearly lower alpha than named titles");
+    ctx.fillStyle = scheme === "light" ? "white" : "black"; ctx.fillRect(0, 0, 1, 1);
+    ctx.fillStyle = getComputedStyle(unnamed.closest(".column")).backgroundColor; ctx.fillRect(0, 0, 1, 1);
+    const card = [...ctx.getImageData(0, 0, 1, 1).data];
+    ctx.fillStyle = getComputedStyle(unnamed).color; ctx.fillRect(0, 0, 1, 1);
+    const text = [...ctx.getImageData(0, 0, 1, 1).data];
+    const luminance = rgb => rgb.slice(0, 3).map(c => c / 255 <= 0.04045 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4)
+      .reduce((sum, value, i) => sum + value * [0.2126, 0.7152, 0.0722][i], 0);
+    const a = luminance(card), b = luminance(text);
+    const contrast = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    assert.ok(contrast >= 3, `UNNAMED contrast must be at least 3:1, got ${contrast}`);
+  });
+}
 
 test("unnamed and long groups retain 264px glass columns with hard scroll cuts", async () => {
   const node = await draw();
@@ -128,6 +170,23 @@ test("unnamed and long groups retain 264px glass columns with hard scroll cuts",
     assert.equal(rows.tabIndex, -1);
   }
 });
+
+// Generic button fills must not create a second surface inside the row/header.
+for (const state of ["hover", "active", "focus-visible"]) {
+  for (const kind of ["row", "group name"]) {
+    test(`${kind} ${state} paints only its containing surface`, async () => {
+      const node = await draw(); node.style.colorScheme = "dark";
+      const button = node.querySelector(kind === "row" ? ".row-open" : ".group-name");
+      const container = button.parentElement;
+      const elements = state === "hover" ? [button, container] : [button];
+      withPseudoState(elements, state, () => {
+        assert.equal(getComputedStyle(button).backgroundColor, "rgba(0, 0, 0, 0)", "the inner button must stay transparent");
+        assert.equal(getComputedStyle(container).backgroundColor,
+          state === "hover" ? "rgba(255, 255, 255, 0.08)" : "rgba(255, 255, 255, 0.12)");
+      });
+    });
+  }
+}
 
 test("empty board still offers fixed columns and new group", async () => {
   const node = await root();

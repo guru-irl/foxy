@@ -106,7 +106,8 @@ export function attachDnd(root, handlers, board) {
 
   root.addEventListener("dragstart", event => {
     const source = event.target.closest?.(".row, .column-header");
-    if (!source || !root.contains(source) || !event.dataTransfer || event.target.closest("input, textarea")) return;
+    if (!source || !root.contains(source) || !event.dataTransfer || event.target.closest("input, textarea") ||
+        source.closest(".column")?.querySelector(".name-editor, .color-picker")) return;
     const row = source.matches(".row");
     const id = row ? source.dataset.tabId : source.closest(".column[data-group-id]")?.dataset.groupId;
     if (id === undefined) return;

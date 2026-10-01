@@ -1,4 +1,4 @@
-import { test, assert, fixture, nextFrame, dispatchDrag } from "./harness.js";
+import { test, assert, fixture, nextFrame, dispatchDrag, withPseudoState } from "./harness.js";
 import { createFirefox } from "../fakes/firefox.js";
 import { buildBoard } from "../../extension/src/board/model.js";
 import { renderBoard } from "../../extension/src/board/render.js";
@@ -67,6 +67,7 @@ for (const ending of ["Enter", "Escape", "blur"]) {
     const field = input(node);
     assert.equal(document.activeElement, field);
     assert.equal(field.value, "First");
+    assert.equal(field.getAttribute("aria-label"), "Rename First");
     assert.equal(field.selectionStart, 0); assert.equal(field.selectionEnd, 5);
     field.value = "  New name  ";
     if (ending === "blur") field.blur(); else key(field, ending);
@@ -76,6 +77,29 @@ for (const ending of ["Enter", "Escape", "blur"]) {
     assert.deepEqual(states, [true]);
     assert.equal(node.querySelector(".name-editor"), null);
     assert.equal(name(node).textContent, ending === "Escape" ? "First" : "New name");
+    assert.equal(name(node).getAttribute("aria-label"), ending === "Escape" ? "Rename First" : "Rename New name");
+  });
+}
+
+// Leaving a draggable ancestor enabled makes pointer text selection drag the group.
+for (const ending of ["Enter", "Escape", "blur", "rerender"]) {
+  test(`rename disables header dragging and restores it after ${ending}`, async () => {
+    const node = await draw();
+    const header = name(node).closest(".column-header");
+    assert.equal(header.draggable, true);
+    name(node).click();
+    const field = input(node);
+    try {
+      assert.equal(header.draggable, false, "the rename input must not have a draggable ancestor");
+      if (ending === "blur") field.dispatchEvent(new FocusEvent("blur"));
+      else if (ending === "rerender") {
+        const ff = createFirefox(setup());
+        const board = buildBoard({ windows: await ff.browser.windows.getAll(), tabs: await ff.browser.tabs.query({}),
+          groups: await ff.browser.tabGroups.query({}), currentWindowId: 1, selfTabId: 99 });
+        renderBoard(node, board, {}, {});
+      } else key(field, ending);
+      assert.equal(header.draggable, true, "editor completion must restore the previous drag state");
+    } finally { key(field, "Escape"); }
   });
 }
 
@@ -92,8 +116,81 @@ test("empty commit remains faint UNNAMED and long editor never widens a column",
   assert.equal(style.fontWeight, "800"); assert.equal(style.fontStretch, "50%");
   assert.equal(style.borderTopWidth, "0px"); assert.equal(style.outlineStyle, "none"); assert.equal(style.boxShadow, "none");
   field.value = " \t "; key(field, "Enter");
-  assert.deepEqual(saved, [[102, ""]]);
+  assert.deepEqual(saved, [], "trimmed unchanged unnamed titles must not request an API write");
   assert.equal(name(node, 102).textContent, "UNNAMED"); assert.ok(name(node, 102).classList.contains("unnamed"));
+});
+
+test("clearing a named group still saves the empty title once", async () => {
+  const saved = [], ended = [];
+  const node = await draw({ onRename: (...args) => saved.push(args), onEditEnd: () => ended.push(true) });
+  name(node).click(); const field = input(node); field.value = " \t "; key(field, "Enter");
+  key(field, "Enter"); field.dispatchEvent(new FocusEvent("blur"));
+  assert.deepEqual(saved, [[101, ""]]); assert.equal(ended.length, 1);
+  assert.equal(name(node).textContent, "UNNAMED"); assert.equal(name(node).getAttribute("aria-label"), "Rename Unnamed");
+});
+
+test("name editor uses a text-selection cursor", async () => {
+  const node = await draw(); name(node).click();
+  try { assert.equal(getComputedStyle(input(node)).cursor, "text"); }
+  finally { key(input(node), "Escape"); }
+});
+
+// Calling onRename for an unchanged trimmed title needlessly mutates Firefox.
+for (const ending of ["Enter", "blur"]) {
+  for (const id of [101, 102]) {
+    test(`unchanged trimmed ${id === 102 ? "unnamed" : "named"} title on ${ending} skips updates and refreshes once`, async () => {
+      const { ff, node, control } = await controller();
+      name(node, id).click(); const field = input(node), count = rebuilds(node);
+      try {
+        field.value = id === 101 ? "  First\t " : " \t ";
+        await ff.browser.tabs.update(23, { url: "https://example.com/no-op-rename" }); await flush(ff);
+        assert.equal(count(), 0); ff.calls.length = 0;
+        if (ending === "blur") field.dispatchEvent(new FocusEvent("blur")); else key(field, ending);
+        field.dispatchEvent(new FocusEvent("blur")); key(field, "Enter"); await flush(ff);
+        assert.equal(ff.calls.filter(call => call.api === "tabGroups.update").length, 0, "an unchanged trimmed title must not write");
+        assert.equal(control.ui.editing, false); assert.equal(control.ui.editGroupId, null);
+        assert.equal(count(), 1); assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
+        assert.equal(node.querySelector(".name-editor"), null);
+      } finally { key(field, "Escape"); await flush(ff); }
+    });
+  }
+}
+
+test("picking the current colour skips updates and refreshes once", async () => {
+  const { ff, node, control } = await controller();
+  node.querySelector('[data-group-id="101"] .dot').click();
+  const picker = node.querySelector(".color-picker"), count = rebuilds(node);
+  try {
+    await ff.browser.tabs.update(23, { url: "https://example.com/no-op-colour" }); await flush(ff);
+    assert.equal(count(), 0); ff.calls.length = 0;
+    const choice = picker.querySelector('[data-color="red"]'); choice.click(); choice.click(); await flush(ff);
+    assert.equal(ff.calls.filter(call => call.api === "tabGroups.update").length, 0, "the current colour must not write");
+    assert.equal(control.ui.editing, false); assert.equal(control.ui.editGroupId, null);
+    assert.equal(count(), 1); assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
+    assert.equal(node.querySelector(".color-picker"), null);
+  } finally { key(document, "Escape"); await flush(ff); }
+});
+
+test("current picker colour is visibly larger", async () => {
+  const node = await draw(); node.querySelector('[data-group-id="101"] .dot').click();
+  const picker = node.querySelector(".color-picker"), current = picker.querySelector('[aria-pressed="true"]');
+  const other = picker.querySelector('[data-color="green"]');
+  try {
+    assert.equal(getComputedStyle(other).transform, "none");
+    assert.equal(getComputedStyle(current).transform, "matrix(1.25, 0, 0, 1.25, 0, 0)", "current colour needs a visible marker");
+  } finally { key(document, "Escape"); }
+});
+
+test("picker keyboard focus is stronger without border or outline decoration", async () => {
+  const node = await draw(); node.querySelector('[data-group-id="101"] .dot').click();
+  const other = node.querySelector('.color-picker [data-color="green"]');
+  try {
+    withPseudoState([other], "focus-visible", () => {
+      const style = getComputedStyle(other);
+      assert.equal(style.transform, "matrix(1.5, 0, 0, 1.5, 0, 0)", "keyboard focus must be more than opacity alone");
+      assert.equal(style.opacity, "1"); assert.equal(style.outlineStyle, "none"); assert.equal(style.borderTopWidth, "0px");
+    });
+  } finally { key(document, "Escape"); }
 });
 
 test("title and colour edits are exclusive and each releases its hold once", async () => {
@@ -143,6 +240,66 @@ for (const ending of ["Escape", "outside click"]) {
     key(document, "Escape"); assert.equal(ended.length, 1);
   });
 }
+
+function visibility(hidden) {
+  const descriptor = Object.getOwnPropertyDescriptor(document, "hidden");
+  try {
+    Object.defineProperty(document, "hidden", { configurable: true, value: hidden });
+    document.dispatchEvent(new Event("visibilitychange"));
+  } finally {
+    if (descriptor) Object.defineProperty(document, "hidden", descriptor);
+    else delete document.hidden;
+  }
+}
+
+// Missing any lifecycle close listener leaves ui.editing set and events held.
+for (const ending of ["outside focus", "lost focus", "hidden document", "window blur"]) {
+  test(`picker ${ending} releases its hold with exactly one refresh`, async () => {
+    const { ff, node, control } = await controller();
+    let ended = 0;
+    const end = control.handlers.onEditEnd;
+    control.handlers.onEditEnd = id => { ended++; end(id); };
+    const dot = node.querySelector('[data-group-id="101"] .dot');
+    dot.click();
+    const picker = node.querySelector(".color-picker");
+    const choice = picker.querySelector('[data-color="red"]');
+    const count = rebuilds(node);
+    try {
+      await ff.browser.tabs.update(23, { url: "https://example.com/picker-held" }); await flush(ff);
+      assert.equal(control.ui.editing, true); assert.equal(count(), 0);
+      ff.calls.length = 0;
+      const depart = () => {
+        if (ending === "hidden document") visibility(true);
+        else if (ending === "window blur") window.dispatchEvent(new Event("blur"));
+        else choice.dispatchEvent(new FocusEvent("focusout", { bubbles: true,
+          relatedTarget: ending === "outside focus" ? node.querySelector(".row-open") : null }));
+      };
+      depart(); depart(); await flush(ff);
+      assert.equal(node.querySelector(".color-picker"), null, "leaving the picker must dismiss it");
+      assert.equal(control.ui.editing, false); assert.equal(control.ui.editGroupId, null);
+      assert.equal(ended, 1); assert.equal(count(), 1);
+      assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
+      assert.equal(ff.calls.filter(call => call.api === "tabGroups.update").length, 0);
+      assert.equal(node.querySelector('[data-tab-id="23"] .row-label').textContent, "https://example.com/picker-held");
+    } finally { key(document, "Escape"); await flush(ff); }
+  });
+}
+
+test("picker keeps its hold while focus moves between swatches or its dot and while visible", async () => {
+  const { ff, node, control } = await controller();
+  const dot = node.querySelector('[data-group-id="101"] .dot'); dot.click();
+  const picker = node.querySelector(".color-picker"), choices = picker.querySelectorAll(".dot");
+  try {
+    for (const relatedTarget of [choices[1], dot]) {
+      choices[0].dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget }));
+      assert.equal(node.querySelector(".color-picker"), picker);
+      assert.equal(control.ui.editing, true);
+    }
+    visibility(false);
+    assert.equal(node.querySelector(".color-picker"), picker);
+    assert.equal(control.ui.editing, true);
+  } finally { key(document, "Escape"); await flush(ff); }
+});
 
 for (const ending of ["Enter", "Escape"]) {
   test(`new-group DOM drop opens selected focused input and ${ending} releases one refresh`, async () => {
