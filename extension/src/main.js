@@ -30,6 +30,8 @@ function startClock(timeEl, dateEl) {
 
 /** All board interactions share this state; DnD and editors set it via handlers. */
 export function createController(root, api, ui = { editGroupId: null, dragging: false, editing: false }) {
+  ui.confirmFolderId ??= null;
+  ui.busy ??= new Set();
   let board;
   let self;
   let generation = 0;
@@ -79,13 +81,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
           ? requestedEditGroupId : null;
         requestedEditGroupId = null;
       }
-      const key = JSON.stringify({ board, ui });
-      if (key !== lastRenderedKey) {
-        const saved = captureView(root);
-        renderBoard(root, board, ui, handlers);
-        restoreView(root, saved);
-        lastRenderedKey = key;
-      }
+      publish();
     } catch (error) {
       pending = true;
       console.warn("Foxy: could not refresh board", error);
@@ -93,6 +89,17 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       // can retry again, without a permanent failure creating a frame loop.
       if (retry) schedule(false);
     }
+  }
+
+  function publish() {
+    if (!board) return;
+    // JSON.stringify(Set) is {}, so serialize its folder IDs explicitly.
+    const key = JSON.stringify({ board, ui: { ...ui, busy: [...ui.busy].sort() } });
+    if (key === lastRenderedKey) return;
+    const saved = captureView(root);
+    renderBoard(root, board, ui, handlers);
+    restoreView(root, saved);
+    lastRenderedKey = key;
   }
 
   function schedule(retry = true) {
@@ -126,6 +133,12 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   }
 
   const handlers = {
+    onConfirmDelete: folderId => {
+      if (ui.confirmFolderId === folderId) return;
+      ui.confirmFolderId = folderId;
+      if (held()) pending = true;
+      else publish();
+    },
     onOpen: row => action(() => openTab(api, row, self, { close: history.length === 1 })),
     onCloseTab: tabId => action(() => closeTabs(api, [tabId], self?.id)),
     onCloseGroup: groupId => action(() => closeGroup(api, groupId, self?.id)),

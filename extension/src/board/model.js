@@ -1,7 +1,7 @@
 import { colorKey } from "../model.js";
 
 /** Build the board from detached WebExtension snapshots, without changing them. */
-export function buildBoard({ windows, tabs, groups, currentWindowId, selfTabId, selfUrl }) {
+export function buildBoard({ windows, tabs, groups, currentWindowId, selfTabId, selfUrl, saved = [], missing = [] }) {
   const selfBaseUrl = selfUrl?.split(/[?#]/, 1)[0];
   const recency = new Map();
   for (const tab of tabs) {
@@ -16,7 +16,7 @@ export function buildBoard({ windows, tabs, groups, currentWindowId, selfTabId, 
       return (recency.get(b) ?? 0) - (recency.get(a) ?? 0) || a - b;
     });
 
-  const board = { windowOrder, pinned: [], columns: [], tabs: [] };
+  const board = { windowOrder, pinned: [], columns: [], tabs: [], saved, missing };
   for (const windowId of windowOrder) {
     const current = windowId === currentWindowId;
     const rows = tabs

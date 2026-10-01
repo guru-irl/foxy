@@ -1,8 +1,10 @@
+import { colorKey } from "../model.js";
 import { attachDnd } from "./dnd.js";
 import { openNameEditor, openColorPicker } from "./edit.js";
 
 const editors = new WeakMap();
 const renameStarts = new WeakMap();
+const banners = new WeakMap();
 
 const layouts = new WeakSet();
 function alignColumns(root) {
@@ -12,12 +14,14 @@ function alignColumns(root) {
 
 // Text is always assigned as textContent, never parsed as markup.
 export function renderBoard(root, board, ui, handlers) {
+  const focus = savedFocus(root);
   // A vanished editor must also release its document listeners. Controller
   // identity checks prevent this old cleanup from ending a newer editor.
   editors.get(root)?.cancel();
   root.setAttribute("role", "region");
   const strip = el("div", "strip");
   strip.tabIndex = -1;
+  if (board.saved?.length) strip.append(savedColumn(root, board.saved, ui, handlers));
   strip.append(...board.columns.map(column => groupColumn(root, column, handlers)));
   const create = el("section", "column new-group");
   create.dataset.zone = "new-group";
@@ -27,17 +31,160 @@ export function renderBoard(root, board, ui, handlers) {
   strip.append(create);
   root.replaceChildren(fixedColumn("pinned", "PINNED", board.pinned, handlers), strip,
     fixedColumn("tabs", "TABS", board.tabs, handlers));
+  banners.get(root)?.remove();
+  banners.delete(root);
+  if (board.missing?.length) {
+    const banner = missingBanner(board.missing.length, ui, handlers);
+    root.before(banner);
+    banners.set(root, banner);
+  }
   attachDnd(root, handlers, board);
   alignColumns(root);
   if (ui.editGroupId != null) {
     const name = root.querySelector(`.column[data-group-id="${ui.editGroupId}"] .group-name`);
     renameStarts.get(name)?.();
   }
+  if (focus && !root.querySelector(".name-editor")) {
+    let target;
+    if (focus.folderId !== undefined) {
+      const rows = [...root.querySelectorAll(".saved-row")];
+      const row = rows.find(row => row.dataset.folderId === focus.folderId);
+      target = row ? (focus.selector ? row.querySelector(focus.selector) : row)
+        : rows[Math.min(focus.index, rows.length - 1)]?.querySelector(".row-open");
+    } else target = banners.get(root)?.querySelector(focus.selector);
+    (target ?? strip).focus({ preventScroll: true });
+  }
   if (!layouts.has(root)) {
     layouts.add(root);
     // Width changes can add/remove a classic horizontal scrollbar.
     new ResizeObserver(() => alignColumns(root)).observe(root);
   }
+}
+
+// SAVED and the sibling banner are not tab/group focus identities. Preserve
+// these here; the controller continues owning tab focus and scroll restoration.
+function savedFocus(root) {
+  const active = document.activeElement;
+  const row = active.closest?.(".saved-row");
+  if (row && root.contains(row)) {
+    return { folderId: row.dataset.folderId,
+      index: [...root.querySelectorAll(".saved-row")].indexOf(row),
+      selector: active === row ? null : active.matches(".saved-delete") ? ".saved-delete" : ".row-open" };
+  }
+  if (banners.get(root)?.contains(active)) {
+    return { selector: active.matches(".banner-restore") ? ".banner-restore" : ".banner-dismiss" };
+  }
+  return null;
+}
+
+function missingBanner(count, ui, handlers) {
+  const banner = el("div", "banner");
+  banner.setAttribute("role", "status");
+  const text = el("span", "banner-text");
+  text.textContent = `${count} ${count === 1 ? "GROUP" : "GROUPS"} DIDN'T COME BACK`;
+  const restore = button("banner-restore", "Restore all missing groups", "RESTORE ALL");
+  const dismiss = button("banner-dismiss", "Dismiss missing groups", "DISMISS");
+  restore.addEventListener("click", () => {
+    if (!ui.busy?.has("banner")) handlers.onRestoreAll?.();
+  });
+  dismiss.addEventListener("click", () => {
+    if (!ui.busy?.has("banner")) handlers.onDismissMissing?.();
+  });
+  banner.append(text, restore, dismiss);
+  setBusy(banner, ui.busy?.has("banner"));
+  return banner;
+}
+
+function savedColumn(root, saved, ui, handlers) {
+  const column = el("section", "column saved");
+  column.dataset.zone = "saved";
+  const heading = el("h2", "column-title");
+  heading.textContent = "SAVED";
+  const list = rows("saved");
+  list.append(...saved.map(group => savedRow(root, group, ui, handlers)));
+  column.append(heading, list);
+  return column;
+}
+
+function savedRow(root, group, ui, handlers) {
+  const row = el("div", "row saved-row");
+  // As with tab rows, open and delete are siblings, not nested buttons.
+  row.tabIndex = -1;
+  row.dataset.folderId = group.folderId;
+  row.dataset.color = group.color;
+  const unnamed = group.title.trim() === "";
+  const title = unnamed ? "Unnamed" : group.title;
+  row.title = title;
+  const open = button("row-open", `Open saved group: ${title}`);
+  const dot = el("span", "dot");
+  dot.dataset.palette = colorKey(group.color);
+  const label = el("span", "row-label");
+  label.textContent = unnamed ? "UNNAMED" : group.title;
+  label.classList.toggle("unnamed", unnamed);
+  const count = el("span", "saved-count");
+  count.textContent = String(group.count);
+  open.append(dot, label, count);
+  if (group.cantReopen.length) {
+    const blocked = el("span", "cant-reopen");
+    blocked.textContent = `${group.cantReopen.length} CAN'T REOPEN`;
+    blocked.title = group.cantReopen.join("\n");
+    open.append(blocked);
+  }
+  const confirming = ui.confirmFolderId === group.folderId;
+  row.classList.toggle("confirming", confirming);
+  const remove = button("saved-delete", `Delete saved group: ${title}`, confirming ? "DELETE?" : "×");
+  remove.tabIndex = confirming ? 0 : -1;
+  if (confirming) remove.dataset.color = "red";
+  const busy = () => ui.busy?.has(group.folderId);
+  const confirm = () => {
+    if (busy()) return;
+    handlers.onConfirmDelete?.(group.folderId);
+  };
+  const cancel = () => {
+    if (row.isConnected && !busy() && ui.confirmFolderId === group.folderId) handlers.onConfirmDelete?.(null);
+  };
+  row.addEventListener("click", event => {
+    if (busy() || event.button !== 0 || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+    handlers.onOpenSaved?.(group.folderId);
+  });
+  remove.addEventListener("click", event => {
+    event.stopPropagation();
+    if (busy()) return;
+    if (confirming) handlers.onDeleteSaved?.(group.folderId);
+    else confirm();
+  });
+  row.addEventListener("keydown", event => {
+    if (event.isComposing) return;
+    if (["Enter", " ", "Delete", "Backspace", "Escape"].includes(event.key)) event.preventDefault();
+    if (event.repeat || busy()) return;
+    if (event.key === "Escape") { event.preventDefault(); cancel(); return; }
+    if (event.target === remove) {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); remove.click(); }
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault(); handlers.onOpenSaved?.(group.folderId);
+    } else if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault(); confirm();
+      // The controller may have rebuilt the DOM synchronously. Find by identity
+      // rather than interpolating a bookmark GUID into a CSS selector.
+      const next = [...root.querySelectorAll(".saved-row")].find(node => node.dataset.folderId === group.folderId);
+      next?.querySelector(".saved-delete")?.focus({ preventScroll: true });
+    }
+  });
+  row.addEventListener("mouseleave", cancel);
+  row.addEventListener("focusout", event => {
+    if (!row.contains(event.relatedTarget)) cancel();
+  });
+  row.append(open, remove);
+  setBusy(row, busy());
+  return row;
+}
+
+function setBusy(node, busy) {
+  node.classList.toggle("busy", Boolean(busy));
+  node.setAttribute("aria-busy", String(Boolean(busy)));
+  for (const button of node.querySelectorAll("button")) button.disabled = Boolean(busy);
 }
 
 function fixedColumn(zone, title, sections, handlers) {

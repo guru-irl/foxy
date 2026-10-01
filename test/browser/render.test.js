@@ -192,6 +192,57 @@ for (const state of ["hover", "active", "focus-visible"]) {
   }
 }
 
+test("controller owns saved confirmation and serializes busy folder IDs in its render key", async () => {
+  const { ff, node, control } = await controller();
+  assert.equal(control.ui.confirmFolderId, null);
+  assert.ok(control.ui.busy instanceof Set);
+  const rebuilds = countRebuilds(node);
+  control.handlers.onConfirmDelete("f1");
+  assert.equal(control.ui.confirmFolderId, "f1");
+  assert.equal(rebuilds(), 1);
+  await control.refresh();
+  assert.equal(rebuilds(), 1, "unchanged confirmation must skip a rebuild");
+  control.ui.busy.add("f1"); await control.refresh();
+  assert.equal(rebuilds(), 2, "Set membership must invalidate the render key");
+  control.ui.busy.add("banner"); await control.refresh();
+  assert.equal(rebuilds(), 3);
+  control.ui.busy.delete("f1"); await control.refresh();
+  assert.equal(rebuilds(), 4);
+  control.handlers.onConfirmDelete(null);
+  assert.equal(control.ui.confirmFolderId, null); assert.equal(rebuilds(), 5);
+  assert.equal(ff.calls.some(call => call.api === "runtime.sendMessage"), false,
+    "Task 1 must not start sync reads or messages yet");
+});
+
+for (const hold of ["drag", "edit", "action"]) {
+  test(`saved confirmation plumbing preserves the ${hold} hold and refreshes once on release`, async () => {
+    const { ff, node, control } = await controller();
+    const rebuilds = countRebuilds(node);
+    let release, running;
+    if (hold === "drag") control.handlers.onDragState(true);
+    else if (hold === "edit") control.handlers.onEditState(true);
+    else {
+      const update = ff.browser.tabGroups.update;
+      ff.browser.tabGroups.update = async (...args) => {
+        await new Promise(resolve => { release = resolve; });
+        return update(...args);
+      };
+      running = control.handlers.onRename(101, "Action rename");
+    }
+    control.handlers.onConfirmDelete("f1");
+    assert.equal(control.ui.confirmFolderId, "f1"); assert.equal(rebuilds(), 0);
+    await ff.browser.tabs.update(23, { url: `https://example.com/${hold}-confirm` });
+    await flush(ff);
+    assert.equal(rebuilds(), 0);
+    if (hold === "drag") control.handlers.onDragState(false);
+    else if (hold === "edit") control.handlers.onEditEnd();
+    else { release(); await running; }
+    await flush(ff);
+    assert.equal(rebuilds(), 1);
+    assert.equal(control.ui.confirmFolderId, "f1");
+  });
+}
+
 test("empty board still offers fixed columns and new group", async () => {
   const node = await root();
   const { renderBoard } = await import("../../extension/src/board/render.js");

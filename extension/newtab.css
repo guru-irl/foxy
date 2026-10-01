@@ -83,6 +83,54 @@ body {
   color: var(--text-muted);
 }
 
+/* --- Missing groups ----------------------------------------------------- */
+
+.banner {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  flex: none;
+  max-width: calc(100% - 48px);
+  box-sizing: border-box;
+  margin-bottom: 16px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--card);
+}
+
+.banner-text {
+  color: var(--text-muted);
+  font: normal 600 10px / 20px "Foxy Sans", system-ui, sans-serif;
+  font-stretch: 90%;
+  letter-spacing: 0.12em;
+}
+
+.banner-restore,
+.banner-dismiss,
+.cant-reopen,
+.confirming .saved-delete {
+  font: normal 700 10px / 20px "Foxy Sans", system-ui, sans-serif;
+  font-stretch: 80%;
+}
+
+.banner-restore,
+.banner-dismiss {
+  color: var(--text-muted);
+  border-radius: 999px;
+}
+
+.banner-restore::before,
+.banner-dismiss::before {
+  content: "·";
+  margin-inline: 12px;
+  opacity: 0.5;
+}
+
+.busy {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 /* --- Buttons and icons -------------------------------------------------- */
 
 /* No native look. Hover, pressed and keyboard focus are fills, not outlines. */
@@ -166,7 +214,8 @@ button.dot {
 }
 
 .column[data-color="red"],
-.dot[data-palette="red"] { --g1: oklch(0.86 0.10 45); --g2: oklch(0.72 0.17 18); }
+.dot[data-palette="red"],
+.saved-delete[data-color="red"] { --g1: oklch(0.86 0.10 45); --g2: oklch(0.72 0.17 18); }
 .column[data-color="orange"],
 .dot[data-palette="orange"] { --g1: oklch(0.90 0.10 80); --g2: oklch(0.77 0.16 52); }
 .column[data-color="yellow"],
@@ -422,6 +471,47 @@ button.group-name:focus-visible {
 .url {
   font-family: "Foxy Mono", monospace;
   font-variant-ligatures: none;
+}
+
+/* SAVED uses the same sibling action structure and row fills as tab rows. */
+.saved-row .dot {
+  flex: none;
+  margin: 0;
+}
+
+.saved-row .unnamed {
+  color: var(--text-muted);
+}
+
+.saved-count,
+.cant-reopen {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.saved-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.saved-delete {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  opacity: 0;
+}
+
+.saved-row:hover .saved-delete,
+.saved-row:focus-within .saved-delete,
+.confirming .saved-delete {
+  opacity: 1;
+}
+
+.confirming .saved-delete {
+  width: auto;
+  padding-inline: 8px;
+  color: var(--g2);
+  background: var(--hover);
 }
 
 /* Open and close are separate, keyboard-reachable buttons within each row. */

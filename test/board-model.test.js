@@ -72,7 +72,7 @@ test("only non-private normal windows contribute sections or group columns", asy
   input.windows.find(win => win.id === 3).type = "popup";
   input.windows.find(win => win.id === 4).type = "panel";
   assert.deepEqual(buildBoard(input), {
-    windowOrder: [1], pinned: [], columns: [],
+    windowOrder: [1], pinned: [], columns: [], saved: [], missing: [],
     tabs: [{ windowId: 1, current: true, rows: [{
       id: 11, windowId: 1, index: 0, title: "about:blank", url: "about:blank",
       icon: null, pinned: false, groupId: -1, active: true,
@@ -245,8 +245,34 @@ for (const suffix of ["", "?q=self", "#page", "?q=self#page"]) {
   });
 }
 
+test("saved and missing default to empty arrays before the background answers", async () => {
+  const input = await snapshot();
+  const board = buildBoard({ ...input, saved: undefined, missing: undefined });
+  assert.deepEqual(board.saved, []);
+  assert.deepEqual(board.missing, []);
+});
+
+test("saved and missing preserve folder order, literal titles and API colours without changing tab zones", async () => {
+  const input = await snapshot({
+    groups: [{ id: 10, windowId: 1 }],
+    tabs: [{ id: 1, windowId: 1, pinned: true }, { id: 2, windowId: 1, groupId: 10 }, { id: 3, windowId: 1 }],
+  });
+  const saved = [
+    { folderId: "z", title: "  Work  ", color: "grey", count: 4, cantReopen: ["about:config"] },
+    { folderId: "a", title: "", color: "red", count: 0, cantReopen: [] },
+  ];
+  const missing = [{ folderId: "a", title: "", color: "red" }, { folderId: "z", title: "  Work  ", color: "grey" }];
+  const before = structuredClone({ ...input, saved, missing });
+  const { saved: actualSaved, missing: actualMissing, ...zones } = buildBoard(freeze({ ...input, saved, missing }));
+  assert.deepEqual(actualSaved, saved);
+  assert.deepEqual(actualMissing, missing);
+  const { saved: ignoredSaved, missing: ignoredMissing, ...originalZones } = buildBoard(input);
+  assert.deepEqual(zones, originalZones);
+  assert.deepEqual({ ...input, saved, missing }, before);
+});
+
 test("no eligible windows gives an empty board, without inventing a current window", () => {
   assert.deepEqual(buildBoard({ windows: [], tabs: [], groups: [], currentWindowId: 1, selfTabId: 99 }), {
-    windowOrder: [], pinned: [], columns: [], tabs: [],
+    windowOrder: [], pinned: [], columns: [], tabs: [], saved: [], missing: [],
   });
 });
