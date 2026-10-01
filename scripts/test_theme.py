@@ -82,6 +82,17 @@ class ThemeTypographyTest(unittest.TestCase):
     def setUpClass(cls):
         cls.chrome, cls.content = (p.read_text() for p in THEME_FILES)
 
+    def test_extension_new_tab_shows_the_search_button_not_the_extension_chip(self):
+        # Firefox keeps an extension page's address bar 'valid', so Foxy's empty
+        # new tab gets the identity chip and an offscreen search button.
+        scope = '#urlbar[pageproxystate="valid"]:has(#identity-box.extensionPage):has(.urlbar-input:placeholder-shown)'
+        for part in ("#identity-box", "#tracking-protection-icon-container"):
+            with self.subTest(part=part):
+                self.assertEqual(matching_rule(self.chrome, f"{scope} {part}")["display"], "none !important")
+        switcher = matching_rule(self.chrome, f"{scope} .searchmode-switcher[offscreen]")
+        self.assertEqual(switcher["position"], "static !important")
+        self.assertEqual(switcher["top"], "auto !important")
+
     def test_no_legacy_font_references(self):
         for path, css in zip(THEME_FILES, (self.chrome, self.content)):
             with self.subTest(path=path.name):

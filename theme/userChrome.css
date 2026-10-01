@@ -822,6 +822,24 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
   pointer-events: none;
 }
 
+/* Foxy's new tab and home page: show the search engine button, as on
+   Firefox's own new tab, instead of the "Extension (Foxy)" identity chip.
+   Firefox 157 keeps the address bar "valid" for extension pages
+   (UrlbarInputBase setURI: isExtensionUrl), so it shows the identity box
+   and parks the search button offscreen ([offscreen]: fixed, top -999px).
+   An extension page with an empty address bar is an extension's new tab or
+   home override; other extension pages show their URL, so they keep the
+   chip. Typing makes the bar "invalid" and Firefox takes over as usual. */
+#urlbar[pageproxystate="valid"]:has(#identity-box.extensionPage):has(.urlbar-input:placeholder-shown) #identity-box,
+#urlbar[pageproxystate="valid"]:has(#identity-box.extensionPage):has(.urlbar-input:placeholder-shown) #tracking-protection-icon-container {
+  display: none !important;
+}
+
+#urlbar[pageproxystate="valid"]:has(#identity-box.extensionPage):has(.urlbar-input:placeholder-shown) .searchmode-switcher[offscreen] {
+  position: static !important;
+  top: auto !important;
+}
+
 /* The page's URL in bundled Cascadia Mono, which has no programming
    ligatures. The ligature-off declarations guard fallback fonts so
    "//", "==" and "&&" stay separate characters. Only while the bar shows
