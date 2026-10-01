@@ -6,9 +6,12 @@ Writes dist/preview/<name>.png.
 
 Usage: python3 scripts/preview.py [name ...]   (no names: all scenarios)
 """
+import os
 import pathlib
 import subprocess
 import sys
+
+from browser_test import PROFILE_PREFS
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIREFOX = "/Applications/Firefox.app/Contents/MacOS/firefox"
@@ -25,6 +28,8 @@ INJECT = (
 SCENARIOS = {
     "empty": ("scenario=empty", 1600, 1000),
     "one-window": ("scenario=one-window", 1600, 1000),
+    "saved": ("scenario=saved", 1600, 1000),
+    "banner": ("scenario=banner", 1600, 1000),
     "two-windows": ("scenario=two-windows", 1600, 1000),
     "remote-header": ("scenario=remote-header", 1600, 1000),
     "many-groups": ("scenario=many-groups", 1600, 1000),
@@ -45,9 +50,7 @@ def ensure_profile():
     PROFILE.mkdir(parents=True, exist_ok=True)
     (PROFILE / "user.js").write_text(
         # file:// pages may import sibling ES modules only with this off.
-        'user_pref("security.fileuri.strict_origin_policy", false);\n'
-        'user_pref("browser.shell.checkDefaultBrowser", false);\n'
-        'user_pref("datareporting.policy.dataSubmissionEnabled", false);\n'
+        'user_pref("security.fileuri.strict_origin_policy", false);\n' + PROFILE_PREFS
     )
 
 
@@ -55,12 +58,15 @@ def shoot(name, query, width, height):
     OUT.mkdir(parents=True, exist_ok=True)
     out = OUT / f"{name}.png"
     out.unlink(missing_ok=True)
+    temp = PROFILE / "tmp"
+    temp.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
         [
             FIREFOX, "--headless", "--no-remote", "-profile", str(PROFILE),
             f"--window-size={width},{height}", "--screenshot", str(out),
             f"{PAGE.as_uri()}?{query}",
         ],
+        env={**os.environ, "TMPDIR": str(temp), "TMP": str(temp), "TEMP": str(temp)},
         capture_output=True, text=True, timeout=180,
     )
     if result.returncode != 0 or not out.exists():

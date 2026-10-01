@@ -130,10 +130,10 @@ class ResultsHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def terminate_firefox(process):
-    """Signal the whole isolated group, even if the Firefox parent has exited."""
+    """Signal the isolated group even after parent exit; tolerate zombie-only EPERM."""
     try:
         os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         pass
     try:
         process.wait(timeout=5)
@@ -143,7 +143,7 @@ def terminate_firefox(process):
         # A child can outlive its parent or ignore SIGTERM.
         try:
             os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
         process.wait()
 

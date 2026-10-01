@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 import smoke_firefox as smoke
 
@@ -107,6 +108,87 @@ class ProfileTests(unittest.TestCase):
         for path in ("/tmp/smoke/profile", "/var/tmp/smoke/profile", "/private/tmp/smoke/profile"):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 smoke.safe_profile_path(path)
+
+
+class SmokeSequenceTests(unittest.TestCase):
+    def test_second_navigation_waits_for_sync_root_plus_one_second(self):
+        SCRATCH.mkdir(parents=True, exist_ok=True)
+        clock = [0.0]
+        navigations, root_seen = [], []
+        base = "moz-extension://smoke-test/"
+        grouped = [False]
+
+        def command(name, params):
+            if name == "WebDriver:Navigate":
+                navigations.append(clock[0])
+            if name == "WebDriver:TakeScreenshot":
+                return {"value": "iVBORw0KGgo="}
+
+        def script(source, args=None, *, chrome=False):
+            if source == smoke.BOARD_SCRIPT:
+                return {"board": True, "fontsReady": True, "clock": True,
+                        "columns": ["PINNED", "TABS", "SMOKE"], "url": base + "newtab.html"}
+            if source == smoke.PLACES_SCRIPT:
+                if clock[0] < 6:
+                    return []
+                if not root_seen:
+                    root_seen.append(clock[0])
+                children = [{"title": "📌 Pinned", "type": 2}]
+                if grouped[0]:
+                    children.append({"title": "🔵 Smoke", "type": 2, "urls": [smoke.SMOKE_URL]})
+                return [{"guid": "root", "children": children}]
+            if "document.fonts.load" in source:
+                return {"sans": True, "mono": True, "loaded": ["Foxy Sans", "Foxy Mono"]}
+            if "AboutNewTab" in source:
+                return base + "newtab.html"
+            if "browser.tabs.create" in source:
+                grouped[0] = True
+                return {"tabId": 1, "groupId": 1}
+            self.fail(f"unexpected script: {source}")
+
+        client = Mock(command=command, script=script)
+        with tempfile.TemporaryDirectory(prefix="smoke-sequence-", dir=SCRATCH) as directory, \
+                patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(smoke.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            results = smoke.Results()
+            smoke.run_checks(client, smoke.ROOT, Path(directory), results, base)
+        self.assertEqual(results.exit_code, 0)
+        self.assertEqual(len(navigations), 2)
+        self.assertGreaterEqual(navigations[1], root_seen[0] + 1)
+
+    def test_extension_console_errors_still_fail_the_smoke(self):
+        SCRATCH.mkdir(parents=True, exist_ok=True)
+        client = Mock()
+        client.script.return_value = [{"level": "ERROR", "message": "Promise rejected after context unloaded",
+                                      "source": "moz-extension://smoke-test/newtab.html", "line": 1}]
+        with tempfile.TemporaryDirectory(prefix="smoke-console-", dir=SCRATCH) as directory, \
+                contextlib.redirect_stdout(io.StringIO()):
+            results = smoke.Results()
+            with self.assertRaises(smoke.CheckFailed):
+                smoke.check_console(client, "moz-extension://smoke-test/", Path(directory), results)
+        self.assertEqual(results.exit_code, 1)
+
+
+class CleanupTests(unittest.TestCase):
+    def test_permission_error_on_term_still_reaps_parent(self):
+        process = Mock(pid=987654321)
+        with patch.object(smoke.os, "killpg", side_effect=PermissionError) as killpg:
+            smoke.quit_firefox(None, process)
+        killpg.assert_called_once_with(process.pid, smoke.signal.SIGTERM)
+        self.assertEqual(process.wait.call_count, 2)
+
+    def test_permission_error_on_kill_still_reaps_parent(self):
+        process = Mock(pid=987654321)
+        process.wait.side_effect = [smoke.subprocess.TimeoutExpired("firefox", 5),
+                                    smoke.subprocess.TimeoutExpired("firefox", 5), None]
+        with patch.object(smoke.os, "killpg", side_effect=[None, PermissionError]) as killpg:
+            smoke.quit_firefox(None, process)
+        self.assertEqual(killpg.call_args_list, [
+            unittest.mock.call(process.pid, smoke.signal.SIGTERM),
+            unittest.mock.call(process.pid, smoke.signal.SIGKILL),
+        ])
+        self.assertEqual(process.wait.call_count, 3)
 
 
 class ResultTests(unittest.TestCase):

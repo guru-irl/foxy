@@ -2,7 +2,8 @@
 
 A private Firefox add-on and browser theme. The add-on replaces the new tab page and
 the home page with a clock, the date and a kanban board of tabs and tab groups from
-every normal, non-private window (Foxy 2.0.0).
+every normal, non-private window (Foxy 2.1.0). Groups and pins are saved in
+bookmarks, with Firefox Sync carrying them to your other devices.
 All page text uses Google Sans Flex: the clock is heavy and upright, the date upright,
 and group titles condensed, heavy and slanted. Clicking a tab switches to it; the page
 closes only when it is its own tab's only history entry (`history.length === 1`).
@@ -13,16 +14,17 @@ Closed Tabs (as Firefox's own new tab page does). When the page has more than on
 history entry (for example, after using the Home button in an existing tab), it
 switches without closing. Closing the page with Cmd+W (or any way other than clicking a
 tab on it) still adds a "New Tab" entry to Recently Closed Tabs. No `sessions`
-permission is needed; the add-on keeps no saved copy of your tabs and sends nothing.
+permission is needed. Grouped and pinned tabs are kept as bookmarks; Foxy makes no
+network requests itself. Firefox Sync shares those bookmarks when enabled.
 
 Design: `docs/superpowers/specs/2026-10-01-foxy-design.md`.
 
 ## Board
 
-PINNED stays on the left and TABS on the right. Group columns and `+ NEW GROUP`
-scroll sideways between them; each column scrolls vertically. This window's tabs
-and groups come first, with other windows labelled below the headers or in separate
-sections. Empty group names show a faint `UNNAMED`; long names are cut with an ellipsis.
+PINNED stays on the left and TABS on the right. SAVED (when it has entries), group
+columns and `+ NEW GROUP` scroll sideways between them; each column scrolls
+vertically. This window's tabs and groups come first, with other windows labelled
+below the headers or in separate sections. Empty group names show a faint `UNNAMED`; long names are cut with an ellipsis.
 
 - Drag a tab to a group, TABS or PINNED at the insertion line. PINNED brings the tab
   into this window and pins it. Dropping on `+ NEW GROUP` creates a local group and
@@ -40,8 +42,75 @@ sections. Empty group names show a faint `UNNAMED`; long names are cut with an e
   focus their original window. Only tab activation can trigger the page-close rule
   described above. Editing and dragging defer live board updates until they end.
 
-Bookmark-backed saving and cross-device restoration are a separate planned feature;
-this board release does not yet save groups in bookmarks.
+## Saved groups and Sync
+
+SAVED lists groups that are not open on this device, with a colour dot and bookmark
+count. Click one to open it here with unloaded tabs. A `CAN'T REOPEN` label marks
+URLs Firefox does not let an add-on reopen, such as `about:` or `file:` pages;
+those URLs stay bookmarked but are skipped when opening the group. An empty group
+name appears as `UNNAMED`.
+
+Closing a whole group or its window keeps it saved. Closing an individual tab
+removes its bookmark after a short delay. To delete a saved group everywhere,
+click its ×, then `DELETE?`; moving away cancels the confirmation.
+
+If groups previously open here are missing after a restart, the board shows
+`N GROUPS DIDN'T COME BACK` with `RESTORE ALL` and `DISMISS`. They also appear
+individually in SAVED. Restore opens them here; Dismiss only clears the banner.
+Groups whose window you closed on purpose can also appear in this banner.
+
+Under `Other Bookmarks/Foxy`, `📌 Pinned` holds pins and each group has its own
+folder named with a colour emoji and the group name (for example, `🔵 Reading`).
+Each tab is a bookmark in tab order. Enable bookmark sync in Firefox Sync on each
+device to share them; without Sync they still survive locally. Shared pins reopen
+on each device. New group folders appear in SAVED rather than opening automatically.
+You can also rename folders and edit bookmarks there to change groups and tabs.
+
+First-run merges move duplicates and emptied extra folders into
+`Other Bookmarks/Foxy merge leftovers` rather than deleting them. Foxy does not
+manage or reopen that folder; it is safe to delete by hand after checking its contents.
+
+Sync never closes, moves or navigates the tab you are looking at in the focused
+window. Such changes wait until you switch away and are applied only if still valid.
+Private windows never sync and are not shown on the board.
+
+### Permissions
+
+Updating to this release asks once for the new bookmarks permission. Foxy uses:
+
+- `tabs`: read tab titles and URLs, activate, move, pin, open and close tabs.
+- `tabGroups`: read, create, move, rename and recolour groups.
+- `bookmarks`: save groups and pins in Foxy's folder and apply bookmark changes.
+- `storage`: remember bookmark mappings, which groups are open here, and deferred
+  sync changes across restarts.
+
+### Known limitations
+
+- Firefox Sync delivers bookmark changes on its own schedule, from seconds to minutes.
+- Only URLs and titles are saved, not back/forward history. Restored tabs start
+  fresh; logins survive through cookies.
+- Ungrouped, unpinned tabs are not saved. Private windows and keyboard tab moving
+  are not supported. Firefox's own saved-groups feature is separate and unaffected.
+- A local navigation held for safe syncing is lost across a restart, when the
+  session mappings and last-synced history are rebuilt. Held group ordering waits
+  for a safe activation to retry.
+- The theme does not change web pages' or `about:` pages' fonts.
+
+## Checking it in Firefox
+
+Use normal windows, with bookmark sync enabled for the cross-device check:
+
+1. Drag a tab between groups in two windows and check its exact insertion position.
+2. Click a pin from the other window and check that it moves here, still pinned.
+3. Drag a group header to reorder it, then move its column into the other window.
+4. Create or rename a group and check its colour-emoji folder and tab bookmarks under
+   `Other Bookmarks/Foxy`; pins should appear under `📌 Pinned`.
+5. On a second device with Foxy and Firefox Sync, check shared pins and SAVED groups,
+   open a saved group, then edit a bookmark and check the change on the first device.
+6. Restart with session restore off while groups are open. Check the missing-groups
+   banner, `RESTORE ALL`, and `DISMISS`. Pins should reopen too.
+7. Close a whole group so it appears in SAVED, then use × and `DELETE?`. Check that
+   its folder is gone and Sync removes it on the second device.
 
 ## Develop
 
@@ -54,6 +123,7 @@ The build packages only the add-on, with `manifest.json` at the root of
     npm test                           # node --test and the Python tests; no npm packages
     npm run test:browser               # DOM tests in headless Firefox (throwaway profile)
     python3 scripts/preview.py         # headless screenshots in dist/preview/ (throwaway profile)
+    python3 scripts/smoke_firefox.py    # real extension checks in a throwaway headless profile
 
 Runner failure-fixture checks are opt-in: `python3 test/browser/check_runner.py`.
 They launch throwaway Firefox instances; `npm test` never launches Firefox.
@@ -62,10 +132,10 @@ Before pushing: the scan reads files from the working tree, so commit (or stash)
 
 ## Smoke check in real Firefox
 
-Run `python3 scripts/smoke_firefox.py --keep-going` (or `npm run test:smoke`)
-to temporarily install the unpacked add-on in headless Firefox. Use `--firefox PATH`
-to select another Firefox executable. Without `--keep-going`, checks stop at the
-first failure; any failure exits 1. This is separate from `npm test`.
+Run `python3 scripts/smoke_firefox.py` (or `npm run test:smoke`) to temporarily
+install the unpacked add-on in headless Firefox. Add `--keep-going` to report all
+checks rather than stopping at the first failure. Use `--firefox PATH` to select
+another Firefox executable. Any failure exits 1. This is separate from `npm test`.
 
 The check covers the real newtab override, board and clock, bundled fonts,
 bookmark-backed sync startup and a grouped-tab round-trip. It prints extension

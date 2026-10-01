@@ -38,9 +38,17 @@ const one = [
   { title: "Research with a very long group name that has to be cut off", color: "green", count: 12 },
   { title: "   ", color: "grey", count: 3 },
 ];
+const saved = [
+  { folderId: "saved-reading", title: "READING", color: "blue", count: 4, cantReopen: [] },
+  { folderId: "saved-local", title: "LOCAL PAGES", color: "grey", count: 2, cantReopen: ["about:config"] },
+  { folderId: "saved-unnamed", title: "", color: "orange", count: 3, cantReopen: [] },
+];
 export const SCENARIOS = {
   empty: scenario([], { pinned: 0 }),
   "one-window": scenario(one),
+  saved: { ...scenario(one), saved, missing: [] },
+  banner: { ...scenario(one), saved,
+    missing: saved.slice(0, 2).map(({ folderId, title, color }) => ({ folderId, title, color })) },
   "two-windows": scenario(one, { other: true }),
   "remote-header": scenario([{ title: "LOCAL", color: "grey", count: 3 }], { other: true }),
   "many-groups": scenario([

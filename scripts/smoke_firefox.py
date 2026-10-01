@@ -309,12 +309,6 @@ def run_checks(client, root, scratch, results, base):
             return AboutNewTab.newTabURL;
         """, chrome=True), lambda value: value == url)
         return target
-    try:
-        results.check("newtab override", override)
-    finally:
-        # Subsequent checks must run in the extension even if the override fails.
-        client.command("Marionette:SetContext", {"value": "content"})
-        client.command("WebDriver:Navigate", {"url": url})
 
     def sync_started():
         title = pinned_title(root)
@@ -322,7 +316,17 @@ def run_checks(client, root, scratch, results, base):
                      lambda roots: any(any(c["title"] == title and c["type"] == 2
                                            for c in r["children"]) for r in roots))
         return "Foxy under Other Bookmarks, with " + title + "; " + json.dumps(state, ensure_ascii=False)
-    results.check("sync started", sync_started)
+
+    try:
+        results.check("newtab override", override)
+    finally:
+        # Let queued startup messages finish before unloading the first board.
+        # Keep checking the console: context-unloaded errors must not be hidden.
+        results.check("sync started", sync_started)
+        time.sleep(1)
+        # Subsequent checks must run in the extension even if the override fails.
+        client.command("Marionette:SetContext", {"value": "content"})
+        client.command("WebDriver:Navigate", {"url": url})
 
     def round_trip():
         state = client.script("""
@@ -384,16 +388,17 @@ def quit_firefox(client, process):
             except subprocess.TimeoutExpired:
                 pass
             # Only this launch's isolated process group, never existing Firefox.
+            # macOS may return EPERM when the group contains only zombies.
             try:
                 os.killpg(process.pid, signal.SIGTERM)
-            except ProcessLookupError:
+            except (ProcessLookupError, PermissionError):
                 pass
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
+                except (ProcessLookupError, PermissionError):
                     pass
                 process.wait(timeout=5)
 
