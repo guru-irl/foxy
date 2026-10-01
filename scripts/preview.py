@@ -23,14 +23,13 @@ INJECT = (
 
 # name: (query string, window width, window height)
 SCENARIOS = {
-    "clock-only": ("scenario=none", 1400, 900),
-    "one-group": ("scenario=one", 1400, 900),
-    "two-groups": ("scenario=two", 1400, 900),
-    "three-groups": ("scenario=three", 1400, 1000),
-    "five-groups": ("scenario=five", 1400, 1200),
-    "light": ("scenario=three&scheme=light", 1400, 1000),
-    "narrow-600": ("scenario=five", 600, 1500),
-    "narrow-440": ("scenario=three", 440, 1800),
+    "empty": ("scenario=empty", 1600, 1000),
+    "one-window": ("scenario=one-window", 1600, 1000),
+    "two-windows": ("scenario=two-windows", 1600, 1000),
+    "remote-header": ("scenario=remote-header", 1600, 1000),
+    "many-groups": ("scenario=many-groups", 1600, 1000),
+    "light": ("scenario=light&scheme=light", 1600, 1000),
+    "narrow": ("scenario=one-window", 900, 900),
 }
 
 

@@ -9,7 +9,7 @@ import pathlib
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-INCLUDE = ["manifest.json", "newtab.html", "newtab.css", "background.js", "src/*.js", "fonts/*", "icons/*"]
+INCLUDE = ["manifest.json", "newtab.html", "newtab.css", "background.js", "src/**/*.js", "fonts/*", "icons/*"]
 FIXED_TIME = (1980, 1, 1, 0, 0, 0)
 
 
@@ -19,8 +19,9 @@ def package_files(root=ROOT):
     found = set()
     for pattern in INCLUDE:
         for path in addon_root.glob(pattern):
-            if path.is_file() and not path.name.startswith("."):
-                found.add(path.relative_to(addon_root).as_posix())
+            relative = path.relative_to(addon_root)
+            if path.is_file() and not any(part.startswith(".") for part in relative.parts):
+                found.add(relative.as_posix())
     return sorted(found)
 
 

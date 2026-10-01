@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Foxy browser tests</title>
+</head>
+<body>
+  <div id="fixture"></div>
+  <script>
+    // This must be classic script: even a broken module graph needs to report.
+    (() => {
+      const format = error => error?.stack ? `${String(error)}\n${error.stack}` : String(error);
+      const state = window.__browserTestState = {
+        started: false, active: null, results: [], startupReported: false,
+        post: results => fetch("/results", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ results }),
+        }),
+        record(error) {
+          if (state.active) {
+            state.active.fail(error);
+          } else {
+            const name = state.started ? "uncaught error outside a test" : "browser module startup";
+            state.results.push({ name, ok: false, error: format(error) });
+            if (!state.started && !state.startupReported) {
+              state.startupReported = true;
+              state.post(state.results).catch(error => console.error("Foxy: startup report failed", error));
+            }
+          }
+        },
+      };
+      window.onerror = (message, source, line, column, error) => {
+        state.record(error ?? new Error(`${message} (${source}:${line}:${column})`));
+        return true;
+      };
+      // Script resource failures do not call window.onerror in every browser.
+      window.addEventListener("error", event => {
+        if (event.target instanceof HTMLScriptElement) {
+          state.record(new Error(`could not load browser module: ${event.target.src || "inline module"}`));
+        }
+      }, true);
+      window.addEventListener("unhandledrejection", event => {
+        event.preventDefault();
+        state.record(event.reason);
+      });
+    })();
+  </script>
+  <script type="module">
+    import { test, runTests } from "./harness.js";
+
+    const state = window.__browserTestState;
+    state.started = true;
+    try {
+      const files = (new URLSearchParams(location.search).get("files") ?? "")
+        .split(",").filter(Boolean);
+      if (!files.length) test("browser test discovery", () => { throw new Error("no test files selected"); });
+      for (const file of files) {
+        try {
+          await import(file);
+        } catch (error) {
+          test(file, () => { throw error; });
+        }
+      }
+      await runTests({
+        state,
+        async onStart(name) {
+          const response = await fetch("/progress", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name }),
+          });
+          if (!response.ok) throw new Error(`progress POST returned ${response.status}`);
+        },
+      });
+      // Drain a frame and event turn with no active test, including late errors.
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      await new Promise(resolve => setTimeout(resolve, 0));
+      if (!state.results.length) {
+        state.results.push({ name: "browser test discovery", ok: false, error: "no tests registered" });
+      }
+    } catch (error) {
+      state.record(error);
+    }
+    try {
+      const response = await state.post(state.results);
+      if (!response.ok) throw new Error(`results POST returned ${response.status}`);
+    } catch (error) {
+      console.error("Foxy: could not post browser test results", error);
+    }
+  </script>
+</body>
+</html>

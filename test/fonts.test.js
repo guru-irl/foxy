@@ -23,10 +23,11 @@ function declarations(block) {
 }
 
 function rule(selector) {
-  const match = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
-    .find((match) => match[1].replace(/\/\*[\s\S]*?\*\//g, "").trim() === selector);
-  assert.ok(match, `missing ${selector} rule`);
-  return declarations(match[2]);
+  const matches = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter(match => match[1].replace(/\/\*[\s\S]*?\*\//g, "").trim()
+      .split(",").some(part => part.trim() === selector));
+  assert.ok(matches.length, `missing ${selector} rule`);
+  return Object.assign({}, ...matches.map(match => declarations(match[2])));
 }
 
 function face(family) {
@@ -96,7 +97,7 @@ test("the date is upright weight 600 capitals with compensated trailing spacing"
 });
 
 test("group titles are heavy, condensed, slanted capitals without extra letter spacing", () => {
-  const title = rule(".card-title");
+  const title = rule(".column-header");
   assert.equal(title["font-family"], '"Foxy Sans", system-ui, sans-serif');
   assert.equal(title["font-weight"], "800");
   assert.equal(title["font-stretch"], "50%");
@@ -106,7 +107,7 @@ test("group titles are heavy, condensed, slanted capitals without extra letter s
 });
 
 test("no typography role overrides the default zero roundness or sets a slant axis", () => {
-  for (const selector of ["body", ".clock-time", ".clock-date", ".card-title"]) {
+  for (const selector of ["body", ".clock-time", ".clock-date", ".column-header"]) {
     const settings = rule(selector)["font-variation-settings"] ?? "";
     for (const match of settings.matchAll(/"ROND"\s+(-?\d*\.?\d+)/gi)) {
       assert.equal(Number(match[1]), 0, `${selector} roundness must stay zero`);
@@ -127,7 +128,7 @@ test("only group titles have oblique or italic styling in any style rule", () =>
       slanted.push(...selector.split(",").map((part) => part.trim()));
     }
   }
-  assert.deepEqual(slanted, [".card-title"]);
+  assert.deepEqual(slanted, [".column-header"]);
 });
 
 test("the 12px group dot keeps the sidebar's original glow", () => {
