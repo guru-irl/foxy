@@ -42,6 +42,22 @@ async function directRoots(api) {
     .sort((a, b) => a.dateAdded - b.dateAdded || a.index - b.index);
 }
 
+/** Merge duplicate contents by moving; retained folders are never deleted. */
+export async function mergeRoots(api, knownRootId) {
+  const rootId = await findOrCreateRoot(api, knownRootId);
+  for (const extra of await findExtraRoots(api, rootId, knownRootId)) {
+    for (const child of await api.bookmarks.getChildren(extra)) await api.bookmarks.move(child.id, { parentId: rootId });
+  }
+  const pinnedId = await ensurePinnedFolder(api, rootId), tree = await readTree(api, rootId);
+  const urls = new Set(tree.pinned.bookmarks.map(bookmark => bookmark.url));
+  for (const extra of tree.extraPinned) for (const bookmark of extra.bookmarks) {
+    if (urls.has(bookmark.url)) continue;
+    await api.bookmarks.move(bookmark.id, { parentId: pinnedId });
+    urls.add(bookmark.url);
+  }
+  return { rootId, pinnedId };
+}
+
 /** Reserve the first matching child folder for pins; new pins go at index zero. */
 export async function ensurePinnedFolder(api, rootId) {
   const children = await api.bookmarks.getChildren(rootId);

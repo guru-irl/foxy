@@ -232,7 +232,11 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     if (!pinned && groupId === null) return; // Saved here, never auto-open.
     // The controller rematches late restore tabs before releasing this durable
     // quiet-period marker. Bookmark echoes must not open duplicates meanwhile.
-    if (!pinned && Number.isFinite(state.groups[groupId]?.rebindUntil)) return;
+    if (!pinned && Number.isFinite(state.groups[groupId]?.rebindUntil)) {
+      if (retryOrder) state.groups[groupId].pendingOrder = true;
+      return;
+    }
+    retryOrder ||= !!state.groups[groupId]?.pendingOrder;
     let folder;
     try { [folder] = await api.bookmarks.get(folderId); }
     catch (error) {
@@ -291,6 +295,7 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
       }
       if (retryOrder) {
         await orderMapped(folderId, nodes, await api.tabs.query({ windowId: group.windowId, groupId: group.id }));
+        if (!state.deferred.includes(folderId)) delete state.groups[groupId].pendingOrder;
       }
     } else if (retryOrder) {
       // A deferred explicit pin move is retried per window. New pins already

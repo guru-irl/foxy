@@ -1,5 +1,5 @@
 import { encodeFolderTitle, isSyncableUrl } from "./codec.js";
-import { findOrCreateRoot, findExtraRoots, ensurePinnedFolder, readTree } from "./tree.js";
+import { mergeRoots, readTree } from "./tree.js";
 import { matchGroups, matchTabs } from "./match.js";
 
 /** Temporary listeners observe restore activity, independently of the serial queue. */
@@ -38,22 +38,10 @@ export async function rebuild({ api, state, outbound, inbound }) {
   state.failedCreates = {};
   state.quietUntil = {};
   state.expectedMoves = {};
+  delete state.lastFocusedNormalWindowId;
   state.openFolders = [];
-  state.rootId = await findOrCreateRoot(api, knownRootId);
-  for (const extra of await findExtraRoots(api, state.rootId, knownRootId)) {
-    for (const child of await api.bookmarks.getChildren(extra)) {
-      await api.bookmarks.move(child.id, { parentId: state.rootId });
-    }
-  }
-  state.pinnedId = await ensurePinnedFolder(api, state.rootId);
-  let tree = await readTree(api, state.rootId);
-  const urls = new Set(tree.pinned.bookmarks.map(bookmark => bookmark.url));
-  for (const extra of tree.extraPinned) for (const bookmark of extra.bookmarks) {
-    if (urls.has(bookmark.url)) continue;
-    await api.bookmarks.move(bookmark.id, { parentId: state.pinnedId });
-    urls.add(bookmark.url);
-  }
-  tree = await readTree(api, state.rootId);
+  Object.assign(state, await mergeRoots(api, knownRootId));
+  const tree = await readTree(api, state.rootId);
   const tabs = (await api.tabs.query({})).filter(tab => !tab.incognito).sort((a, b) => a.windowId - b.windowId || a.index - b.index);
   const normalIds = new Set((await api.windows.getAll({ windowTypes: ["normal"] }))
     .filter(win => !win.incognito && win.type === "normal").map(win => win.id));

@@ -590,7 +590,8 @@ export function createFirefox(setup = {}) {
   api("bookmarks", "removeTree", id => removeNode(mutableNode(id)));
 
   // Sync changes emit normal events but are not re-uploaded as local edits.
-  async function applyRemoteBookmarks(changes) {
+  async function applyRemoteBookmarks(changes, { orderEvents = batch => batch } = {}) {
+    const eventStart = pending.length;
     remoteBookmarks = true;
     try {
       for (const change of changes.filter(node => node.deleted)) {
@@ -618,7 +619,10 @@ export function createFirefox(setup = {}) {
         }
         waiting = waiting.filter(node => !ready.includes(node));
       }
-    } finally { remoteBookmarks = false; }
+    } finally {
+      remoteBookmarks = false;
+      pending.push(...orderEvents(pending.splice(eventStart)));
+    }
   }
 
   const session = {};

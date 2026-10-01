@@ -1,7 +1,7 @@
 import { handleMessage } from "../close.js";
-import { isOpenableUrl, isSyncableUrl, encodeFolderTitle } from "./codec.js";
+import { isOpenableUrl, isSyncableUrl, encodeFolderTitle, ROOT_TITLE, isPinnedFolderTitle } from "./codec.js";
 import { createQueue, loadState, saveState, groupOfFolder } from "./state.js";
-import { ensurePinnedFolder, readTree } from "./tree.js";
+import { ensurePinnedFolder, readTree, mergeRoots, OTHER_BOOKMARKS } from "./tree.js";
 import { createOutbound } from "./outbound.js";
 import { createInbound } from "./inbound.js";
 import { matchGroups, matchTabs } from "./match.js";
@@ -12,7 +12,8 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   settleMs = 3000, maxWaitMs = 20000 }) {
   const queue = createQueue();
   let state, starting;
-  const returnTimers = new Map();
+  const returnTimers = new Map(), movedTabs = new Set();
+  let moveTimer;
   const save = () => saveState(api, state);
   const outbound = createOutbound({ api, getState: () => state, save, now, removeDelayMs, quietMs,
     extensionBaseUrl: api.runtime.getURL(""),
@@ -117,13 +118,13 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     if (!starting) {
       starting = queue.run(async () => {
         state = await loadState(api);
-        await normalWindow();
         const session = await api.storage.session.get("foxySession");
         if (!session.foxySession) {
           await settle(api, { settleMs, maxWaitMs, now });
           await rebuildMaps();
           await api.storage.session.set({ foxySession: true });
         }
+        await normalWindow();
         // Once per event-page lifetime; queue-owned timers cover later deadlines.
         await ensureTree();
         for (const id of Object.keys(state.groups)) scheduleReturningGroup(Number(id));
@@ -182,14 +183,23 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       const candidates = new Set([...state.missing, ...state.openFolders]
         .filter(id => groupOfFolder(state, id) === null));
       {
-        const tree = await readTree(api, state.rootId), urls = new Set(local.map(tab => tab.url));
+        const tree = await readTree(api, state.rootId), urls = local.map(tab => tab.url);
+        const counts = new Map();
+        for (const url of urls) counts.set(url, (counts.get(url) ?? 0) + 1);
         const folders = tree.folders.filter(folder => {
           if (groupOfFolder(state, folder.id) !== null) return false;
-          if (candidates.has(folder.id)) return folder.bookmarks.some(bookmark => urls.has(bookmark.url));
+          if (candidates.has(folder.id)) return folder.bookmarks.some(bookmark => counts.has(bookmark.url));
           // Firefox's saved-group reopen is not marked missing/open here. Only
-          // an exact openable URL set plus name/colour is safe to bind at runtime.
-          const openable = new Set(folder.bookmarks.filter(bookmark => isOpenableUrl(bookmark.url)).map(bookmark => bookmark.url));
-          return openable.size === urls.size && [...urls].every(url => openable.has(url));
+          // an exact openable URL multiset plus name/colour is safe at runtime.
+          const openable = folder.bookmarks.filter(bookmark => isOpenableUrl(bookmark.url));
+          if (openable.length !== urls.length) return false;
+          const remaining = new Map(counts);
+          for (const bookmark of openable) {
+            const count = remaining.get(bookmark.url) ?? 0;
+            if (!count) return false;
+            remaining.set(bookmark.url, count - 1);
+          }
+          return true;
         });
         const [pair] = matchGroups([{ groupId, title: group.title, color: group.color, urls: [...urls] }], folders).pairs;
         if (pair) {
@@ -201,8 +211,10 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
             delete state.quietUntil[id];
             delete state.failedCreates[id];
           }
+          const boundAt = now(), rebindMaxUntil = boundAt + maxWaitMs;
           state.groups[groupId] = { folderId: folder.id, title: encodeFolderTitle(group),
-            rebindUntil: now() + (quietMs ?? 10000) };
+            rebindUntil: Math.min(boundAt + (quietMs ?? 10000), rebindMaxUntil), rebindMaxUntil,
+            rebindTabIds: local.map(tab => tab.id) };
           if (!state.openFolders.includes(folder.id)) state.openFolders.push(folder.id);
           state.missing = state.missing.filter(id => id !== folder.id);
           const tabs = matchTabs(local.map(tab => ({ tabId: tab.id, url: tab.url })), folder.bookmarks);
@@ -218,9 +230,11 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       }
     }
     if (Number.isFinite(state.groups[groupId]?.rebindUntil)) {
-      await matchReturningTabs(groupId);
-      if (!finishingReturn) {
-        state.groups[groupId].rebindUntil = now() + (quietMs ?? 10000);
+      const membershipChanged = await matchReturningTabs(groupId);
+      if (!finishingReturn && membershipChanged) {
+        const entry = state.groups[groupId];
+        // Older stored deadlines did not include a cap. Never extend them.
+        entry.rebindUntil = Math.min(now() + (quietMs ?? 10000), entry.rebindMaxUntil ?? entry.rebindUntil);
         await save();
         scheduleReturningGroup(groupId);
       }
@@ -233,6 +247,9 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     if (!entry) return;
     const local = (await api.tabs.query({ groupId })).filter(tab => !tab.incognito && !tab.pinned
       && !state.tabs[tab.id] && isSyncableUrl(tab.url, api.runtime.getURL(""))).sort((a, b) => a.index - b.index);
+    const seen = new Set(entry.rebindTabIds ?? []);
+    const arrived = local.some(tab => !seen.has(tab.id));
+    if (arrived) entry.rebindTabIds = [...seen, ...local.filter(tab => !seen.has(tab.id)).map(tab => tab.id)];
     const mapped = new Set(Object.values(state.tabs).map(tab => tab.bookmarkId));
     const bookmarks = (await api.bookmarks.getChildren(entry.folderId)).filter(node => node.type === "bookmark" && !mapped.has(node.id));
     const tabs = matchTabs(local.map(tab => ({ tabId: tab.id, url: tab.url })), bookmarks);
@@ -241,7 +258,8 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       state.tabs[tab.id] = { bookmarkId: pair.bookmarkId, folderId: entry.folderId,
         url: tab.url, title: tab.title ?? "" };
     }
-    if (tabs.pairs.length) await save();
+    if (tabs.pairs.length || arrived) await save();
+    return arrived || tabs.pairs.length > 0;
   }
   function scheduleReturningGroup(groupId) {
     clearTimeout(returnTimers.get(groupId));
@@ -258,11 +276,14 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
         // have left Foxy while the timer waited. Use the same controller guards.
         const managed = await syncGroup(groupId, true);
         delete entry.rebindUntil;
+        delete entry.rebindMaxUntil;
+        delete entry.rebindTabIds;
         await save();
         if (!managed) return;
+        await inbound.reconcileFolder(entry.folderId, !!entry.pendingOrder);
         // Tabs can arrive without a delivered event before quiet completes.
+        // A safety-blocked order remains pending and cannot be published back.
         for (const tab of await api.tabs.query({ groupId })) await syncTab(tab.id);
-        await inbound.reconcileFolder(entry.folderId);
       }).catch(() => {});
     }, Math.max(0, entry.rebindUntil - now())));
   }
@@ -278,20 +299,33 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
           && !isSyncableUrl(tab.url, api.runtime.getURL(""))) await outbound.syncTab(tabId);
         return;
       }
+      if (state.groups[tab.groupId]?.pendingOrder) return;
     }
     await outbound.syncTab(tabId);
   }
-  async function syncMovedTab(tabId) {
-    await syncTab(tabId);
-    let tab;
-    try { tab = await api.tabs.get(tabId); } catch { return; }
-    if (tab.incognito || (!tab.pinned && (tab.groupId == null || tab.groupId === -1))) return;
-    // A multi-drag can invert several bookmark neighbours before any tab event
-    // runs. Publishing only the dragged ids leaves shifted neighbours stranded.
-    // One strip-order pass publishes the final relative order with per-id deltas.
-    const members = await api.tabs.query({ windowId: tab.windowId,
-      ...(tab.pinned ? { pinned: true } : { groupId: tab.groupId }) });
-    for (const member of members.sort((a, b) => a.index - b.index)) await syncTab(member.id);
+  function syncMovedTab(tabId) {
+    movedTabs.add(tabId);
+    if (moveTimer === undefined) moveTimer = setTimeout(() => queue.run(flushMovedTabs).catch(() => {}), 0);
+  }
+  async function flushMovedTabs() {
+    clearTimeout(moveTimer);
+    moveTimer = undefined;
+    const ids = [...movedTabs], strips = new Map();
+    movedTabs.clear();
+    for (const id of ids) {
+      let tab;
+      try { tab = await api.tabs.get(id); } catch { continue; }
+      if (tab.incognito) continue;
+      if (!tab.pinned && (tab.groupId == null || tab.groupId === -1)) { await syncTab(id); continue; }
+      strips.set(`${tab.windowId}:${tab.pinned ? "pinned" : tab.groupId}`, { windowId: tab.windowId,
+        ...(tab.pinned ? { pinned: true } : { groupId: tab.groupId }) });
+    }
+    // A multi-drag can invert several neighbours before any event runs. One
+    // final strip-order pass per batch publishes all shifted members' deltas.
+    for (const query of strips.values()) {
+      const members = await api.tabs.query(query);
+      for (const member of members.sort((a, b) => a.index - b.index)) await syncTab(member.id);
+    }
   }
   async function flush() {
     for (const folderId of new Set(Object.values(state.pendingRemovals).map(removal => removal.folderId))) {
@@ -310,6 +344,22 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     await inbound.applyDeferred();
   }
   async function changed(id, node) {
+    if (node?.type === "folder" && ((id !== state.rootId && node.parentId === OTHER_BOOKMARKS && node.title === ROOT_TITLE)
+      || (id !== state.pinnedId && node.parentId === state.rootId && isPinnedFolderTitle(node.title)))) {
+      const oldPinnedId = state.pinnedId;
+      Object.assign(state, await mergeRoots(api, state.rootId));
+      // Moved pins retain their bookmark GUID and live tab identity. Never run
+      // a browser-session rebuild just because another device's root arrived.
+      for (const [tabId, entry] of Object.entries(state.tabs)) if (entry.folderId === oldPinnedId) {
+        const bookmark = await getNode(entry.bookmarkId);
+        if (bookmark?.parentId === state.pinnedId) {
+          entry.folderId = state.pinnedId;
+          if (state.pendingRemovals[tabId]) state.pendingRemovals[tabId].folderId = state.pinnedId;
+        }
+      }
+      await save();
+      await inbound.reconcileFolder(state.pinnedId);
+    }
     if (!node || !await relevant(id, node.parentId)) return;
     if (node.type === "folder") {
       if (id !== state.rootId) await inbound.reconcileFolder(id);
@@ -471,5 +521,10 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       }
     }).catch(() => ({ ok: false })); // The queue logs failures and keeps draining.
   }
-  return { start, handlers, onMessage, idle: () => queue.idle() };
+  async function idle() {
+    await queue.idle();
+    if (movedTabs.size) await queue.run(flushMovedTabs);
+    await queue.idle();
+  }
+  return { start, handlers, onMessage, idle };
 }
