@@ -153,8 +153,12 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       return action(() => dropGroup(api, groupId, resolveGroupTarget(board, groupId, slot, self.windowId)));
     },
     onDragState: dragging => interaction("dragging", dragging),
-    onEditState: editing => interaction("editing", editing),
-    onEditEnd: () => {
+    onEditState: (editing, groupId) => {
+      if (editing && groupId != null) ui.editGroupId = groupId;
+      interaction("editing", editing);
+    },
+    onEditEnd: groupId => {
+      if (groupId != null && ui.editGroupId !== groupId) return;
       ui.editGroupId = null;
       pending = true;
       interaction("editing", false);
@@ -213,7 +217,8 @@ function captureView(root) {
 }
 
 function restoreView(root, { focus, left, tops }) {
-  if (focus) {
+  const editor = root.querySelector(".name-editor");
+  if (focus && !editor) {
     let active;
     const list = [...root.querySelectorAll(".rows")].find(list => rowsKey(list) === focus.rowsKey);
     if (focus.strip) active = root.querySelector(".strip");
@@ -226,7 +231,7 @@ function restoreView(root, { focus, left, tops }) {
         : [...(container?.querySelectorAll("*") ?? [])].find(el => el.className === focus.className);
       if (!container && focus.tabId !== undefined) {
         const rows = [...(list?.querySelectorAll(".row") ?? [])];
-        active = rows[Math.min(focus.index, rows.length - 1)] ?? list ?? root.querySelector(".strip");
+        active = rows[Math.min(focus.index, rows.length - 1)]?.querySelector(".row-open") ?? list ?? root.querySelector(".strip");
       } else if (!container && focus.groupId !== undefined) {
         const columns = [...root.querySelectorAll(".column[data-group-id]")];
         const neighbour = columns[Math.min(focus.index, columns.length - 1)];
@@ -238,4 +243,6 @@ function restoreView(root, { focus, left, tops }) {
   }
   root.querySelector(".strip").scrollLeft = left;
   for (const list of root.querySelectorAll(".rows")) list.scrollTop = tops.get(rowsKey(list)) ?? 0;
+  // A new group's input can be beyond the old horizontal viewport.
+  editor?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }

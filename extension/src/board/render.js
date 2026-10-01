@@ -1,4 +1,8 @@
 import { attachDnd } from "./dnd.js";
+import { openNameEditor, openColorPicker } from "./edit.js";
+
+const editors = new WeakMap();
+const renameStarts = new WeakMap();
 
 const layouts = new WeakSet();
 function alignColumns(root) {
@@ -8,9 +12,13 @@ function alignColumns(root) {
 
 // Text is always assigned as textContent, never parsed as markup.
 export function renderBoard(root, board, ui, handlers) {
+  // A vanished editor must also release its document listeners. Controller
+  // identity checks prevent this old cleanup from ending a newer editor.
+  editors.get(root)?.cancel();
+  root.setAttribute("role", "region");
   const strip = el("div", "strip");
   strip.tabIndex = -1;
-  strip.append(...board.columns.map(column => groupColumn(column, ui, handlers)));
+  strip.append(...board.columns.map(column => groupColumn(root, column, handlers)));
   const create = el("section", "column new-group");
   create.dataset.zone = "new-group";
   const action = el("span", "action");
@@ -21,6 +29,10 @@ export function renderBoard(root, board, ui, handlers) {
     fixedColumn("tabs", "TABS", board.tabs, handlers));
   attachDnd(root, handlers, board);
   alignColumns(root);
+  if (ui.editGroupId != null) {
+    const name = root.querySelector(`.column[data-group-id="${ui.editGroupId}"] .group-name`);
+    renameStarts.get(name)?.();
+  }
   if (!layouts.has(root)) {
     layouts.add(root);
     // Width changes can add/remove a classic horizontal scrollbar.
@@ -51,7 +63,7 @@ function fixedColumn(zone, title, sections, handlers) {
   return column;
 }
 
-function groupColumn(group, ui, handlers) {
+function groupColumn(root, group, handlers) {
   const column = el("section", "column group");
   column.dataset.groupId = String(group.id);
   column.dataset.windowId = String(group.windowId);
@@ -59,17 +71,45 @@ function groupColumn(group, ui, handlers) {
   const header = el("header", "column-header");
   header.draggable = true;
   const dot = button("dot", "Group colour");
-  const name = el("span", "group-name");
+  dot.setAttribute("aria-expanded", "false");
+  const name = button("group-name", "Rename group");
   const unnamed = group.title.trim() === "";
   name.classList.toggle("unnamed", unnamed);
   name.textContent = unnamed ? "UNNAMED" : group.title;
   name.title = name.textContent;
+  function begin(open) {
+    editors.get(root)?.finish();
+    handlers.onEditState?.(true, group.id);
+    const active = { finish: null, cancel: null };
+    editors.set(root, active);
+    const end = () => {
+      if (editors.get(root) !== active) return;
+      editors.delete(root);
+      handlers.onEditEnd?.(group.id);
+    };
+    const editor = open(end);
+    active.finish = editor.save ?? editor.close;
+    active.cancel = editor.cancel ?? editor.close;
+  }
+  const rename = () => begin(end => openNameEditor(name, {
+    initial: name.classList.contains("unnamed") ? "" : name.textContent,
+    onSave: title => { try { handlers.onRename?.(group.id, title); } finally { end(); } },
+    onCancel: end,
+  }));
+  renameStarts.set(name, rename);
+  name.addEventListener("click", rename);
+  dot.addEventListener("click", () => {
+    if (dot.getAttribute("aria-expanded") === "true") { editors.get(root)?.finish(); return; }
+    begin(end => openColorPicker(dot, { current: group.apiColor,
+      onPick: color => handlers.onRecolor?.(group.id, color), onClose: end }));
+  });
   const close = button("column-close", "Close group", "×");
   close.addEventListener("click", () => handlers.onCloseGroup?.(group.id));
   header.append(dot, name);
   if (!group.current) {
     header.classList.add("remote");
-    const bring = button("bring-here", "Bring here", "↙");
+    const bring = button("bring-here", "Bring here");
+    bring.append(el("span", "bring-icon"));
     bring.addEventListener("click", () => handlers.onBringHere?.(group.id));
     header.append(bring);
   }
@@ -98,8 +138,8 @@ function rows(zone, groupId) {
 
 function tabRow(tab, handlers) {
   const row = el("div", "row");
-  row.setAttribute("role", "button");
-  row.tabIndex = 0;
+  // The open action and close are sibling buttons, never nested controls.
+  row.tabIndex = -1;
   row.draggable = true;
   row.dataset.tabId = String(tab.id);
   row.dataset.windowId = String(tab.windowId);
@@ -107,8 +147,9 @@ function tabRow(tab, handlers) {
   const label = el("span", "row-label");
   label.textContent = tab.title;
   if (tab.title === tab.url) label.classList.add("url");
+  const open = button("row-open", tab.title);
+  open.append(icon(tab.icon), label);
   const close = button("row-close", "Close tab", "×");
-  close.tabIndex = -1;
   close.addEventListener("click", event => {
     event.stopPropagation();
     handlers.onCloseTab?.(tab.id);
@@ -122,7 +163,7 @@ function tabRow(tab, handlers) {
     event.preventDefault();
     handlers.onOpen?.(tab);
   });
-  row.append(icon(tab.icon), label, close);
+  row.append(open, close);
   return row;
 }
 

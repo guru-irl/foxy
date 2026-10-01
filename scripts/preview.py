@@ -26,6 +26,7 @@ SCENARIOS = {
     "empty": ("scenario=empty", 1600, 1000),
     "one-window": ("scenario=one-window", 1600, 1000),
     "two-windows": ("scenario=two-windows", 1600, 1000),
+    "remote-header": ("scenario=remote-header", 1600, 1000),
     "many-groups": ("scenario=many-groups", 1600, 1000),
     "light": ("scenario=light&scheme=light", 1600, 1000),
     "narrow": ("scenario=one-window", 900, 900),

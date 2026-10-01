@@ -85,8 +85,10 @@ test("rows expose drag identities, literal text and accessible close controls", 
     onCloseGroup: id => groupsClosed.push(id), onBringHere: id => brought.push(id) });
   const row = node.querySelector('[data-tab-id="12"]');
   assert.equal(row.dataset.windowId, "1");
-  assert.equal(row.getAttribute("role"), "button");
-  assert.equal(row.tabIndex, 0);
+  assert.equal(row.getAttribute("role"), null);
+  assert.equal(row.querySelector(".row-open").tabIndex, 0);
+  assert.equal(row.querySelector(".row-close").tabIndex, 0);
+  assert.equal(row.tabIndex, -1);
   assert.equal(row.draggable, true);
   assert.equal(row.querySelector(".row-label").textContent, "<b>Literal title</b>");
   assert.equal(row.querySelectorAll("b").length, 0);
@@ -331,7 +333,7 @@ for (const [tabId, nextId, child] of [[23, 32, false], [32, 23, false], [11, 21,
     assert.equal(document.activeElement, target, "focus the original row/control before removal");
     await ff.browser.tabs.remove(tabId);
     await flush(ff);
-    assert.equal(document.activeElement, node.querySelector(`[data-tab-id="${nextId}"]`),
+    assert.equal(document.activeElement, node.querySelector(`[data-tab-id="${nextId}"] .row-open`),
       `focus the same-zone neighbour; active=${document.activeElement.className}:${document.activeElement.dataset.tabId}`);
   });
 }

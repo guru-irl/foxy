@@ -42,6 +42,7 @@ export const SCENARIOS = {
   empty: scenario([], { pinned: 0 }),
   "one-window": scenario(one),
   "two-windows": scenario(one, { other: true }),
+  "remote-header": scenario([{ title: "LOCAL", color: "grey", count: 3 }], { other: true }),
   "many-groups": scenario([
     { title: "DEV SERVER", color: "red", count: 20 },
     { title: "READING", color: "blue", count: 20 },

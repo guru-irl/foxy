@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Foxy",
-  "version": "1.1.0",
-  "description": "Your tabs, pinned tabs and tab groups on the new tab page.",
+  "version": "2.0.0",
+  "description": "A kanban board of your tabs and tab groups on the new tab page.",
   "permissions": ["tabs", "tabGroups"],
   "background": {
     "scripts": ["background.js"],
