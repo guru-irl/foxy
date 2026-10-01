@@ -131,6 +131,7 @@ ROND 0–100). Roundness (ROND) is 0 everywhere. Only group titles are slanted.
   equivalent top/bottom fades. Unscrollable content is never masked. Passive
   scroll listeners, ResizeObserver and render/scroll restoration update the
   edge attributes. No shadows or overlays; drop geometry stays unchanged.
+  The fade also fades the thin scrollbar thumb at a faded edge.
 - Group column order: this window's groups in tab strip order, then each other
   window's groups, windows ordered by most recent use (the latest
   `lastAccessed` of their tabs).

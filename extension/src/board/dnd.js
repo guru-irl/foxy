@@ -117,6 +117,7 @@ export function attachDnd(root, handlers, board) {
     clearTimeout(clickTimer);
     state.source = { kind: row ? "tab" : "group", id: Number(id) };
     state.dragging = true; state.suppressClick = true;
+    root.toggleAttribute("data-dragging", true);
     state.handlers.onDragState?.(true);
   });
   root.addEventListener("dragover", event => {
@@ -153,6 +154,7 @@ export function attachDnd(root, handlers, board) {
     root.querySelectorAll(".dragging").forEach(source => source.classList.remove("dragging"));
     if (!state.dragging) return;
     state.dragging = false; state.source = null;
+    root.toggleAttribute("data-dragging", false);
     clickTimer = setTimeout(() => { state.suppressClick = false; }, 0);
     state.handlers.onDragState?.(false);
   });

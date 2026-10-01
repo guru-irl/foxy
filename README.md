@@ -29,8 +29,8 @@ columns and `+ NEW GROUP` scroll sideways between them; each column scrolls
 vertically. A 24px content fade appears only at edges with more content offscreen,
 horizontally in the strip and vertically in each row list. Neutral glass card fills
 use alpha 0.6 in dark mode and 0.7 in light mode. This window's tabs and groups come
-first, with other windows labelled below the headers or in separate sections. Empty group names show a faint `UNNAMED`;
-long names are cut with an ellipsis.
+first, with other windows labelled below the headers or in separate sections.
+Empty group names show a faint `UNNAMED`; long names are cut with an ellipsis.
 
 - Drag a tab to a group, TABS or PINNED at the insertion line. PINNED brings the tab
   into this window and pins it. Dropping on `+ NEW GROUP` creates a local group and

@@ -40,6 +40,8 @@ export function renderTime(timeEl, time) {
   minutes.textContent = time.slice(3);
   timeEl.replaceChildren(hours, colon, minutes);
   timeEl.dataset.lead = time[0];
+  timeEl.setAttribute("aria-label", time);
+  if (timeEl.localName === "time") timeEl.setAttribute("datetime", time);
 }
 
 /** All board interactions share this state; DnD and editors set it via handlers. */

@@ -94,7 +94,6 @@ test("the clock uses semibold upright lining tabular serif digits at an ink-matc
   const clock = rule(".clock-time");
   assert.equal(clock.font, 'normal 600 clamp(96.8px, 12.1vw, 176px) / 1 "Foxy Serif", serif');
   assert.equal(clock["font-variant-numeric"], "lining-nums tabular-nums");
-  assert.equal(clock["font-feature-settings"], '"case" 1');
 });
 
 test("the date is upright, slightly compressed weight 600 capitals", () => {

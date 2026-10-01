@@ -83,7 +83,7 @@ body {
   display: block;
   font: normal 600 clamp(96.8px, 12.1vw, 176px) / 1 "Foxy Serif", serif;
   font-variant-numeric: lining-nums tabular-nums;
-  font-feature-settings: "case" 1;
+  white-space: nowrap;
 }
 
 /* case does not raise EB Garamond's colon. Its ink midpoint is 0.134em
@@ -422,6 +422,11 @@ button.dot {
 .rows[data-scroll-start],
 .rows[data-scroll-end] {
   mask-image: linear-gradient(to bottom, transparent, black var(--fade-start), black calc(100% - var(--fade-end)), transparent);
+}
+
+.board[data-dragging] .rows,
+.board[data-dragging] .strip {
+  mask-image: none;
 }
 
 .rows,

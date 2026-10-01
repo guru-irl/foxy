@@ -9,19 +9,23 @@ const confirmations = new WeakMap();
 
 const layouts = new WeakMap();
 
-function updateEdge(node) {
+function readEdge(node) {
   const horizontal = node.classList.contains("strip");
   const position = horizontal ? node.scrollLeft : node.scrollTop;
   const extent = horizontal ? node.scrollWidth - node.clientWidth : node.scrollHeight - node.clientHeight;
-  // Scroll extents are integer CSS pixels; offsets can be fractional. A
-  // half-pixel tolerance clears the far edge at Firefox's rounded maximum
-  // without hiding the hint when even one full pixel remains offscreen.
-  node.toggleAttribute("data-scroll-start", extent > 0 && position > 0);
-  node.toggleAttribute("data-scroll-end", extent > 0 && extent - position > 0.5);
+  // Integer extents and fractional offsets can disagree at the maximum.
+  // Less than one CSS pixel remaining is at-end; a full pixel gets a hint.
+  return { node, start: extent > 0 && position > 0, end: extent > 0 && extent - position >= 1 };
+}
+
+function writeEdge({ node, start, end }) {
+  node.toggleAttribute("data-scroll-start", start);
+  node.toggleAttribute("data-scroll-end", end);
 }
 
 export function updateScrollEdges(root) {
-  for (const node of root.querySelectorAll(".strip, .rows")) updateEdge(node);
+  const edges = [...root.querySelectorAll(".strip, .rows")].map(readEdge);
+  for (const edge of edges) writeEdge(edge);
 }
 
 function watchLayout(root) {
@@ -35,7 +39,7 @@ function watchLayout(root) {
   layouts.set(root, observer);
   observer.observe(root);
   for (const node of root.querySelectorAll(".strip, .rows")) {
-    node.addEventListener("scroll", () => updateEdge(node), { passive: true });
+    node.addEventListener("scroll", () => writeEdge(readEdge(node)), { passive: true });
     observer.observe(node);
     for (const child of node.children) observer.observe(child);
   }

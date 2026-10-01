@@ -44,6 +44,33 @@ test("clock updates preserve the formatted time while isolating its centred colo
   }
 });
 
+test("clock exposes each formatted tick as its accessible label and time value", async () => {
+  const { time, renderTime } = await clock();
+  for (const value of ["15:27", "00:00", "23:59"]) {
+    renderTime(time, value);
+    assert.equal(time.getAttribute("aria-label"), value);
+    assert.equal(time.getAttribute("datetime"), value);
+  }
+  const label = document.createElement("div");
+  renderTime(label, "15:27");
+  assert.equal(label.getAttribute("aria-label"), "15:27");
+  assert.equal(label.hasAttribute("datetime"), false, "datetime belongs only on a time element");
+});
+
+test("clock digits stay on one line even when the container is narrower than the time", async () => {
+  const { time, renderTime } = await clock();
+  time.style.width = "80px";
+  time.style.fontSize = "96.8px";
+  renderTime(time, "15:27");
+  await document.fonts.load('600 96.8px "Foxy Serif"');
+  const tops = [time.firstElementChild, time.lastElementChild].map(child => {
+    const range = document.createRange(); range.selectNodeContents(child);
+    return range.getBoundingClientRect().top;
+  });
+  assert.equal(tops[0], tops[1], "hours and minutes must share a line");
+  assert.equal(getComputedStyle(time).whiteSpace, "nowrap");
+});
+
 test("clock uses bundled semibold upright lining tabular figures and an independently raised colon", async () => {
   const { time, renderTime } = await clock();
   renderTime(time, "12:24");
