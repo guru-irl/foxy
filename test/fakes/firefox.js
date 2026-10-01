@@ -471,7 +471,20 @@ export function createFirefox(setup = {}) {
   }
 
   const nodes = [], localStore = {};
-  let nextBookmark = 1, bookmarkClock = 0;
+  let nextBookmark = 1, bookmarkClock = 0, remoteBookmarks = false;
+  const bookmarkJournal = [];
+  function recordBookmark(node) {
+    if (!remoteBookmarks) bookmarkJournal.push(copy(node));
+  }
+  function bookmarkChanges(sinceCursor = 0) {
+    const changed = new Map();
+    for (const entry of bookmarkJournal.slice(sinceCursor)) {
+      changed.delete(entry.id);
+      changed.set(entry.id, entry);
+    }
+    return { cursor: bookmarkJournal.length, nodes: [...changed.values()].map(entry =>
+      entry.deleted ? entry : copy(nodes.find(node => node.id === entry.id) ?? { id: entry.id, deleted: true })) };
+  }
   function nodeById(id) {
     const node = nodes.find(n => n.id === id);
     if (!node) throw new Error(`Invalid bookmark ID: ${id}`);
@@ -483,7 +496,11 @@ export function createFirefox(setup = {}) {
     if (node.type !== "folder") throw new Error("Parent must be a folder");
     return node;
   }
-  function reindexChildren(id) { children(id).forEach((n, i) => { n.index = i; }); }
+  function reindexChildren(id) {
+    children(id).forEach((n, i) => {
+      if (n.index !== i) { n.index = i; recordBookmark(n); }
+    });
+  }
   function treeNode(node) {
     return node.type === "folder" ? { ...node, children: children(node.id).map(treeNode) } : { ...node };
   }
@@ -493,12 +510,12 @@ export function createFirefox(setup = {}) {
     folderById(parentId);
     if (props.url != null) checkURL(props.url, true);
     const siblings = children(parentId), index = Math.max(0, Math.min(props.index ?? siblings.length, siblings.length));
-    for (const n of siblings.slice(index)) n.index++;
-    const node = { id: `b${String(nextBookmark++).padStart(11, "0")}`, parentId, index, title: props.title ?? "",
-      type: props.url == null ? "folder" : "bookmark", dateAdded: ++bookmarkClock };
+    for (const n of siblings.slice(index)) { n.index++; recordBookmark(n); }
+    const node = { id: props.id ?? `${notify ? setup.bookmarkPrefix ?? "b" : "b"}${String(nextBookmark++).padStart(11, "0")}`, parentId, index, title: props.title ?? "",
+      type: props.url == null ? "folder" : "bookmark", dateAdded: props.dateAdded ?? ++bookmarkClock };
     if (props.url != null) node.url = props.url;
     nodes.push(node);
-    if (notify) queue("bookmarks.onCreated", node.id, node);
+    if (notify) { recordBookmark(node); queue("bookmarks.onCreated", node.id, node); }
     return node;
   }
   nodes.push({ id: ROOTS[0], index: 0, title: "", type: "folder", dateAdded: ++bookmarkClock });
@@ -512,6 +529,7 @@ export function createFirefox(setup = {}) {
     }
   }
   seedBookmarks(setup.bookmarks ?? [], "unfiled_____");
+  for (const node of nodes) if (!ROOTS.includes(node.id)) recordBookmark(node);
   api("bookmarks", "getTree", () => [treeNode(nodeById(ROOTS[0]))]);
   api("bookmarks", "getSubTree", id => [treeNode(nodeById(id))]);
   api("bookmarks", "getChildren", id => { folderById(id); return children(id); });
@@ -527,6 +545,7 @@ export function createFirefox(setup = {}) {
     for (const key of ["title", "url"]) {
       if (props[key] != null && node[key] !== props[key]) {
         node[key] = props[key];
+        recordBookmark(node);
         queue("bookmarks.onChanged", id, { [key]: props[key] });
       }
     }
@@ -548,15 +567,17 @@ export function createFirefox(setup = {}) {
     node.parentId = undefined;
     reindexChildren(oldParentId);
     const siblings = children(parentId), index = Math.max(0, Math.min(props.index ?? siblings.length, siblings.length));
-    for (const n of siblings.slice(index)) n.index++;
+    for (const n of siblings.slice(index)) { n.index++; recordBookmark(n); }
     node.parentId = parentId;
     node.index = index;
+    recordBookmark(node);
     queue("bookmarks.onMoved", id, { parentId, index, oldParentId, oldIndex });
     return node;
   });
   function removeNode(node, notify = true) {
     const info = { parentId: node.parentId, index: node.index, node: copy(node) };
     for (const child of children(node.id)) removeNode(child, false);
+    recordBookmark({ id: node.id, deleted: true });
     nodes.splice(nodes.indexOf(node), 1);
     reindexChildren(node.parentId);
     if (notify) queue("bookmarks.onRemoved", node.id, info);
@@ -567,6 +588,38 @@ export function createFirefox(setup = {}) {
     removeNode(node);
   });
   api("bookmarks", "removeTree", id => removeNode(mutableNode(id)));
+
+  // Sync changes emit normal events but are not re-uploaded as local edits.
+  async function applyRemoteBookmarks(changes) {
+    remoteBookmarks = true;
+    try {
+      for (const change of changes.filter(node => node.deleted)) {
+        const node = nodes.find(node => node.id === change.id);
+        if (node && !ROOTS.includes(node.id)) removeNode(node);
+      }
+      const remaining = changes.filter(node => !node.deleted && !ROOTS.includes(node.id));
+      // Parent folders can arrive after children in an upload.
+      let waiting = [...remaining];
+      while (waiting.length) {
+        const ready = waiting.filter(node => nodes.some(parent => parent.id === node.parentId))
+          .sort((a, b) => a.index - b.index);
+        if (!ready.length) throw new Error("Remote bookmark parent missing");
+        for (const change of ready) {
+          let node = nodes.find(node => node.id === change.id);
+          if (!node) node = insertNode(change);
+          else {
+            if (node.title !== change.title || node.url !== change.url) {
+              await browser.bookmarks.update(node.id, { title: change.title, url: change.url });
+            }
+            if (node.parentId !== change.parentId || node.index !== change.index) {
+              await browser.bookmarks.move(node.id, { parentId: change.parentId, index: change.index });
+            }
+          }
+        }
+        waiting = waiting.filter(node => !ready.includes(node));
+      }
+    } finally { remoteBookmarks = false; }
+  }
 
   const session = {};
   for (const [area, storage] of [["local", localStore], ["session", session]]) {
@@ -649,5 +702,5 @@ export function createFirefox(setup = {}) {
     }
     return `${pinned ? `${pinned} ` : ""}| ${items.join(" ")}`;
   }
-  return { browser, settle, layout, closeWindow, restart, fire: queue, errors, calls };
+  return { browser, settle, layout, closeWindow, restart, bookmarkChanges, applyRemoteBookmarks, fire: queue, errors, calls };
 }
