@@ -48,9 +48,20 @@ def build_page():
 
 def ensure_profile():
     PROFILE.mkdir(parents=True, exist_ok=True)
+    scrollbar_prefs = ('user_pref("widget.macos.overlay-scrollbars",',
+                       'user_pref("ui.useOverlayScrollbars",')
+    # Firefox persists user.js overrides in prefs.js between preview runs.
+    stored = PROFILE / "prefs.js"
+    if stored.exists():
+        stored.write_text("".join(line for line in stored.read_text().splitlines(keepends=True)
+                                  if not line.lstrip().startswith(scrollbar_prefs)))
     (PROFILE / "user.js").write_text(
         # file:// pages may import sibling ES modules only with this off.
-        'user_pref("security.fileuri.strict_origin_policy", false);\n' + PROFILE_PREFS
+        'user_pref("security.fileuri.strict_origin_policy", false);\n' + "\n".join(
+            line for line in PROFILE_PREFS.splitlines()
+            # Leave native overlay scrollbar settings alone in visual previews.
+            if not line.lstrip().startswith(scrollbar_prefs)
+        ) + "\n"
     )
 
 

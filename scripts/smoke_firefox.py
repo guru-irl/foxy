@@ -322,11 +322,12 @@ def run_checks(client, root, scratch, results, base):
     finally:
         # Let queued startup messages finish before unloading the first board.
         # Keep checking the console: context-unloaded errors must not be hidden.
-        results.check("sync started", sync_started)
+        sync_started()
         time.sleep(1)
         # Subsequent checks must run in the extension even if the override fails.
         client.command("Marionette:SetContext", {"value": "content"})
         client.command("WebDriver:Navigate", {"url": url})
+    results.check("sync started", sync_started)
 
     def round_trip():
         state = client.script("""

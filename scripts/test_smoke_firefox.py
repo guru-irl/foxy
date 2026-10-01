@@ -157,6 +157,32 @@ class SmokeSequenceTests(unittest.TestCase):
         self.assertEqual(len(navigations), 2)
         self.assertGreaterEqual(navigations[1], root_seen[0] + 1)
 
+    def test_override_failure_records_nothing_after_first_fail(self):
+        base = "moz-extension://smoke-test/"
+        clock = [0.0]
+
+        def script(source, args=None, *, chrome=False):
+            if source == smoke.BOARD_SCRIPT:
+                return {"board": True, "fontsReady": True, "clock": True,
+                        "columns": ["PINNED", "TABS"], "url": base + "newtab.html"}
+            if "document.fonts.load" in source:
+                return {"sans": True, "mono": True, "loaded": ["Foxy Sans", "Foxy Mono"]}
+            if "AboutNewTab" in source:
+                raise RuntimeError("override unavailable")
+            if source == smoke.PLACES_SCRIPT:
+                return [{"guid": "root", "children": [{"title": "📌 Pinned", "type": 2}]}]
+            self.fail(f"unexpected script: {source}")
+
+        output = io.StringIO()
+        with patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]), \
+                patch.object(smoke.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)), \
+                contextlib.redirect_stdout(output):
+            results = smoke.Results()
+            with self.assertRaisesRegex(smoke.CheckFailed, "newtab override"):
+                smoke.run_checks(Mock(script=script), smoke.ROOT, SCRATCH, results, base)
+        self.assertEqual(results.outcomes, [True, True, False])
+        self.assertEqual(output.getvalue().splitlines()[-1], "FAIL newtab override: override unavailable")
+
     def test_extension_console_errors_still_fail_the_smoke(self):
         SCRATCH.mkdir(parents=True, exist_ok=True)
         client = Mock()

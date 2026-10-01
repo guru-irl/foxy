@@ -20,6 +20,19 @@ class ScenarioTests(unittest.TestCase):
 
 
 class IsolationTests(unittest.TestCase):
+    def test_reused_profile_drops_persisted_scrollbar_overrides(self):
+        scratch = preview.ROOT / ".spider" / "scratch"
+        scratch.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="preview-reuse-", dir=scratch) as directory:
+            profile = Path(directory)
+            stored = profile / "prefs.js"
+            stored.write_text('user_pref("ui.useOverlayScrollbars", 0);\n'
+                              'user_pref("widget.macos.overlay-scrollbars", 0);\n'
+                              'user_pref("browser.startup.page", 0);\n')
+            with patch.object(preview, "PROFILE", profile):
+                preview.ensure_profile()
+            self.assertEqual(stored.read_text(), 'user_pref("browser.startup.page", 0);\n')
+
     def test_profile_blocks_external_traffic_and_screenshot_uses_scratch_temp(self):
         scratch = preview.ROOT / ".spider" / "scratch"
         scratch.mkdir(parents=True, exist_ok=True)
@@ -37,6 +50,8 @@ class IsolationTests(unittest.TestCase):
                 self.assertEqual(prefs.get("network.proxy.ssl"), "127.0.0.1")
                 self.assertIs(prefs.get("network.proxy.failover_direct"), False)
                 self.assertIs(prefs["security.fileuri.strict_origin_policy"], False)
+                self.assertNotIn("widget.macos.overlay-scrollbars", prefs)
+                self.assertNotIn("ui.useOverlayScrollbars", prefs)
 
                 def launch(args, **options):
                     for key in ("TMPDIR", "TMP", "TEMP"):

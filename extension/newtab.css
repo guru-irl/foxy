@@ -143,6 +143,7 @@ button {
   cursor: pointer;
 }
 
+.banner-text,
 .banner-restore,
 .banner-dismiss {
   padding-inline: 8px;

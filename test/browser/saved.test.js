@@ -199,6 +199,15 @@ for (const selector of [".row-open", ".saved-delete", ".banner-restore", ".banne
   });
 }
 
+test("banner text and actions leave equal padding beside both separators", async () => {
+  const { page } = await draw({ missing: entries() });
+  for (const item of page.querySelectorAll(".banner-text, .banner-restore, .banner-dismiss")) {
+    const style = getComputedStyle(item);
+    assert.equal(style.paddingInlineStart, "8px");
+    assert.equal(style.paddingInlineEnd, "8px");
+  }
+});
+
 for (const scheme of ["light", "dark"]) {
   test(`SAVED and banner obey glass, palette and upright typography rules in ${scheme}`, async () => {
     const { root, page } = await draw({ missing: entries(), ui: { confirmFolderId: "f3" } });

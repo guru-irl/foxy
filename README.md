@@ -24,7 +24,8 @@ Design: `docs/superpowers/specs/2026-10-01-foxy-design.md`.
 PINNED stays on the left and TABS on the right. SAVED (when it has entries), group
 columns and `+ NEW GROUP` scroll sideways between them; each column scrolls
 vertically. This window's tabs and groups come first, with other windows labelled
-below the headers or in separate sections. Empty group names show a faint `UNNAMED`; long names are cut with an ellipsis.
+below the headers or in separate sections. Empty group names show a faint `UNNAMED`;
+long names are cut with an ellipsis.
 
 - Drag a tab to a group, TABS or PINNED at the insertion line. PINNED brings the tab
   into this window and pins it. Dropping on `+ NEW GROUP` creates a local group and
@@ -45,10 +46,10 @@ below the headers or in separate sections. Empty group names show a faint `UNNAM
 ## Saved groups and Sync
 
 SAVED lists groups that are not open on this device, with a colour dot and bookmark
-count. Click one to open it here with unloaded tabs. A `CAN'T REOPEN` label marks
+count. Click one to open it here with unloaded tabs. An `N CAN'T REOPEN` label counts
 URLs Firefox does not let an add-on reopen, such as `about:` or `file:` pages;
-those URLs stay bookmarked but are skipped when opening the group. An empty group
-name appears as `UNNAMED`.
+its tooltip lists those URLs. They stay bookmarked but are skipped when opening
+the group. An empty group name appears as `UNNAMED`.
 
 Closing a whole group or its window keeps it saved. Closing an individual tab
 removes its bookmark after a short delay. To delete a saved group everywhere,
@@ -120,7 +121,7 @@ The add-on root is `extension/`: `extension/manifest.json`, `extension/newtab.ht
 The build packages only the add-on, with `manifest.json` at the root of
 `dist/foxy-<version>.zip`.
 
-    npm test                           # node --test and the Python tests; no npm packages
+    npm test                          # node --test and the Python tests; no npm packages
     npm run test:browser               # DOM tests in headless Firefox (throwaway profile)
     python3 scripts/preview.py         # headless screenshots in dist/preview/ (throwaway profile)
     python3 scripts/smoke_firefox.py    # real extension checks in a throwaway headless profile
@@ -168,6 +169,8 @@ The add-on is unlisted: signed by Mozilla, never published.
 ## Undo
 
 Remove the add-on in about:addons. Firefox's own new tab page and home page come back.
+`Other Bookmarks/Foxy` and `Other Bookmarks/Foxy merge leftovers` stay after removal;
+delete them by hand if you no longer want the saved bookmarks.
 If you removed the address-bar rule after installing, restore it in your Firefox
 profile's `chrome/userChrome.css` (section 5) from
 `chrome/userChrome.css.bak-before-newtab` (made right before the rule is removed).
