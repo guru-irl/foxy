@@ -292,6 +292,7 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
       else lostIdentity(folderId);
       return;
     }
+    for (const node of nodes) delete state.removedIds[node.id];
     const ids = new Set(nodes.map(n => n.id)), departures = [], lost = [];
     for (const [tabId, entry] of tabsInFolder(state, folderId)) {
       if (ids.has(entry.bookmarkId)) continue;

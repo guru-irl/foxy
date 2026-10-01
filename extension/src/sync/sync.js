@@ -503,7 +503,13 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       await syncGroup(group.id);
       for (const tab of await api.tabs.query({ groupId: group.id })) await syncTab(tab.id);
     },
-    "bookmarks.onCreated": (id, node) => changed(id, node),
+    "bookmarks.onCreated": async (id, node) => {
+      if (id in state.removedIds) {
+        delete state.removedIds[id];
+        await save();
+      }
+      await changed(id, node);
+    },
     "bookmarks.onChanged": async id => changed(id, await managedNode(id)),
     "bookmarks.onRemoved": async (id, info) => {
       recordRemoved(state, id, info, now());

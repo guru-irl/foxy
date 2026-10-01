@@ -59,7 +59,7 @@ export function pruneRemovedIds(state, at = Date.now()) {
 export function wasRemoved(state, id, at = Date.now()) {
   const time = state.removedIds?.[id];
   // TTL applies only when pruning unreferenced evidence, not during a retry.
-  return Number.isFinite(time) && time <= at;
+  return Number.isFinite(time);
 }
 
 /** Called on onRemoved, before queued reconciliation can discard the mappings. */
