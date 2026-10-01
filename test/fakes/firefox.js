@@ -16,6 +16,7 @@ export function createFirefox(setup = {}) {
   let clock = 0, colorIndex = 0;
   let nextTab = Math.max(0, ...(setup.tabs ?? []).map(t => t.id)) + 1;
   let nextGroup = Math.max(0, ...groups.map(g => g.id)) + 1;
+  let nextWindow = Math.max(0, ...wins.map(w => w.id)) + 1;
   const currentWindowId = setup.currentWindowId ?? wins.find(w => w.focused)?.id ?? wins[0]?.id;
   let lastFocusedId = wins.find(w => w.focused)?.id ?? wins[0]?.id;
   const browser = { tabs: {}, tabGroups: {}, windows: {}, bookmarks: {}, storage: { local: {}, session: {} }, runtime: {} };
@@ -430,6 +431,20 @@ export function createFirefox(setup = {}) {
   });
 
   browser.windows.WINDOW_ID_NONE = -1;
+  api("windows", "create", async (props = {}) => {
+    const win = { id: nextWindow++, focused: props.focused ?? true, type: props.type ?? "normal",
+      incognito: props.incognito ?? false, tabs: [] };
+    wins.push(win);
+    if (win.focused) {
+      for (const other of wins) other.focused = other === win;
+      lastFocusedId = win.id;
+      queue("windows.onFocusChanged", win.id);
+    }
+    for (const url of asArray(props.url ?? "about:blank")) {
+      await browser.tabs.create({ windowId: win.id, url, active: win.tabs.length === 0 });
+    }
+    return windowObject(win, true);
+  });
   api("windows", "getAll", (props = {}) => (props.windowTypes && !props.windowTypes.includes("normal") ? [] : wins)
     .map(w => windowObject(w, props.populate)));
   api("windows", "get", (id, props = {}) => windowObject(windowById(id), props.populate));

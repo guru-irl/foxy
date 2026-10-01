@@ -159,9 +159,9 @@ test("prototype namespace settle observes events rather than resolving early", a
   assert.equal(early, false);
 });
 
-async function returningGroup(ff, url, title = "  Work  ", color = "red") {
-  const tab = await ff.browser.tabs.create({ windowId: 1, url, active: false });
-  const groupId = await ff.browser.tabs.group({ tabIds: [tab.id], createProperties: { windowId: 1 } });
+async function returningGroup(ff, url, title = "  Work  ", color = "red", windowId = 1) {
+  const tab = await ff.browser.tabs.create({ windowId, url, active: false });
+  const groupId = await ff.browser.tabs.group({ tabIds: [tab.id], createProperties: { windowId } });
   await ff.browser.tabGroups.update(groupId, { title, color });
   return { tab, groupId };
 }
@@ -174,7 +174,8 @@ test("late restored group rebinds its missing folder after startup settle", asyn
   ff.restart();
   sync = wire(ff);
   await drain(ff, sync);
-  const returning = await returningGroup(ff, "https://work/");
+  const restored = await ff.browser.windows.create({ url: "about:blank", focused: false });
+  const returning = await returningGroup(ff, "https://work/", "  Work  ", "red", restored.id);
   await drain(ff, sync);
   const after = await loadState(ff.browser);
   assert.equal(after.groups[returning.groupId].folderId, before.groups[11].folderId);
@@ -191,7 +192,8 @@ test("history reopened group rebinds an unmapped openFolder without duplicate bo
   const before = await loadState(ff.browser), tree = await ff.browser.bookmarks.getTree();
   await ff.closeWindow(2);
   await drain(ff, sync);
-  const returning = await returningGroup(ff, "https://work/");
+  const restored = await ff.browser.windows.create({ url: "about:blank", focused: false });
+  const returning = await returningGroup(ff, "https://work/", "  Work  ", "red", restored.id);
   await drain(ff, sync);
   const after = await loadState(ff.browser);
   assert.equal(after.groups[returning.groupId].folderId, before.groups[11].folderId);
@@ -335,4 +337,15 @@ test("closing a formerly mapped tab in a private window cannot delete its shared
   await drain(ff, sync);
   assert.equal((await ff.browser.bookmarks.get(state.tabs[4].bookmarkId))[0].url, "https://work/");
   assert.deepEqual(await ff.browser.bookmarks.getTree(), before);
+});
+
+
+test("fake windows.create provides a fresh window and inherited private tab metadata", async () => {
+  const ff = createFirefox();
+  const win = await ff.browser.windows.create({ url: "https://private/", incognito: true });
+  assert.notEqual(win.id, 1);
+  assert.equal(win.incognito, true);
+  assert.equal(win.tabs[0].incognito, true);
+  assert.equal((await ff.browser.windows.getLastFocused()).id, win.id);
+  assert.equal(win.tabs[0].url, "https://private/");
 });
