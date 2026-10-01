@@ -73,19 +73,77 @@ test("get rejects unknown tabs and getCurrent uses the calling page rather than 
 test("create handles current window, pinned range, discarded titles and activation", async () => {
   const ff = strip();
   const log = logEvents(ff, ["tabs.onCreated"]);
-  const a = await ff.browser.tabs.create({ url: "https://example.com/a", title: "Ignored" });
+  const a = await ff.browser.tabs.create({ url: "https://example.com/a" });
   assert.equal(a.title, "https://example.com/a");
   assert.equal(a.active, true);
   assert.equal((await ff.browser.tabs.get(1)).active, false);
   const b = await ff.browser.tabs.create({ pinned: true, active: false });
   assert.equal(b.index, 1);
-  const c = await ff.browser.tabs.create({ discarded: true, title: "Saved" });
+  const c = await ff.browser.tabs.create({ url: "https://example.com/saved", discarded: true, title: "Saved" });
   assert.equal(c.active, false);
   assert.equal(c.title, "Saved");
   await assert.rejects(ff.browser.tabs.create({ discarded: true, active: true }));
   assert.equal(log.length, 0);
   await ff.settle();
   assert.equal(log.length, 3);
+  await invariants(ff);
+});
+
+const invalidCreates = [
+  ["illegal URL before active discard check", { url: "about:config", discarded: true, active: true },
+    "Illegal URL: about:config"],
+  ["illegal URL before pinned discard check", { url: "file:///example", discarded: true, pinned: true, active: false },
+    "Illegal URL: file:///example"],
+  ["illegal URL before title check", { url: "chrome://example", title: "Saved" },
+    "Illegal URL: chrome://example"],
+  ["active discarded tab", { url: "https://example.com/", discarded: true, active: true },
+    "Active tabs cannot be created and discarded."],
+  ["pinned discarded tab", { url: "https://example.com/", discarded: true, pinned: true, active: false },
+    "Pinned tabs cannot be created and discarded."],
+  ["discarded tab with no URL", { discarded: true, active: false },
+    'Cannot create a discarded new tab or "about" urls.'],
+  ["discarded tab with undefined URL", { discarded: true, active: false, url: undefined },
+    'Cannot create a discarded new tab or "about" urls.'],
+  ["discarded tab with null URL", { discarded: true, active: false, url: null },
+    'Cannot create a discarded new tab or "about" urls.'],
+  // The fake rejects relative URLs; Firefox resolves "" to an extension URL.
+  ["discarded tab with empty URL", { discarded: true, active: false, url: "" },
+    "Illegal URL: "],
+  ["discarded about:blank", { discarded: true, active: false, url: "about:blank" },
+    'Cannot create a discarded new tab or "about" urls.'],
+  ["discarded about:newtab", { discarded: true, active: false, url: "about:newtab" },
+    "Illegal URL: about:newtab"],
+  ["discarded about URL with fragment", { discarded: true, active: false, url: "about:blank#top" },
+    "Illegal URL: about:blank#top"],
+  ["title on a loaded tab", { url: "https://example.com/", title: "Saved" },
+    "Title may only be set for discarded tabs."],
+  ["title with explicit discarded false", { url: "https://example.com/", title: "Saved", discarded: false },
+    "Title may only be set for discarded tabs."],
+];
+for (const [name, props, message] of invalidCreates) {
+  test(`create rejects ${name} like Firefox 157 without changing state or emitting events`, async () => {
+    const ff = createFirefox({ tabs: [{ id: 1, windowId: 1 }] });
+    const before = await ff.browser.windows.getAll({ populate: true });
+    const log = logEvents(ff, ["tabs.onCreated", "tabs.onUpdated", "tabs.onActivated"]);
+    await assert.rejects(ff.browser.tabs.create(props), { message });
+    assert.deepEqual(await ff.browser.windows.getAll({ populate: true }), before);
+    await ff.settle();
+    assert.deepEqual(log, []);
+  });
+}
+
+test("a pinned inactive tab can be discarded after creation", async () => {
+  const ff = createFirefox({ tabs: [{ id: 1, windowId: 1 }] });
+  const log = logEvents(ff, ["tabs.onUpdated"]);
+  const tab = await ff.browser.tabs.create({ url: "https://example.com/pin", active: false, pinned: true });
+  const [discarded] = await ff.browser.tabs.discard(tab.id);
+  assert.equal(discarded.discarded, true);
+  assert.equal(discarded.pinned, true);
+  assert.equal(discarded.active, false);
+  assert.equal((await ff.browser.tabs.get(tab.id)).discarded, true);
+  assert.equal((await ff.browser.tabs.get(1)).active, true);
+  await ff.settle();
+  assert.deepEqual(log, [["tabs.onUpdated", tab.id, { discarded: true }, discarded]]);
   await invariants(ff);
 });
 
@@ -135,7 +193,7 @@ test("update activates, pins out of groups, unpins at the boundary and loads dis
   assert.equal((await ff.browser.tabs.get(1)).active, false);
   await ff.browser.tabs.update(3, { pinned: false });
   assert.equal(ff.layout(1), "P1 | 3 2 [101: 4] 5");
-  const tab = await ff.browser.tabs.create({ discarded: true });
+  const tab = await ff.browser.tabs.create({ url: "https://example.com/saved", discarded: true });
   assert.equal((await ff.browser.tabs.update(tab.id, { url: "https://example.com/a" })).discarded, false);
   await invariants(ff);
 });
@@ -1031,4 +1089,62 @@ test("settle waits for in-flight message listeners and drains events they queue"
   await ff.settle();
   assert.deepEqual(log, ["storage"]);
   assert.equal(await response, "ready");
+});
+
+// Catch lost durable data, surviving listeners, or unchanged ids at restart.
+test("session storage supports defaults, snapshots, changes, removal and clear", async () => {
+  const ff = createFirefox(), api = ff.browser;
+  const changes = logEvents(ff, ["storage.onChanged"]);
+  await api.storage.session.set({ marker: { ready: true }, other: 2 });
+  const result = await api.storage.session.get({ marker: null, absent: 3 });
+  assert.deepEqual(result, { marker: { ready: true }, absent: 3 });
+  result.marker.ready = false;
+  assert.deepEqual(await api.storage.session.get("marker"), { marker: { ready: true } });
+  await api.storage.session.remove("marker");
+  await api.storage.session.clear();
+  await ff.settle();
+  assert.deepEqual(await api.storage.session.get(), {});
+  assert.deepEqual(changes.map(([, , area]) => area), ["session", "session", "session"]);
+  assert.deepEqual(changes[1][1], { marker: { oldValue: { ready: true } } });
+});
+
+test("restart with restore retains windows, pins and bookmark/local data but changes ids and clears listeners/session", async () => {
+  const ff = strip(), api = ff.browser;
+  await api.storage.local.set({ durable: 1 });
+  await api.storage.session.set({ marker: true });
+  const folder = await api.bookmarks.create({ title: "Keep" });
+  let oldListener = 0, startup = 0;
+  api.runtime.onStartup.addListener(() => oldListener++);
+  api.tabs.onCreated.addListener(() => oldListener++);
+  const before = await api.tabs.query({});
+  await ff.restart({ restore: true });
+  api.runtime.onStartup.addListener(() => startup++);
+  await ff.settle();
+  const after = await api.tabs.query({});
+  assert.equal(oldListener, 0);
+  assert.equal(startup, 1);
+  assert.deepEqual(await api.storage.session.get(), {});
+  assert.deepEqual(await api.storage.local.get(), { durable: 1 });
+  assert.equal((await api.bookmarks.get(folder.id))[0].title, "Keep");
+  assert.equal(after.length, before.length);
+  assert.ok(after.every(t => !before.some(old => old.id === t.id)));
+  assert.equal(after.filter(t => t.pinned).length, 1);
+  assert.notEqual((await api.tabGroups.query({}))[0].id, 101);
+  await invariants(ff);
+});
+
+test("restart without restore leaves one home tab and durable bookmarks/local storage", async () => {
+  const ff = strip(), api = ff.browser;
+  await api.storage.local.set({ durable: true });
+  const folder = await api.bookmarks.create({ title: "Keep" });
+  await ff.restart({ restore: false });
+  await ff.settle();
+  assert.equal((await api.windows.getAll()).length, 1);
+  const tabs = await api.tabs.query({});
+  assert.equal(tabs.length, 1);
+  assert.equal(tabs[0].url, "about:home");
+  assert.ok(tabs[0].id > 5);
+  assert.deepEqual(await api.tabGroups.query({}), []);
+  assert.deepEqual(await api.storage.local.get(), { durable: true });
+  assert.equal((await api.bookmarks.get(folder.id))[0].title, "Keep");
 });

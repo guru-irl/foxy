@@ -8,7 +8,7 @@ const ROOTS = ["root________", "menu________", "toolbar_____", "unfiled_____", "
 export function createFirefox(setup = {}) {
   const calls = [], errors = [], pending = [], events = new Map(), messages = new Set();
   const wins = (setup.windows ?? [{ id: 1, focused: true }]).map(w => ({
-    id: w.id, focused: w.focused ?? false, type: "normal", incognito: false, tabs: [],
+    id: w.id, focused: w.focused ?? false, type: w.type ?? "normal", incognito: w.incognito ?? false, tabs: [],
   }));
   const groups = (setup.groups ?? []).map(g => ({
     id: g.id, windowId: g.windowId, title: g.title ?? "", color: g.color ?? "blue", collapsed: g.collapsed ?? false,
@@ -16,9 +16,10 @@ export function createFirefox(setup = {}) {
   let clock = 0, colorIndex = 0;
   let nextTab = Math.max(0, ...(setup.tabs ?? []).map(t => t.id)) + 1;
   let nextGroup = Math.max(0, ...groups.map(g => g.id)) + 1;
+  let nextWindow = Math.max(0, ...wins.map(w => w.id)) + 1;
   const currentWindowId = setup.currentWindowId ?? wins.find(w => w.focused)?.id ?? wins[0]?.id;
   let lastFocusedId = wins.find(w => w.focused)?.id ?? wins[0]?.id;
-  const browser = { tabs: {}, tabGroups: {}, windows: {}, bookmarks: {}, storage: { local: {} }, runtime: {} };
+  const browser = { tabs: {}, tabGroups: {}, windows: {}, bookmarks: {}, storage: { local: {}, session: {} }, runtime: {} };
 
   function event(name) {
     const listeners = new Set();
@@ -76,7 +77,7 @@ export function createFirefox(setup = {}) {
       calls.push({ api: `${namespace}.${name}`, args: copy(args) });
       return fn(...args);
     };
-    const target = namespace === "storage.local" ? browser.storage.local : browser[namespace];
+    const target = namespace.startsWith("storage.") ? browser.storage[namespace.split(".")[1]] : browser[namespace];
     target[name] = sync ? (...args) => copy(wrapped(...args)) : async (...args) => {
       const result = wrapped(...args);
       return copy(result && typeof result.then === "function" ? await result : result);
@@ -104,10 +105,10 @@ export function createFirefox(setup = {}) {
   function tabObject(t) {
     return { id: t.id, windowId: t.windowId, index: t.index, pinned: t.pinned, groupId: t.groupId,
       url: t.url, title: t.title, favIconUrl: t.favIconUrl, active: t.active, discarded: t.discarded,
-      hidden: false, status: "complete", lastAccessed: t.lastAccessed, incognito: false };
+      hidden: false, status: "complete", lastAccessed: t.lastAccessed, incognito: windowById(t.windowId).incognito };
   }
   function windowObject(w, populate = false) {
-    const result = { id: w.id, focused: w.focused, type: w.type, incognito: false };
+    const result = { id: w.id, focused: w.focused, type: w.type, incognito: w.incognito };
     if (populate) result.tabs = w.tabs.map(tabObject);
     return result;
   }
@@ -190,10 +191,21 @@ export function createFirefox(setup = {}) {
   api("tabs", "get", id => tabObject(tabById(id)));
   api("tabs", "getCurrent", () => setup.selfTabId == null ? undefined : tabObject(tabById(setup.selfTabId)));
   api("tabs", "create", (props = {}) => {
+    checkURL(props.url ?? "about:blank");
     const id = props.windowId ?? currentWindowId;
     const tabs = windowTabs(id), pinned = props.pinned ?? false, discarded = props.discarded ?? false;
-    if (discarded && props.active === true) throw new Error("Cannot create an active discarded tab");
-    checkURL(props.url ?? "about:blank");
+    if (discarded) {
+      if (props.active === true) throw new Error("Active tabs cannot be created and discarded.");
+      if (pinned) throw new Error("Pinned tabs cannot be created and discarded.");
+      // Keep the brief's missing-URL rejection. Firefox uses BROWSER_NEW_TAB_URL
+      // (moz-extension with Foxy's override); "" resolves to an extension URL there,
+      // but this fake's checkURL rejects relative URLs before reaching this branch.
+      if (props.url == null || props.url.startsWith("about:")) {
+        throw new Error('Cannot create a discarded new tab or "about" urls.');
+      }
+    } else if (props.title) {
+      throw new Error("Title may only be set for discarded tabs.");
+    }
     const count = pinnedCount(id);
     const index = pinned ? Math.max(0, Math.min(props.index ?? count, count))
       : Math.max(count, Math.min(props.index ?? tabs.length, tabs.length));
@@ -419,8 +431,23 @@ export function createFirefox(setup = {}) {
   });
 
   browser.windows.WINDOW_ID_NONE = -1;
+  api("windows", "create", async (props = {}) => {
+    const win = { id: nextWindow++, focused: props.focused ?? true, type: props.type ?? "normal",
+      incognito: props.incognito ?? false, tabs: [] };
+    wins.push(win);
+    if (win.focused) {
+      for (const other of wins) other.focused = other === win;
+      lastFocusedId = win.id;
+      queue("windows.onFocusChanged", win.id);
+    }
+    for (const url of asArray(props.url ?? "about:blank")) {
+      await browser.tabs.create({ windowId: win.id, url, active: win.tabs.length === 0 });
+    }
+    return windowObject(win, true);
+  });
   api("windows", "getAll", (props = {}) => (props.windowTypes && !props.windowTypes.includes("normal") ? [] : wins)
     .map(w => windowObject(w, props.populate)));
+  api("windows", "get", (id, props = {}) => windowObject(windowById(id), props.populate));
   api("windows", "getCurrent", (props = {}) => windowObject(windowById(currentWindowId), props.populate));
   api("windows", "getLastFocused", (props = {}) => windowObject(windowById(lastFocusedId), props.populate));
   api("windows", "update", (id, props) => {
@@ -443,8 +470,21 @@ export function createFirefox(setup = {}) {
     closeEmptyWindow(id);
   }
 
-  const nodes = [], storage = {};
-  let nextBookmark = 1, bookmarkClock = 0;
+  const nodes = [], localStore = {};
+  let nextBookmark = 1, bookmarkClock = 0, remoteBookmarks = false;
+  const bookmarkJournal = [];
+  function recordBookmark(node) {
+    if (!remoteBookmarks) bookmarkJournal.push(copy(node));
+  }
+  function bookmarkChanges(sinceCursor = 0) {
+    const changed = new Map();
+    for (const entry of bookmarkJournal.slice(sinceCursor)) {
+      changed.delete(entry.id);
+      changed.set(entry.id, entry);
+    }
+    return { cursor: bookmarkJournal.length, nodes: [...changed.values()].map(entry =>
+      entry.deleted ? entry : copy(nodes.find(node => node.id === entry.id) ?? { id: entry.id, deleted: true })) };
+  }
   function nodeById(id) {
     const node = nodes.find(n => n.id === id);
     if (!node) throw new Error(`Invalid bookmark ID: ${id}`);
@@ -456,7 +496,11 @@ export function createFirefox(setup = {}) {
     if (node.type !== "folder") throw new Error("Parent must be a folder");
     return node;
   }
-  function reindexChildren(id) { children(id).forEach((n, i) => { n.index = i; }); }
+  function reindexChildren(id) {
+    children(id).forEach((n, i) => {
+      if (n.index !== i) { n.index = i; recordBookmark(n); }
+    });
+  }
   function treeNode(node) {
     return node.type === "folder" ? { ...node, children: children(node.id).map(treeNode) } : { ...node };
   }
@@ -466,12 +510,12 @@ export function createFirefox(setup = {}) {
     folderById(parentId);
     if (props.url != null) checkURL(props.url, true);
     const siblings = children(parentId), index = Math.max(0, Math.min(props.index ?? siblings.length, siblings.length));
-    for (const n of siblings.slice(index)) n.index++;
-    const node = { id: `b${String(nextBookmark++).padStart(11, "0")}`, parentId, index, title: props.title ?? "",
-      type: props.url == null ? "folder" : "bookmark", dateAdded: ++bookmarkClock };
+    for (const n of siblings.slice(index)) { n.index++; recordBookmark(n); }
+    const node = { id: props.id ?? `${notify ? setup.bookmarkPrefix ?? "b" : "b"}${String(nextBookmark++).padStart(11, "0")}`, parentId, index, title: props.title ?? "",
+      type: props.url == null ? "folder" : "bookmark", dateAdded: props.dateAdded ?? ++bookmarkClock };
     if (props.url != null) node.url = props.url;
     nodes.push(node);
-    if (notify) queue("bookmarks.onCreated", node.id, node);
+    if (notify) { recordBookmark(node); queue("bookmarks.onCreated", node.id, node); }
     return node;
   }
   nodes.push({ id: ROOTS[0], index: 0, title: "", type: "folder", dateAdded: ++bookmarkClock });
@@ -485,6 +529,7 @@ export function createFirefox(setup = {}) {
     }
   }
   seedBookmarks(setup.bookmarks ?? [], "unfiled_____");
+  for (const node of nodes) if (!ROOTS.includes(node.id)) recordBookmark(node);
   api("bookmarks", "getTree", () => [treeNode(nodeById(ROOTS[0]))]);
   api("bookmarks", "getSubTree", id => [treeNode(nodeById(id))]);
   api("bookmarks", "getChildren", id => { folderById(id); return children(id); });
@@ -500,6 +545,7 @@ export function createFirefox(setup = {}) {
     for (const key of ["title", "url"]) {
       if (props[key] != null && node[key] !== props[key]) {
         node[key] = props[key];
+        recordBookmark(node);
         queue("bookmarks.onChanged", id, { [key]: props[key] });
       }
     }
@@ -521,15 +567,17 @@ export function createFirefox(setup = {}) {
     node.parentId = undefined;
     reindexChildren(oldParentId);
     const siblings = children(parentId), index = Math.max(0, Math.min(props.index ?? siblings.length, siblings.length));
-    for (const n of siblings.slice(index)) n.index++;
+    for (const n of siblings.slice(index)) { n.index++; recordBookmark(n); }
     node.parentId = parentId;
     node.index = index;
+    recordBookmark(node);
     queue("bookmarks.onMoved", id, { parentId, index, oldParentId, oldIndex });
     return node;
   });
   function removeNode(node, notify = true) {
     const info = { parentId: node.parentId, index: node.index, node: copy(node) };
     for (const child of children(node.id)) removeNode(child, false);
+    recordBookmark({ id: node.id, deleted: true });
     nodes.splice(nodes.indexOf(node), 1);
     reindexChildren(node.parentId);
     if (notify) queue("bookmarks.onRemoved", node.id, info);
@@ -541,31 +589,70 @@ export function createFirefox(setup = {}) {
   });
   api("bookmarks", "removeTree", id => removeNode(mutableNode(id)));
 
-  api("storage.local", "get", keys => {
-    if (keys == null) return jsonCopy(storage);
-    const result = {};
-    const defaults = typeof keys === "object" && !Array.isArray(keys) ? keys : undefined;
-    for (const key of defaults ? Object.keys(defaults) : asArray(keys)) {
-      if (Object.hasOwn(storage, key)) result[key] = jsonCopy(storage[key]);
-      else if (defaults && defaults[key] !== undefined) result[key] = jsonCopy(defaults[key]);
+  // Sync changes emit normal events but are not re-uploaded as local edits.
+  async function applyRemoteBookmarks(changes, { orderEvents = batch => batch } = {}) {
+    const eventStart = pending.length;
+    remoteBookmarks = true;
+    try {
+      for (const change of changes.filter(node => node.deleted)) {
+        const node = nodes.find(node => node.id === change.id);
+        if (node && !ROOTS.includes(node.id)) removeNode(node);
+      }
+      const remaining = changes.filter(node => !node.deleted && !ROOTS.includes(node.id));
+      // Parent folders can arrive after children in an upload.
+      let waiting = [...remaining];
+      while (waiting.length) {
+        const ready = waiting.filter(node => nodes.some(parent => parent.id === node.parentId))
+          .sort((a, b) => a.index - b.index);
+        if (!ready.length) throw new Error("Remote bookmark parent missing");
+        for (const change of ready) {
+          let node = nodes.find(node => node.id === change.id);
+          if (!node) node = insertNode(change);
+          else {
+            if (node.title !== change.title || node.url !== change.url) {
+              await browser.bookmarks.update(node.id, { title: change.title, url: change.url });
+            }
+            if (node.parentId !== change.parentId || node.index !== change.index) {
+              await browser.bookmarks.move(node.id, { parentId: change.parentId, index: change.index });
+            }
+          }
+        }
+        waiting = waiting.filter(node => !ready.includes(node));
+      }
+    } finally {
+      remoteBookmarks = false;
+      pending.push(...orderEvents(pending.splice(eventStart)));
     }
-    return result;
-  });
-  api("storage.local", "set", obj => {
-    const changes = {}, values = jsonCopy(obj);
-    for (const [key, value] of Object.entries(values)) {
-      changes[key] = Object.hasOwn(storage, key) ? { oldValue: storage[key], newValue: value } : { newValue: value };
-      storage[key] = value;
-    }
-    if (Object.keys(changes).length) queue("storage.onChanged", changes, "local");
-  });
-  function removeStorage(keys) {
-    const changes = {};
-    for (const key of keys) if (Object.hasOwn(storage, key)) { changes[key] = { oldValue: storage[key] }; delete storage[key]; }
-    if (Object.keys(changes).length) queue("storage.onChanged", changes, "local");
   }
-  api("storage.local", "remove", keys => removeStorage(asArray(keys)));
-  api("storage.local", "clear", () => removeStorage(Object.keys(storage)));
+
+  const session = {};
+  for (const [area, storage] of [["local", localStore], ["session", session]]) {
+    api(`storage.${area}`, "get", keys => {
+      if (keys == null) return jsonCopy(storage);
+      const result = {};
+      const defaults = typeof keys === "object" && !Array.isArray(keys) ? keys : undefined;
+      for (const key of defaults ? Object.keys(defaults) : asArray(keys)) {
+        if (Object.hasOwn(storage, key)) result[key] = jsonCopy(storage[key]);
+        else if (defaults && defaults[key] !== undefined) result[key] = jsonCopy(defaults[key]);
+      }
+      return result;
+    });
+    api(`storage.${area}`, "set", obj => {
+      const changes = {}, values = jsonCopy(obj);
+      for (const [key, value] of Object.entries(values)) {
+        changes[key] = Object.hasOwn(storage, key) ? { oldValue: storage[key], newValue: value } : { newValue: value };
+        storage[key] = value;
+      }
+      if (Object.keys(changes).length) queue("storage.onChanged", changes, area);
+    });
+    function removeStorage(keys) {
+      const changes = {};
+      for (const key of keys) if (Object.hasOwn(storage, key)) { changes[key] = { oldValue: storage[key] }; delete storage[key]; }
+      if (Object.keys(changes).length) queue("storage.onChanged", changes, area);
+    }
+    api(`storage.${area}`, "remove", keys => removeStorage(asArray(keys)));
+    api(`storage.${area}`, "clear", () => removeStorage(Object.keys(storage)));
+  }
 
   browser.runtime.id = setup.extensionId ?? "foxy-test";
   api("runtime", "getURL", path => `moz-extension://${browser.runtime.id}/${path}`, true);
@@ -580,6 +667,32 @@ export function createFirefox(setup = {}) {
     return response;
   });
 
+  function restart({ restore = false } = {}) {
+    if (settling || messages.size) throw new Error("Settle Firefox before restarting");
+    pending.length = 0;
+    for (const listeners of events.values()) listeners.clear();
+    for (const key of Object.keys(session)) delete session[key];
+    if (restore) {
+      const ids = new Map();
+      for (const group of groups) {
+        const oldId = group.id;
+        group.id = nextGroup++;
+        ids.set(oldId, group.id);
+      }
+      for (const win of wins) for (const tab of win.tabs) {
+        tab.id = nextTab++;
+        tab.groupId = ids.get(tab.groupId) ?? -1;
+      }
+    } else {
+      groups.length = 0;
+      wins.splice(0, wins.length, { id: currentWindowId, focused: true, type: "normal", incognito: false,
+        tabs: [makeTab({ id: nextTab++, windowId: currentWindowId, url: "about:home", active: true })] });
+      lastFocusedId = currentWindowId;
+      reindex(currentWindowId);
+    }
+    queue("runtime.onStartup");
+  }
+
   function layout(id) {
     const tabs = wins.find(w => w.id === id)?.tabs ?? [];
     const pinned = tabs.filter(t => t.pinned).map(t => `P${t.id}`).join(" ");
@@ -593,5 +706,5 @@ export function createFirefox(setup = {}) {
     }
     return `${pinned ? `${pinned} ` : ""}| ${items.join(" ")}`;
   }
-  return { browser, settle, layout, closeWindow, fire: queue, errors, calls };
+  return { browser, settle, layout, closeWindow, restart, bookmarkChanges, applyRemoteBookmarks, fire: queue, errors, calls };
 }
