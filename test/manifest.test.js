@@ -6,12 +6,12 @@ const root = new URL("../extension/", import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), "utf8");
 const manifest = JSON.parse(read("manifest.json"));
 
-test("manifest and package name the add-on Foxy 2.1.1", () => {
+test("manifest and package name the add-on Foxy 2.1.2", () => {
   assert.equal(manifest.name, "Foxy");
-  assert.equal(manifest.version, "2.1.1");
+  assert.equal(manifest.version, "2.1.2");
   assert.equal(manifest.description, "A kanban board of your tabs and tab groups, shared across devices through bookmarks.");
   const pkg = JSON.parse(readFileSync(new URL("../package.json", root), "utf8"));
-  assert.equal(pkg.version, "2.1.1");
+  assert.equal(pkg.version, "2.1.2");
 });
 
 test("manifest replaces the new tab page and the home page with newtab.html", () => {
@@ -54,7 +54,7 @@ test("every file the page references exists", () => {
 });
 
 test("fonts ship with their licences", () => {
-  for (const file of ["fonts/GoogleSansFlex-OFL.txt", "fonts/GoogleSansFlex-TRADEMARKS.md", "fonts/CascadiaMono-OFL.txt"]) {
+  for (const file of ["fonts/GoogleSansFlex-OFL.txt", "fonts/GoogleSansFlex-TRADEMARKS.md", "fonts/CascadiaMono-OFL.txt", "fonts/EBGaramond-OFL.txt"]) {
     assert.ok(existsSync(new URL(file, root)), `missing ${file}`);
   }
 });

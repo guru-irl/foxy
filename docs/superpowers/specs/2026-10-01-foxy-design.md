@@ -34,14 +34,15 @@ userContent.css, user.js) and the fonts.
 | Column drag | Group columns can be dragged to reorder groups, and into another window. |
 | Durability | Groups and pins live in bookmarks: one shared set for all devices. |
 | Remote changes | Live, like Safari: other devices' changes apply to open groups here, except to the tab you are looking at, which waits until you switch away. |
-| Fonts | Google Sans Flex for all text; monospace (Cascadia Mono) for URLs and code-like text. |
+| Fonts | EB Garamond SemiBold for the clock; Google Sans Flex for the date and other text; monospace (Cascadia Mono) for URLs and code-like text. |
 
 ## 3. Repository and packaging
 
 ```
 foxy/
   extension/          the add-on (manifest, pages, src, background)
-  extension/fonts/    GoogleSansFlex.ttf, CascadiaMono.ttf, OFL and TRADEMARKS files
+  extension/fonts/    GoogleSansFlex.ttf, EBGaramond.ttf, CascadiaMono.ttf,
+                      OFL and TRADEMARKS files
                       (shared with the theme through a symlink)
   theme/              userChrome.css, userContent.css, user.js
   scripts/            build.py, sign.py, preview.py, install_theme.py,
@@ -73,15 +74,16 @@ foxy/
 
 ## 4. Typography
 
-One variable font, Google Sans Flex (OFL, axes: wght 1–1000, wdth 25–151,
-opsz 6–144, slnt −10–0, GRAD 0–100, ROND 0–100). Roundness (ROND) is 0
-everywhere. Only group titles are slanted.
+The clock uses EB Garamond (OFL, variable wght 400 to 800), bundled as
+`Foxy Serif`. The date and other text use Google Sans Flex (OFL, axes:
+wght 1–1000, wdth 25–151, opsz 6–144, slnt −10–0, GRAD 0–100,
+ROND 0–100). Roundness (ROND) is 0 everywhere. Only group titles are slanted.
 
 | Role | Settings |
 |---|---|
 | Default text (page and Firefox's UI) | wght 400, wdth 100, opsz automatic |
-| Clock | wght 700, wdth 100, opsz 144, tabular figures, upright; left-aligned with the board, pulled left by the hour digit's side bearing so the ink meets the board edge |
-| Date | wght 600, wdth 85, capitals, letter-spacing 0.12em, upright, "WEEKDAY, D MONTH"; left-aligned |
+| Clock | EB Garamond wght 600, lining and tabular figures, upright; clamp(96.8px, 12.1vw, 176px), 1.1 times the old size to match digit ink height. Ink starts at the PINNED title ink, with a measured lead-digit side-bearing correction. The colon has its own span, shifted 0.134em up and 0.004em right to centre its ink vertically and in its slot. |
+| Date | Google Sans Flex wght 600, wdth 85, capitals, letter-spacing 0.12em, upright, "WEEKDAY, D MONTH"; ink aligned with the PINNED title |
 | Group titles (board columns, sidebar group names) | wght 700, wdth 50, slnt −10, capitals, letter-spacing 0 (compressed). The Bebas Neue look. |
 | Other column titles (PINNED, SAVED, TABS), sidebar pinned names, the "SEARCH" placeholder | Same as group titles, upright, letter-spacing 0 |
 | Subheadings ("OTHER WINDOWS") | wght 600, wdth 90, capitals, small, letter-spacing 0.12em, faint |
@@ -106,20 +108,29 @@ everywhere. Only group titles are slanted.
 ## 5. Board layout
 
 ```
- 21:56
- WEDNESDAY, 30 SEPTEMBER
+   21:56                 EB Garamond SemiBold, centred colon
+   WEDNESDAY, 30 SEPTEMBER
+   ↑ ink aligned with PINNED, not the card edge
 
- PINNED │ SAVED   DEV SERVER   COVERAGE   (more…)   + NEW GROUP │ TABS
- fixed  │ ───────────── scrolls sideways ────────────────────── │ fixed
+   PINNED │ SAVED   DEV SERVER   COVERAGE   (more…)   + NEW GROUP │ TABS
+   fixed  │ ← 24px fades only where more content is offscreen → │ fixed
+   rows: top/bottom 24px fades only while more rows are hidden
 ```
 
-- Clock and date on top, left-aligned with the board's left edge.
+- Clock and date on top. Their shared box inset is the board margin (24px)
+  plus column padding (8px) plus title padding (10px), expressed with CSS
+  layout variables. Optical corrections align their ink to the PINNED title's
+  ink at x=43px within 1px at both clock clamp ends.
 - PINNED is fixed on the left, TABS fixed on the right. Between them, a
   sideways-scrolling strip: SAVED (only when it has entries), the group
   columns, then "+ NEW GROUP".
 - Column width 264px, gap 12px. Columns fill the height of the window below
-  the date and scroll on their own (hard cut, no fade). The board has 24px
-  side margins.
+  the date and scroll on their own. The board has 24px side margins.
+  Mask-image fades the strip's content over 24px at the left when scrolled
+  away from the start, and at the right when more remains. Row lists have
+  equivalent top/bottom fades. Unscrollable content is never masked. Passive
+  scroll listeners, ResizeObserver and render/scroll restoration update the
+  edge attributes. No shadows or overlays; drop geometry stays unchanged.
 - Group column order: this window's groups in tab strip order, then each other
   window's groups, windows ordered by most recent use (the latest
   `lastAccessed` of their tabs).
@@ -129,7 +140,8 @@ everywhere. Only group titles are slanted.
   subheading and the other windows' tabs, window by window in the same order.
 - Rows: favicon, title (default font), and on hover a × on the right. A tab
   showing the Foxy page itself is never listed.
-- Column look: the existing glass card. Group header: dot + group title (§4).
+- Column look: neutral glass cards, alpha 0.6 dark and 0.7 light.
+  Group header: dot + group title (§4).
   PINNED, SAVED and TABS headers have no dot. "+ NEW GROUP" is a faint glass
   card with the action label centred.
 - Drag feedback: the dragged row or column is faded; a 2px bright line shows

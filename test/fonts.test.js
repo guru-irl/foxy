@@ -9,6 +9,8 @@ const main = readFileSync(new URL("src/main.js", root), "utf8");
 const fontFiles = [
   "CascadiaMono-OFL.txt",
   "CascadiaMono.ttf",
+  "EBGaramond-OFL.txt",
+  "EBGaramond.ttf",
   "GoogleSansFlex-OFL.txt",
   "GoogleSansFlex-TRADEMARKS.md",
   "GoogleSansFlex.ttf",
@@ -38,7 +40,7 @@ function face(family) {
   return found;
 }
 
-test("the add-on bundles exactly the two new fonts and their licence notices", () => {
+test("the add-on bundles exactly the three fonts and their licence notices", () => {
   assert.deepEqual(readdirSync(new URL("fonts/", root)).sort(), fontFiles);
 });
 
@@ -81,12 +83,18 @@ test("default text uses Foxy Sans at weight 400", () => {
   assert.equal(rule("body").font, '400 13px "Foxy Sans", system-ui, sans-serif');
 });
 
-test("the clock is bold, upright and tabular at optical size 144, retaining its size clamp", () => {
+test("Foxy Serif exposes EB Garamond's upright variable weight range", () => {
+  const serif = face("Foxy Serif");
+  assert.equal(serif.src, 'url("fonts/EBGaramond.ttf") format("truetype")');
+  assert.equal(serif["font-weight"], "400 800");
+  assert.equal(serif["font-style"], "normal");
+});
+
+test("the clock uses semibold upright lining tabular serif digits at an ink-matched scale", () => {
   const clock = rule(".clock-time");
-  assert.equal(clock.font, 'normal 700 clamp(88px, 11vw, 160px) / 1 "Foxy Sans", system-ui, sans-serif');
-  assert.equal(clock["font-stretch"], "100%");
-  assert.equal(clock["font-variation-settings"], '"opsz" 144');
-  assert.equal(clock["font-variant-numeric"], "tabular-nums");
+  assert.equal(clock.font, 'normal 600 clamp(96.8px, 12.1vw, 176px) / 1 "Foxy Serif", serif');
+  assert.equal(clock["font-variant-numeric"], "lining-nums tabular-nums");
+  assert.equal(clock["font-feature-settings"], '"case" 1');
 });
 
 test("the date is upright, slightly compressed weight 600 capitals", () => {
@@ -95,18 +103,19 @@ test("the date is upright, slightly compressed weight 600 capitals", () => {
   assert.equal(date["font-stretch"], "85%");
   assert.equal(date["text-transform"], "uppercase");
   assert.equal(date["letter-spacing"], "0.12em");
-  // Left-aligned: no centring compensation for the trailing letter gap.
-  assert.equal(date["text-indent"], undefined);
+  // Match the PINNED P's 1px ink inset, not the trailing letter gap.
+  assert.equal(date["text-indent"], "1px");
 });
 
-test("the clock and date are left-aligned with the board", () => {
+test("the clock and date start at the column title inset expressed from layout values", () => {
   assert.equal(rule(".clock")["text-align"], "start");
-  assert.equal(rule(".clock")["margin-inline"], rule(".board")["margin-inline"]);
+  assert.equal(rule(".clock")["margin-inline"], "calc(var(--board-margin) + var(--column-padding) + var(--title-padding))");
+  assert.equal(rule(".board")["margin-inline"], "var(--board-margin)");
 });
 
-test("the clock is pulled left by its lead digit's side bearing so the ink meets the board edge", () => {
-  // Measured in headless Firefox 157 at weight 700, width 100%, opsz 144, 160px.
-  for (const [digit, indent] of [["0", "-0.0375em"], ["1", "-0.075em"], ["2", "-0.056em"]]) {
+test("the clock is pulled left by its lead digit's side bearing so the ink meets the title ink", () => {
+  // Garamond lining tabular figures, wght 600; recalibrated at both clamp ends.
+  for (const [digit, indent] of [["0", "calc(1px - 0.03em)"], ["1", "calc(1px - 0.095em)"], ["2", "calc(1px - 0.045em)"]]) {
     assert.equal(rule(`.clock-time[data-lead="${digit}"]`)["text-indent"], indent, digit);
   }
   assert.match(main, /dataset\.lead\s*=/);

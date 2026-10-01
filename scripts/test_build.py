@@ -23,12 +23,14 @@ class BuildTest(unittest.TestCase):
             "fonts/GoogleSansFlex.ttf", "fonts/GoogleSansFlex-OFL.txt",
             "fonts/GoogleSansFlex-TRADEMARKS.md",
             "fonts/CascadiaMono.ttf", "fonts/CascadiaMono-OFL.txt",
+            "fonts/EBGaramond.ttf", "fonts/EBGaramond-OFL.txt",
             "icons/globe.svg",
         ]:
             self.assertIn(required, names)
         self.assertEqual(
             sorted(name for name in names if name.startswith("fonts/")),
             ["fonts/CascadiaMono-OFL.txt", "fonts/CascadiaMono.ttf",
+             "fonts/EBGaramond-OFL.txt", "fonts/EBGaramond.ttf",
              "fonts/GoogleSansFlex-OFL.txt", "fonts/GoogleSansFlex-TRADEMARKS.md",
              "fonts/GoogleSansFlex.ttf"],
         )
