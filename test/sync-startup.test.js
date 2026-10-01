@@ -107,7 +107,7 @@ test("user-deleted root is recreated on the next rebuild without deleting live g
   assert.equal(after.tree.pinned.bookmarks.length, 2);
 });
 
-test("duplicate roots and pinned folders merge by moving, leave duplicates and never delete", async () => {
+test("duplicate roots and pinned folders merge by moving, archive duplicates and never delete", async () => {
   const ff = createFirefox({ tabs: [{ id: 1, windowId: 1, url: "about:home" }], bookmarks: [
     { title: "Foxy", children: [{ title: "📌 Pinned", children: [{ url: "https://same/" }] }] },
     { title: "Foxy", children: [{ title: "📌 Pinned", children: [{ url: "https://same/" }, { url: "https://unique/" }] },
@@ -120,8 +120,13 @@ test("duplicate roots and pinned folders merge by moving, leave duplicates and n
   assert.deepEqual(tree.pinned.bookmarks.map(b => b.url), ["https://same/", "https://unique/"]);
   assert.equal(tree.folders[0].title, "🟢 Remote");
   assert.equal((await ff.browser.bookmarks.getChildren(roots[1].id)).length, 0);
-  assert.equal((await ff.browser.bookmarks.get(tree.extraPinned[0].id))[0].type, "folder");
-  assert.deepEqual(tree.extraPinned[0].bookmarks.map(b => b.url), ["https://same/"]);
+  assert.deepEqual(tree.extraPinned, []);
+  const [archive] = await ff.browser.bookmarks.search({ title: "Foxy merge leftovers" });
+  assert.equal(archive.parentId, "unfiled_____");
+  assert.equal((await ff.browser.bookmarks.get(roots[1].id))[0].parentId, archive.id);
+  const archived = await ff.browser.bookmarks.getChildren(archive.id);
+  assert.deepEqual(archived.filter(n => n.type === "bookmark").map(n => n.url), ["https://same/"]);
+  assert.ok(archived.some(n => n.title === "📌 Pinned"));
   assert.equal(ff.calls.some(c => c.api.startsWith("bookmarks.remove")), false);
 });
 
@@ -165,4 +170,21 @@ test("settle stops at maxWaitMs even while events keep arriving", async () => {
   try {
     await settle(ff.browser, { settleMs: 500, maxWaitMs: 20, now: Date.now });
   } finally { clearInterval(interval); }
+});
+
+// Catches rebuild selecting the lowest index instead of this device's last open folder.
+test("rebuild ties prefer previousOpen over an earlier equal-overlap folder", async () => {
+  const ff = createFirefox({ groups: [{ id: 11, windowId: 1, title: "Dev", color: "red" }],
+    tabs: [{ id: 1, windowId: 1, url: "about:home", active: true }, { id: 2, windowId: 1, groupId: 11, url: "https://shared/" }],
+    bookmarks: [{ id: "root", title: "Foxy", children: [{ title: "📌 Pinned" },
+      { id: "earlier", title: "🔴 Dev", children: [{ url: "https://shared/" }, { url: "https://remote/" }] },
+      { id: "own", title: "🔴 Dev", children: [{ url: "https://shared/" }, { url: "https://own/" }] }] }] });
+  const state = await loadState(ff.browser);
+  state.rootId = "root"; state.openFolders = ["own"];
+  await saveState(ff.browser, state);
+  const sync = wire(ff); await drain(ff, sync);
+  const after = await loadState(ff.browser);
+  assert.equal(after.groups[11].folderId, "own", "on a tie, rebind this device's previous folder");
+  assert.deepEqual((await ff.browser.tabs.query({ groupId: 11 })).map(tab => tab.url), ["https://shared/", "https://own/"]);
+  assert.deepEqual(after.missing, []);
 });

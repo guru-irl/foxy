@@ -414,3 +414,88 @@ for (const destination of ["private", "outside root"]) test(`return quiet comple
   assert.deepEqual(await ff.browser.bookmarks.getTree(), before);
   assert.equal((await ff.browser.tabs.get(result.tabs[0].id)).url, "https://must-stay-local/");
 });
+
+// Catches one stale-folder read aborting changed() before later remaps/reconciliation.
+test("merge remap warns per deleted folder and changed keeps reconciling pins", async t => {
+  const ff = createFirefox(localSetup), sync = wire(ff); await drain(ff, sync);
+  const before = await loadState(ff.browser);
+  unwire(ff);
+  const root = await ff.browser.bookmarks.create({ title: "Foxy" });
+  // Supply an older remote root via the fake's detached read snapshot.
+  const getChildren = ff.browser.bookmarks.getChildren;
+  t.mock.method(ff.browser.bookmarks, "getChildren", async id => {
+    if (id === "unfiled_____") return (await getChildren(id)).map(node => node.id === root.id ? { ...node, dateAdded: 1 } : node);
+    return getChildren(id);
+  });
+  const pins = await ff.browser.bookmarks.create({ parentId: root.id, title: "📌 Pinned" });
+  await ff.browser.bookmarks.create({ parentId: pins.id, url: "https://remote-pin/" });
+  await ff.settle();
+  const warn = t.mock.method(console, "warn", () => {});
+  let failed = false;
+  const wrapped = ff.browser.bookmarks.getChildren;
+  t.mock.method(ff.browser.bookmarks, "getChildren", async id => {
+    if (!failed && id === before.groups[11].folderId) { failed = true; throw new Error("Invalid bookmark ID: deleted-folder"); }
+    return wrapped(id);
+  });
+  await assert.doesNotReject(sync.handlers["bookmarks.onCreated"](root.id, { ...root, dateAdded: 1 }));
+  assert.equal(failed, true);
+  assert.ok(warn.mock.calls.some(call => /^Foxy:/.test(call.arguments[0]) && call.arguments[1]?.message === "Invalid bookmark ID: deleted-folder"));
+  assert.deepEqual((await ff.browser.tabs.query({ pinned: true })).map(tab => tab.url).sort(), ["https://pin-a/", "https://pin-b/", "https://remote-pin/"]);
+  assert.equal((await loadState(ff.browser)).tabs[5].folderId, before.groups[12].folderId);
+});
+
+// Catches closed-tab pending removals being omitted by live-tab-only remapping.
+for (const kind of ["moved", "counterpart", "already canonical"]) test(`merge rekeys pending pin removal when bookmark is ${kind}`, async t => {
+  let clock = 1000;
+  const ff = createFirefox({ tabs: [home, { id: 2, windowId: 1, pinned: true, url: "https://mail/" }] });
+  const options = { now: () => clock, removeDelayMs: 50 };
+  let sync = wire(ff, options); await drain(ff, sync);
+  t.after(async () => { clock = 99999; await delay(60); await drain(ff, sync); });
+  const before = await loadState(ff.browser);
+  await ff.browser.tabs.remove(2); await drain(ff, sync);
+  assert.equal((await loadState(ff.browser)).pendingRemovals[2].due, 1050);
+  unwire(ff);
+  const root = await ff.browser.bookmarks.create({ title: "Foxy" });
+  const pins = await ff.browser.bookmarks.create({ parentId: root.id, title: "📌 Pinned" });
+  let canonicalId = before.tabs[2].bookmarkId;
+  if (kind === "counterpart") canonicalId = (await ff.browser.bookmarks.create({ parentId: pins.id, url: "https://mail/" })).id;
+  if (kind === "already canonical") await ff.browser.bookmarks.move(canonicalId, { parentId: pins.id });
+  await ff.settle();
+  const getChildren = ff.browser.bookmarks.getChildren;
+  t.mock.method(ff.browser.bookmarks, "getChildren", async id => {
+    const nodes = await getChildren(id);
+    return id === "unfiled_____" ? nodes.map(node => node.id === root.id ? { ...node, dateAdded: 1 } : node) : nodes;
+  });
+  await sync.handlers["bookmarks.onCreated"](root.id, root);
+  const merged = await loadState(ff.browser);
+  assert.deepEqual(merged.pendingRemovals[2], { bookmarkId: canonicalId, folderId: pins.id, due: 1050 }, "closed pins keep their removal identity/deadline after merging");
+  assert.equal(merged.tabs[2].folderId, pins.id);
+  assert.equal(merged.tabs[2].bookmarkId, canonicalId);
+  clock = 1050; await delay(60); await drain(ff, sync);
+  assert.deepEqual(await ff.browser.bookmarks.getChildren(pins.id), [], "the canonical pin is removed at its original deadline");
+  assert.deepEqual((await loadState(ff.browser)).pendingRemovals, {});
+  ff.restart(); sync = wire(ff, options); await drain(ff, sync);
+  assert.deepEqual(await ff.browser.tabs.query({ pinned: true }), [], "restart must not reopen a pin closed just before merge");
+});
+
+// Catches a local navigation breaking remapping and reopening/reading an archived duplicate.
+test("merge remaps an unpublished pin navigation without reading or promoting its archived bookmark", async () => {
+  const ff = createFirefox({ tabs: [home, { id: 2, windowId: 1, pinned: true, url: "https://mail/" }] });
+  const sync = wire(ff); await drain(ff, sync);
+  const before = await loadState(ff.browser);
+  unwire(ff);
+  await ff.browser.tabs.update(2, { url: "https://local-navigation/", active: true });
+  await ff.applyRemoteBookmarks([{ id: "older-root", parentId: "unfiled_____", index: 0, title: "Foxy", type: "folder", dateAdded: 1 },
+    { id: "remote-pins", parentId: "older-root", index: 0, title: "📌 Pinned", type: "folder", dateAdded: 2 },
+    { id: "remote-mail", parentId: "remote-pins", index: 0, title: "Mail", url: "https://mail/", type: "bookmark", dateAdded: 3 }]);
+  await ff.settle();
+  const start = ff.calls.length;
+  await sync.handlers["bookmarks.onCreated"]("older-root", (await ff.browser.bookmarks.get("older-root"))[0]);
+  assert.deepEqual((await ff.browser.tabs.query({ pinned: true })).map(tab => tab.url), ["https://local-navigation/"], "remapping never navigates or duplicates a shown pin");
+  const merged = await loadState(ff.browser);
+  assert.equal(merged.tabs[2].bookmarkId, "remote-mail");
+  assert.equal(merged.tabs[2].url, "https://mail/", "retain last-synced direction for publication");
+  await sync.handlers["tabs.onUpdated"](2);
+  assert.equal((await ff.browser.bookmarks.get("remote-mail"))[0].url, "https://local-navigation/");
+  assert.equal(ff.calls.slice(start).some(call => call.api === "bookmarks.get" && call.args[0] === before.tabs[2].bookmarkId), false);
+});

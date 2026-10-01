@@ -215,7 +215,8 @@ Other Bookmarks
   open on this device; pending deferred changes (§8.5).
 - Firefox's group and tab IDs change across restarts, so after startup the maps
   are rebuilt: open groups are matched to folders by name and colour, ties
-  broken by the most shared URLs; tabs are matched to bookmarks by URL within
+  broken by the most shared URLs, then this device's previously open folders,
+  then folder order; tabs are matched to bookmarks by URL within
   their folder, in order. Unmatched open groups get new folders. Unmatched
   folders are "saved, not open" here.
 - Finding the Foxy folder: the oldest folder named `Foxy` directly under
@@ -224,6 +225,13 @@ Other Bookmarks
   otherwise it is created. The contents of any other Foxy folder (and of the
   stored one, if it's no longer the chosen root) are moved into it; nothing
   is deleted.
+
+Merge leftovers go into `Foxy merge leftovers`, an unmanaged folder directly
+under Other Bookmarks, created on first need and found by exact title. Surplus
+pin occurrences, duplicate groups with the same trimmed name, colour and URL
+multiset, and emptied extra root/pinned folders are moved there, never deleted.
+Live tabs are remapped to their canonical bookmarks. Foxy never reads, opens,
+shows as SAVED, matches or promotes anything in the archive.
 
 ### 8.3 Tabs to bookmarks (outbound)
 
@@ -298,6 +306,9 @@ page going to sleep.
   and remote tabs start fresh (logins survive through cookies).
 - Tabs that are neither grouped nor pinned are not saved.
 - Firefox's own "saved groups" feature is separate and unaffected.
+- A group's `pendingOrder` holds outbound changes until a safe activation
+  retries the order. A local navigation held across a browser restart is lost:
+  rebuilding the session maps resets that hold and its last-synced history.
 
 ## 9. Architecture
 

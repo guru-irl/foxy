@@ -1,3 +1,4 @@
+import { matchTabs } from "./match.js";
 import { ROOT_TITLE, PINNED_TITLE, decodeFolderTitle, isPinnedFolderTitle } from "./codec.js";
 
 export const OTHER_BOOKMARKS = "unfiled_____";
@@ -42,20 +43,73 @@ async function directRoots(api) {
     .sort((a, b) => a.dateAdded - b.dateAdded || a.index - b.index);
 }
 
-/** Merge duplicate contents by moving; retained folders are never deleted. */
+export const MERGE_ARCHIVE_TITLE = "Foxy merge leftovers";
+
+/** Move leftovers outside Foxy. Keep every GUID, but never manage the archive. */
 export async function mergeRoots(api, knownRootId) {
   const rootId = await findOrCreateRoot(api, knownRootId);
+  const pinnedId = await ensurePinnedFolder(api, rootId);
+  const kept = await readTree(api, rootId), folderRemaps = {}, bookmarkRemaps = {};
+  let archiveId;
+  async function archive(id) {
+    if (!archiveId) {
+      const found = (await api.bookmarks.getChildren(OTHER_BOOKMARKS))
+        .find(node => node.type === "folder" && node.title === MERGE_ARCHIVE_TITLE);
+      archiveId = found?.id ?? (await api.bookmarks.create({ parentId: OTHER_BOOKMARKS, title: MERGE_ARCHIVE_TITLE })).id;
+    }
+    await api.bookmarks.move(id, { parentId: archiveId });
+  }
+  function recordBookmarks(bookmarks, folderId) {
+    for (const node of bookmarks) bookmarkRemaps[node.id] = { bookmarkId: node.id, folderId };
+  }
+  recordBookmarks(kept.pinned.bookmarks, pinnedId);
+  for (const folder of kept.folders) recordBookmarks(folder.bookmarks, folder.id);
+  const extraPins = [...kept.extraPinned];
   for (const extra of await findExtraRoots(api, rootId, knownRootId)) {
-    for (const child of await api.bookmarks.getChildren(extra)) await api.bookmarks.move(child.id, { parentId: rootId });
+    const snapshot = await readTree(api, extra);
+    const pins = [snapshot.pinned, ...snapshot.extraPinned].filter(Boolean);
+    extraPins.push(...pins);
+    const groups = new Map(snapshot.folders.map(folder => [folder.id, folder]));
+    for (const child of await api.bookmarks.getChildren(extra)) {
+      const folder = groups.get(child.id);
+      const same = folder && kept.folders.find(candidate => sameGroup(candidate, folder));
+      if (same) {
+        folderRemaps[folder.id] = same.id;
+        const matches = matchTabs(folder.bookmarks.map(node => ({ tabId: node.id, url: node.url })), same.bookmarks);
+        for (const pair of matches.pairs) bookmarkRemaps[pair.tabId] = { bookmarkId: pair.bookmarkId, folderId: same.id };
+        await archive(folder.id);
+      } else {
+        await api.bookmarks.move(child.id, { parentId: rootId });
+        if (folder) {
+          kept.folders.push(folder);
+          recordBookmarks(folder.bookmarks, folder.id);
+        }
+      }
+    }
+    if (!(await api.bookmarks.getChildren(extra)).length) await archive(extra);
   }
-  const pinnedId = await ensurePinnedFolder(api, rootId), tree = await readTree(api, rootId);
-  const urls = new Set(tree.pinned.bookmarks.map(bookmark => bookmark.url));
-  for (const extra of tree.extraPinned) for (const bookmark of extra.bookmarks) {
-    if (urls.has(bookmark.url)) continue;
-    await api.bookmarks.move(bookmark.id, { parentId: pinnedId });
-    urls.add(bookmark.url);
+  for (const extra of extraPins) {
+    folderRemaps[extra.id] = pinnedId;
+    // Consume counterparts once per occurrence, not once per distinct URL.
+    const matches = matchTabs(extra.bookmarks.map(node => ({ tabId: node.id, url: node.url })), kept.pinned.bookmarks);
+    for (const pair of matches.pairs) {
+      bookmarkRemaps[pair.tabId] = { bookmarkId: pair.bookmarkId, folderId: pinnedId };
+      await archive(pair.tabId);
+    }
+    for (const id of matches.unmatchedTabs) {
+      await api.bookmarks.move(id, { parentId: pinnedId });
+      const node = extra.bookmarks.find(node => node.id === id);
+      kept.pinned.bookmarks.push(node);
+      recordBookmarks([node], pinnedId);
+    }
+    if (!(await api.bookmarks.getChildren(extra.id)).length) await archive(extra.id);
   }
-  return { rootId, pinnedId };
+  return { rootId, pinnedId, folderRemaps, bookmarkRemaps };
+}
+
+function sameGroup(a, b) {
+  if (a.name.trim() !== b.name.trim() || a.color !== b.color || a.bookmarks.length !== b.bookmarks.length) return false;
+  return matchTabs(a.bookmarks.map(node => ({ tabId: node.id, url: node.url })), b.bookmarks).unmatchedTabs.length === 0;
 }
 
 /** Reserve the first matching child folder for pins; new pins go at index zero. */

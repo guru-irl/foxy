@@ -40,7 +40,9 @@ export async function rebuild({ api, state, outbound, inbound }) {
   state.expectedMoves = {};
   delete state.lastFocusedNormalWindowId;
   state.openFolders = [];
-  Object.assign(state, await mergeRoots(api, knownRootId));
+  const merged = await mergeRoots(api, knownRootId);
+  Object.assign(state, { rootId: merged.rootId, pinnedId: merged.pinnedId });
+  for (let index = 0; index < previousOpen.length; index++) previousOpen[index] = merged.folderRemaps[previousOpen[index]] ?? previousOpen[index];
   const tree = await readTree(api, state.rootId);
   const tabs = (await api.tabs.query({})).filter(tab => !tab.incognito).sort((a, b) => a.windowId - b.windowId || a.index - b.index);
   const normalIds = new Set((await api.windows.getAll({ windowTypes: ["normal"] }))
@@ -48,7 +50,7 @@ export async function rebuild({ api, state, outbound, inbound }) {
   const groups = (await api.tabGroups.query({})).filter(group => normalIds.has(group.windowId)
     && tabs.some(tab => tab.groupId === group.id && !tab.pinned && isSyncableUrl(tab.url, api.runtime.getURL(""))));
   const matches = matchGroups(groups.map(group => ({ groupId: group.id,
-    title: group.title, color: group.color, urls: tabs.filter(tab => tab.groupId === group.id).map(tab => tab.url) })), tree.folders);
+    title: group.title, color: group.color, urls: tabs.filter(tab => tab.groupId === group.id).map(tab => tab.url) })), tree.folders, previousOpen);
 
   function bindTabs(local, folder) {
     const match = matchTabs(local.map(tab => ({ tabId: tab.id, url: tab.url })), folder.bookmarks);
@@ -74,7 +76,7 @@ export async function rebuild({ api, state, outbound, inbound }) {
   }
   for (const groupId of matches.unmatchedGroups) await outbound.syncGroup(groupId);
   const existing = new Set(tree.folders.map(folder => folder.id));
-  state.missing = previousOpen.filter(id => existing.has(id) && !state.openFolders.includes(id));
+  state.missing = [...new Set(previousOpen)].filter(id => existing.has(id) && !state.openFolders.includes(id));
   state.deferred = state.deferred.filter(id => id === state.pinnedId || existing.has(id));
   for (const id of Object.keys(state.cantReopen)) {
     if (id !== state.pinnedId && !existing.has(id)) delete state.cantReopen[id];

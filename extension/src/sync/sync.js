@@ -146,11 +146,18 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       throw error;
     }
   }
+  async function managedNode(id) {
+    if (id === state.rootId) return getNode(id);
+    const [root] = await api.bookmarks.getSubTree(state.rootId);
+    return root.children.flatMap(node => [node, ...(node.children ?? [])]).find(node => node.id === id) ?? null;
+  }
   async function relevant(id, parentId) {
     if (id === state.rootId || id === state.pinnedId || groupOfFolder(state, id) !== null) return true;
     if (parentId === state.rootId) return true;
-    const parent = parentId ? await getNode(parentId) : null;
-    return parent?.type === "folder" && parent.parentId === state.rootId;
+    // Inspect only managed parents. Unrelated folders (including the archive)
+    // must not be read merely because a bookmark event mentions them.
+    return parentId && (await api.bookmarks.getChildren(state.rootId))
+      .some(node => node.id === parentId && node.type === "folder");
   }
   async function folderRemoved(id) {
     const root = id === state.rootId, pinned = id === state.pinnedId;
@@ -352,32 +359,51 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     await inbound.applyDeferred();
   }
   async function remapMergedTabs(folderId, query) {
-    const nodes = (await api.bookmarks.getChildren(folderId)).filter(node => node.type === "bookmark");
-    const canonical = new Set(nodes.map(node => node.id)), returning = [];
-    for (const tab of await api.tabs.query(query)) {
-      const entry = state.tabs[tab.id];
-      if (tab.incognito || !entry) continue;
-      if (canonical.has(entry.bookmarkId)) {
-        entry.folderId = folderId; // The bookmark moved, retaining its GUID.
-        if (state.pendingRemovals[tab.id]) state.pendingRemovals[tab.id].folderId = folderId;
-      } else {
-        returning.push({ tabId: tab.id, url: tab.url });
+    try {
+      const nodes = (await api.bookmarks.getChildren(folderId)).filter(node => node.type === "bookmark");
+      const canonical = new Set(nodes.map(node => node.id)), returning = [];
+      for (const tab of await api.tabs.query(query)) {
+        const entry = state.tabs[tab.id];
+        if (tab.incognito || !entry) continue;
+        if (canonical.has(entry.bookmarkId)) {
+          entry.folderId = folderId; // The bookmark moved, retaining its GUID.
+          if (state.pendingRemovals[tab.id]) state.pendingRemovals[tab.id].folderId = folderId;
+        } else {
+          // The live URL can already contain an unpublished local navigation.
+          // Match the last-synced identity without changing publication direction.
+          returning.push({ tabId: tab.id, url: entry.url });
+        }
       }
-    }
-    const mapped = new Set(Object.values(state.tabs).map(entry => entry.bookmarkId));
-    const matches = matchTabs(returning, nodes.filter(node => !mapped.has(node.id)));
-    for (const { tabId, bookmarkId } of matches.pairs) {
-      Object.assign(state.tabs[tabId], { bookmarkId, folderId });
-      if (state.pendingRemovals[tabId]) Object.assign(state.pendingRemovals[tabId], { bookmarkId, folderId });
-    }
+      const mapped = new Set(Object.values(state.tabs).map(entry => entry.bookmarkId));
+      const matches = matchTabs(returning, nodes.filter(node => !mapped.has(node.id)));
+      for (const { tabId, bookmarkId } of matches.pairs) {
+        Object.assign(state.tabs[tabId], { bookmarkId, folderId });
+        if (state.pendingRemovals[tabId]) Object.assign(state.pendingRemovals[tabId], { bookmarkId, folderId });
+      }
+    } catch (error) { console.warn("Foxy: merge tab remap failed", error); }
   }
   async function changed(id, node) {
     if (node?.type === "folder" && ((id !== state.rootId && node.parentId === OTHER_BOOKMARKS && node.title === ROOT_TITLE)
       || (id !== state.pinnedId && node.parentId === state.rootId && isPinnedFolderTitle(node.title)))) {
-      Object.assign(state, await mergeRoots(api, state.rootId));
-      // A same-URL bookmark retained in an extra folder did not move. Bind
-      // its live tab to an unused canonical counterpart before reconciling.
-      // Startup rebuild already matches the merged folders from scratch.
+      const merged = await mergeRoots(api, state.rootId);
+      Object.assign(state, { rootId: merged.rootId, pinnedId: merged.pinnedId });
+      for (const entry of Object.values(state.groups)) entry.folderId = merged.folderRemaps[entry.folderId] ?? entry.folderId;
+      for (const field of ["openFolders", "missing", "deferred"]) {
+        state[field] = [...new Set(state[field].map(id => merged.folderRemaps[id] ?? id))];
+      }
+      // Closed tabs are absent from tabs.query, but their delayed removals
+      // still own a bookmark. Rekey from the pre-archive merge snapshot.
+      for (const [tabId, removal] of Object.entries(state.pendingRemovals)) {
+        const target = merged.bookmarkRemaps[removal.bookmarkId];
+        if (!target) continue;
+        const entry = state.tabs[tabId];
+        const same = entry?.bookmarkId === removal.bookmarkId && entry.folderId === removal.folderId;
+        Object.assign(removal, target);
+        if (same) Object.assign(entry, target);
+      }
+      // Bind archived duplicates to unused canonical counterparts before any
+      // reconcile or queued folder-move event can treat them as departures.
+      // Startup rebuild matches the managed folders from scratch.
       await remapMergedTabs(state.pinnedId, { pinned: true });
       for (const [groupId, entry] of Object.entries(state.groups)) {
         await remapMergedTabs(entry.folderId, { groupId: Number(groupId) });
@@ -416,21 +442,22 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       for (const tab of await api.tabs.query({ groupId: group.id })) await syncTab(tab.id);
     },
     "bookmarks.onCreated": (id, node) => changed(id, node),
-    "bookmarks.onChanged": async id => changed(id, await getNode(id)),
+    "bookmarks.onChanged": async id => changed(id, await managedNode(id)),
     "bookmarks.onRemoved": async (id, info) => {
       if (!await relevant(id, info.parentId)) return;
       if (info.node?.type === "folder") await folderRemoved(id);
       else await inbound.reconcileFolder(info.parentId);
     },
     "bookmarks.onMoved": async (id, info) => {
-      const node = await getNode(id);
-      if (!node) return;
-      if (node.type === "folder") {
-        if (info.oldParentId === state.rootId && info.parentId !== state.rootId) await folderRemoved(id);
-        else if (await relevant(id, info.parentId)) await changed(id, node);
-      } else if (await relevant(id, info.parentId) || await relevant(id, info.oldParentId)) {
-        await inbound.bookmarkMoved(id, info);
+      if (info.oldParentId === state.rootId && info.parentId !== state.rootId) {
+        // No need to read the departed folder, which may now be archived.
+        await folderRemoved(id);
+        return;
       }
+      if (!await relevant(id, info.parentId) && !await relevant(id, info.oldParentId)) return;
+      const node = await managedNode(id);
+      if (node?.type === "folder") await changed(id, node);
+      else await inbound.bookmarkMoved(id, info);
     },
     "windows.onFocusChanged": async id => {
       if (id === api.windows.WINDOW_ID_NONE) return;

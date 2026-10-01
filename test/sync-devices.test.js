@@ -191,9 +191,15 @@ test("first-run independent roots merge into one managed oldest root and pinned 
     assert.deepEqual(merged.folders.map(f => f.bookmarks.map(n => n.url)).flat().sort(), ["https://from-a/", "https://from-b/"]);
     assert.deepEqual((await ff.browser.tabs.query({ pinned: true })).map(t => t.url).sort(), ["https://pin-a/", "https://pin-b/"]);
     assert.deepEqual((await ff.browser.tabs.query({ groupId: 11 })).map(t => t.url), [ff === a ? "https://from-a/" : "https://from-b/"]);
-    // Task 1 leaves empty duplicates in place, rather than deleting their GUIDs.
+    // Duplicate GUIDs survive outside the managed tree in the archive.
     assert.equal((await ff.browser.bookmarks.getChildren(original[0].rootId)).length, 0);
-    assert.deepEqual(merged.extraPinned.map(f => f.bookmarks), [[]]);
+    assert.deepEqual(merged.extraPinned, []);
+    const archives = await ff.browser.bookmarks.search({ title: "Foxy merge leftovers" });
+    assert.ok(archives.length);
+    assert.ok(archives.every(folder => folder.parentId === "unfiled_____"));
+    for (const id of [original[0].rootId, original[0].pinnedId]) {
+      assert.ok(archives.map(folder => folder.id).includes((await ff.browser.bookmarks.get(id))[0].parentId));
+    }
     for (const initial of original) {
       assert.equal((await ff.browser.bookmarks.get(initial.rootId))[0].type, "folder");
       assert.equal((await ff.browser.bookmarks.get(initial.pinnedId))[0].type, "folder");
@@ -224,8 +230,20 @@ test("first-run same-URL pins and groups retain one canonical mapping across eit
       assert.deepEqual((await ff.browser.bookmarks.getChildren(state.groups[(await group(ff)).id].folderId)).map(n => n.url), ["https://shared-group/"]);
       const pin = (await ff.browser.tabs.query({ pinned: true }))[0];
       assert.equal(state.tabs[pin.id].bookmarkId, merged.pinned.bookmarks[0].id);
-      // Redundant GUIDs stay intact outside the canonical pin folder.
-      assert.deepEqual(merged.extraPinned.map(f => f.bookmarks.map(n => n.url)), [["https://shared-pin/"]]);
+      assert.deepEqual(merged.extraPinned, []);
+      assert.equal(merged.folders.length, 1, "duplicate Dev is not SAVED in the root");
+      assert.equal(state.groups[(await group(ff)).id].folderId, originals[1].groups[11].folderId);
+      assert.deepEqual(await ff.sync.onMessage({ type: "foxy:saved" }), { saved: [], missing: [] });
+      const archives = await ff.browser.bookmarks.search({ title: "Foxy merge leftovers" });
+      assert.ok(archives.length);
+      assert.ok(archives.every(folder => folder.parentId === "unfiled_____"));
+      const archived = (await Promise.all(archives.map(folder => ff.browser.bookmarks.getChildren(folder.id)))).flat();
+      assert.ok(archived.some(n => n.id === originals[0].tabs[2].bookmarkId && n.url === "https://shared-pin/"));
+      assert.ok(archived.some(n => n.id === originals[0].groups[11].folderId));
+      const count = mutations(ff).length;
+      assert.deepEqual(await ff.sync.onMessage({ type: "foxy:restore-all" }), { ok: true });
+      await drain(ff, ff.sync);
+      assert.equal(mutations(ff).length, count, "Restore all opens nothing extra");
       assert.equal(ff.calls.some(call => /^bookmarks\.remove/.test(call.api)), false);
     }
   }
@@ -235,6 +253,45 @@ test("first-run same-URL pins and groups retain one canonical mapping across eit
   for (const ff of [a, b]) {
     ff.restart({ restore: true }); ff.sync = wire(ff); await drain(ff, ff.sync);
     await check();
+  }
+});
+
+test("probe 8b: closing the merged shared pin cannot promote an archived leftover on either restart", async () => {
+  const setup = { tabs: [home, { id: 2, windowId: 1, pinned: true, url: "https://shared-pin/" }] };
+  const a = createFirefox({ ...setup, bookmarkPrefix: "a" });
+  const b = createFirefox({ ...setup, bookmarkPrefix: "z", bookmarks: [{ id: "older-root", title: "Foxy", dateAdded: 1 }] });
+  const server = createSyncServer({ deliveryOrder, seed: 42 });
+  for (const ff of [a, b]) { ff.sync = wire(ff); await drain(ff, ff.sync); server.attach(ff); }
+  await converge(server, a, b);
+  await a.browser.tabs.remove(2); await converge(server, a, b);
+  for (const ff of [a, b]) {
+    ff.restart(); ff.sync = wire(ff); await drain(ff, ff.sync); await converge(server, a, b);
+    assert.deepEqual(await ff.browser.tabs.query({ pinned: true }), [], "closed pin must not come back");
+    assert.deepEqual((await tree(ff)).pinned.bookmarks, []);
+  }
+});
+
+test("archive hand-added bookmarks are never read or opened live or after restart", async () => {
+  const { a, b, server } = await orderedDevices();
+  const archive = await a.browser.bookmarks.create({ title: "Foxy merge leftovers" });
+  const manual = await a.browser.bookmarks.create({ parentId: archive.id, url: "https://archive-only/" });
+  const nested = await a.browser.bookmarks.create({ parentId: archive.id, title: "Foxy" });
+  const hidden = await a.browser.bookmarks.create({ parentId: nested.id, url: "https://archive-nested/" });
+  const archivedIds = [archive.id, manual.id, nested.id, hidden.id];
+  for (const ff of [a, b]) {
+    const before = ff.calls.length;
+    await converge(server, a, b);
+    await ff.browser.bookmarks.update(manual.id, { url: "https://archive-edited/" });
+    await ff.browser.bookmarks.update(nested.id, { title: "🔴 Dev" });
+    await ff.browser.bookmarks.move(manual.id, { parentId: nested.id });
+    await converge(server, a, b);
+    ff.restart({ restore: true }); ff.sync = wire(ff); await drain(ff, ff.sync);
+    await ff.sync.onMessage({ type: "foxy:restore-all" });
+    await converge(server, a, b);
+    assert.equal((await ff.browser.tabs.query({})).some(t => t.url.startsWith("https://archive-")), false);
+    assert.deepEqual(await ff.sync.onMessage({ type: "foxy:saved" }), { saved: [], missing: [] });
+    assert.equal(ff.calls.slice(before).some(call => ["bookmarks.get", "bookmarks.getChildren", "bookmarks.getSubTree"].includes(call.api)
+      && archivedIds.includes(call.args[0])), false, "controller must not read inside the archive");
   }
 });
 

@@ -317,3 +317,38 @@ test("readTree keeps later pinned folders out of groups and selects pins by inde
   });
   assert.deepEqual(await b.getTree(), before);
 });
+
+// Catches set-based pin deduplication and group deduplication ignoring counts/metadata.
+test("merge archive preserves URL multiplicity and only identical decoded groups", async () => {
+  const ff = createFirefox({ bookmarks: [
+    { id: "kept", title: "Foxy", children: [
+      { id: "pins", title: "📌 Pinned", children: [{ id: "p1", url: "https://mail/" }, { id: "p2", url: "https://mail/" }] },
+      { id: "dev", title: "🔴 Dev", children: [{ url: "https://one/" }, { url: "https://one/" }, { url: "https://two/" }] }] },
+    { id: "extra", title: "Foxy", children: [
+      { id: "extra-pins", title: "📌 Pinned", children: [{ id: "e1", url: "https://mail/" }, { id: "e2", url: "https://mail/" }, { id: "e3", url: "https://mail/" }, { id: "new", url: "https://new/" }] },
+      { id: "same", title: "  🔴  Dev  ", children: [{ url: "https://two/" }, { url: "https://one/" }, { url: "https://one/" }] },
+      { id: "counts", title: "🔴 Dev", children: [{ url: "https://two/" }, { url: "https://two/" }, { url: "https://one/" }] },
+      { id: "name", title: "🔴 Other", children: [{ url: "https://one/" }, { url: "https://one/" }, { url: "https://two/" }] },
+      { id: "colour", title: "🔵 Dev", children: [{ url: "https://one/" }, { url: "https://one/" }, { url: "https://two/" }] }] },
+    { id: "archive", title: "Foxy merge leftovers", children: [{ title: "Foxy" }, { url: "https://manual/" }] },
+  ] });
+  await tree.mergeRoots(ff.browser, "extra");
+  const merged = await readTree(ff.browser, "kept");
+  assert.deepEqual(merged.pinned.bookmarks.map(n => n.id), ["p1", "p2", "e3", "new"], "two counterparts consume two surplus occurrences, not every same-URL bookmark");
+  assert.deepEqual(merged.extraPinned, []);
+  assert.deepEqual(merged.folders.map(n => n.id), ["dev", "counts", "name", "colour"]);
+  assert.deepEqual((await ff.browser.bookmarks.getChildren("archive")).filter(n => ["e1", "e2", "same", "extra", "extra-pins"].includes(n.id)).map(n => n.id).sort(),
+    ["e1", "e2", "extra", "extra-pins", "same"]);
+  assert.equal((await ff.browser.bookmarks.search({ title: "Foxy merge leftovers" })).length, 1, "reuse archive by exact title");
+  assert.equal(ff.calls.some(c => /^bookmarks\.remove/.test(c.api)), false);
+  const before = await ff.browser.bookmarks.getTree();
+  await tree.mergeRoots(ff.browser, "kept");
+  assert.deepEqual(await ff.browser.bookmarks.getTree(), before);
+});
+
+test("archive is not selected as a root or extra root, even when older", async () => {
+  const ff = createFirefox({ bookmarks: [{ id: "archive", title: "Foxy merge leftovers", dateAdded: 1,
+    children: [{ title: "Foxy" }] }, { id: "root", title: "Foxy", dateAdded: 2 }, { id: "extra", title: "Foxy", dateAdded: 3 }] });
+  assert.equal(await findOrCreateRoot(ff.browser), "root");
+  assert.deepEqual(await tree.findExtraRoots(ff.browser, "root"), ["extra"]);
+});
