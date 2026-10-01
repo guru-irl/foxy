@@ -163,6 +163,41 @@ class ThemeTypographyTest(unittest.TestCase):
         before = matching_rule(bodies[0], "&::before")
         self.assertEqual(before["font-size"], "var(--lf-label-size) !important")
 
+    def test_pinned_label_container_does_not_dim_the_name_again(self):
+        # Firefox browser.css dims this parent to 0.7 for unselected tabs.
+        # Changing the label colour alone cannot undo ancestor compositing.
+        selector = ':root:not(#lf) #pinned-tabs-container[orient="vertical"] .tab-label-container'
+        rule = matching_rule(self.chrome, selector)
+        self.assertEqual(rule.get("opacity"), "1 !important")
+        self.assertEqual(matching_rule(self.chrome, PINNED)["color"],
+                         matching_rule(self.chrome, GROUP)["color"])
+
+    def test_vertical_scroll_fades_follow_each_scrollbox_edge_state(self):
+        # Removing the overflow guard or reversing either edge condition would
+        # fade an edge with no offscreen tabs. Both independent viewports need it.
+        for host in ("#tabbrowser-arrowscrollbox", "#pinned-tabs-container"):
+            with self.subTest(host=host):
+                selector = host + '[orient="vertical"]'
+                base = matching_rule(self.chrome, selector)
+                self.assertEqual(base.get("--lf-scroll-fade-start"), "0px !important")
+                self.assertEqual(base.get("--lf-scroll-fade-end"), "0px !important")
+                self.assertEqual(base.get("mask-image"), "none !important")
+                overflow = matching_rule(self.chrome, selector + '[overflowing]')
+                mask = re.sub(r"\s+", " ", overflow.get("mask-image", ""))
+                self.assertEqual(mask, "linear-gradient(to bottom, transparent, "
+                                 "black var(--lf-scroll-fade-start), "
+                                 "black calc(100% - var(--lf-scroll-fade-end)), "
+                                 "transparent) !important")
+                start = matching_rule(self.chrome, selector + '[overflowing]:not([scrolledtostart])')
+                end = matching_rule(self.chrome, selector + '[overflowing]:not([scrolledtoend])')
+                self.assertEqual(start.get("--lf-scroll-fade-start"), "20px !important")
+                self.assertEqual(end.get("--lf-scroll-fade-end"), "20px !important")
+                for rule in (base, overflow, start, end):
+                    self.assertFalse(set(rule) & {"box-shadow", "background-image", "content"})
+        for part in ("overflow-start-indicator", "overflow-end-indicator"):
+            self.assertEqual(matching_rule(self.chrome, f'spacer[part~="{part}"]')["display"],
+                             "none !important")
+
     def test_search_placeholders_are_condensed_heavy_and_upright(self):
         for css, selector in [(self.chrome, SEARCH), (self.content, ".search-handoff-button::after")]:
             with self.subTest(selector=selector):

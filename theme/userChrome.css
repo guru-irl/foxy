@@ -1096,6 +1096,14 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
    font. To add a site, add it to both lists below.
    The same 0.5px top nudge as the group labels keeps the flat capitals
    centred at 1x and 2x (see the calibration in section 8). */
+/* Firefox's browser.css gives unselected .tab-label-container opacity 0.7.
+   That multiplies the name's alpha (including ::before) a second time;
+   group labels have no such parent. Keep the shared colour as the only
+   dimming, without changing regular tab titles or pinned favicons. */
+:root:not(#lf) #pinned-tabs-container[orient="vertical"] .tab-label-container {
+  opacity: 1 !important;
+}
+
 :root:not(#lf) #pinned-tabs-container[orient="vertical"] .tabbrowser-tab .tab-label {
   position: relative !important;
   top: 0.5px !important;
@@ -1124,20 +1132,43 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
 #pinned-tabs-container .tabbrowser-tab[label$="YouTube"] .tab-label::before { content: "YOUTUBE"; }
 #pinned-tabs-container .tabbrowser-tab[label$="Gmail"] .tab-label::before { content: "GMAIL"; }
 
-/* Scroll edges of the tab list and pinned tabs. Nova paints a 16px band that
-   darkens toward the toolbox color at an edge with more tabs behind it,
-   which shows up as a dark box on glass. No band and no fade: the list is
-   clipped at its edge, which already sits a few pixels clear of the pinned
-   divider above and the new tab button below. The bands are 16px tall with
-   -16px margins, so removing them doesn't move anything.
-   ::part() rules in userChrome.css turned out not to match (apparently
-   Firefox ignores ::part in user style sheets), so this targets the
-   spacers inside the scroll box's shadow DOM directly, the same way the
-   chevron rule above does. Only the tab strips style these spacers, so
-   hiding them everywhere changes nothing else. */
+/* Scroll edges of the tab list and pinned tabs (changed 2026-10-01).
+   Replace the earlier hard cut with a 20px alpha fade where more tabs are
+   offscreen, not a shadow or a painted band. Nova's 16px indicator spacers
+   darken toward the toolbox colour; keep them hidden (their -16px margins
+   mean this doesn't move the list). ::part() does not match here in user
+   sheets, so the existing rule targets the shadow spacers directly.
+   Firefox 157's arrowscrollbox sets overflowing, scrolledtostart and
+   scrolledtoend on each host. Mask that fixed viewport, not its scrolling
+   children: an edge at the start/end stays fully opaque, and a list that
+   fits gets no mask. Pinned tabs have their own independent scroll state. */
 spacer[part~="overflow-start-indicator"],
 spacer[part~="overflow-end-indicator"] {
   display: none !important;
+}
+
+#tabbrowser-arrowscrollbox[orient="vertical"],
+#pinned-tabs-container[orient="vertical"] {
+  --lf-scroll-fade-start: 0px !important;
+  --lf-scroll-fade-end: 0px !important;
+  mask-image: none !important;
+}
+
+#tabbrowser-arrowscrollbox[orient="vertical"][overflowing],
+#pinned-tabs-container[orient="vertical"][overflowing] {
+  mask-image: linear-gradient(to bottom, transparent,
+    black var(--lf-scroll-fade-start),
+    black calc(100% - var(--lf-scroll-fade-end)), transparent) !important;
+}
+
+#tabbrowser-arrowscrollbox[orient="vertical"][overflowing]:not([scrolledtostart]),
+#pinned-tabs-container[orient="vertical"][overflowing]:not([scrolledtostart]) {
+  --lf-scroll-fade-start: 20px !important;
+}
+
+#tabbrowser-arrowscrollbox[orient="vertical"][overflowing]:not([scrolledtoend]),
+#pinned-tabs-container[orient="vertical"][overflowing]:not([scrolledtoend]) {
+  --lf-scroll-fade-end: 20px !important;
 }
 
 /* Tab list scrollbar: thin (Firefox's own setting), a faint neutral thumb
