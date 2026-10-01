@@ -52,6 +52,9 @@ export function openColorPicker(dotEl, { current, onPick, onClose }) {
   picker.className = "color-picker";
   picker.setAttribute("role", "group");
   picker.setAttribute("aria-label", "Group colour");
+  picker.addEventListener("mousedown", event => {
+    if (event.target === picker) event.preventDefault();
+  });
   let ended = false;
   function close(restoreFocus = false) {
     if (ended) return;

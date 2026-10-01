@@ -246,6 +246,7 @@ button.dot {
 }
 
 .column-header {
+  border-radius: 8px;
   font-style: oblique 10deg;
 }
 
@@ -325,8 +326,8 @@ button.dot {
 .row:focus-visible,
 .row:has(.row-open:active),
 .row:has(.row-open:focus-visible),
-.column-header:has(.group-name:active),
-.column-header:has(.group-name:focus-visible) {
+.column-header:has(button.group-name:active),
+.column-header:has(button.group-name:focus-visible) {
   background: var(--pressed);
 }
 

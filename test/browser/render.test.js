@@ -180,6 +180,10 @@ for (const state of ["hover", "active", "focus-visible"]) {
       const container = button.parentElement;
       const elements = state === "hover" ? [button, container] : [button];
       withPseudoState(elements, state, () => {
+        const style = getComputedStyle(container);
+        for (const corner of ["borderTopLeftRadius", "borderTopRightRadius", "borderBottomRightRadius", "borderBottomLeftRadius"]) {
+          assert.equal(style[corner], "8px", "interaction fills need the same rounded corners as rows");
+        }
         assert.equal(getComputedStyle(button).backgroundColor, "rgba(0, 0, 0, 0)", "the inner button must stay transparent");
         assert.equal(getComputedStyle(container).backgroundColor,
           state === "hover" ? "rgba(255, 255, 255, 0.08)" : "rgba(255, 255, 255, 0.12)");

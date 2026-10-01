@@ -129,6 +129,18 @@ test("clearing a named group still saves the empty title once", async () => {
   assert.equal(name(node).textContent, "UNNAMED"); assert.equal(name(node).getAttribute("aria-label"), "Rename Unnamed");
 });
 
+test("focused rename editor paints only the input, not the header", async () => {
+  const node = await draw(); node.style.colorScheme = "dark";
+  name(node).click();
+  const field = input(node), header = field.closest(".column-header");
+  try {
+    withPseudoState([field], "focus-visible", () => {
+      assert.equal(getComputedStyle(header).backgroundColor, "rgba(0, 0, 0, 0)");
+      assert.equal(getComputedStyle(field).backgroundColor, "rgba(255, 255, 255, 0.12)");
+    });
+  } finally { key(field, "Escape"); }
+});
+
 test("name editor uses a text-selection cursor", async () => {
   const node = await draw(); name(node).click();
   try { assert.equal(getComputedStyle(input(node)).cursor, "text"); }
@@ -170,6 +182,50 @@ test("picking the current colour skips updates and refreshes once", async () => 
     assert.equal(node.querySelector(".color-picker"), null);
   } finally { key(document, "Escape"); await flush(ff); }
 });
+
+for (const area of ["padding", "gap"]) {
+  test(`picker ${area} mousedown and click keep it open until one selection refresh`, async () => {
+    const { ff, node, control } = await controller();
+    let ended = 0;
+    const end = control.handlers.onEditEnd;
+    control.handlers.onEditEnd = id => { ended++; end(id); };
+    node.querySelector('[data-group-id="101"] .dot').click();
+    const picker = node.querySelector(".color-picker"), count = rebuilds(node);
+    const focused = document.activeElement;
+    try {
+      await ff.browser.tabs.update(23, { url: "https://example.com/picker-background" }); await flush(ff);
+      ff.calls.length = 0;
+      const bounds = picker.getBoundingClientRect();
+      const choices = picker.querySelectorAll(".dot");
+      const x = area === "padding" ? bounds.left + 1
+        : (choices[0].getBoundingClientRect().right + choices[1].getBoundingClientRect().left) / 2;
+      const options = { bubbles: true, cancelable: true, clientX: x, clientY: bounds.top + bounds.height / 2 };
+      assert.equal(document.elementFromPoint(options.clientX, options.clientY), picker);
+      const down = new MouseEvent("mousedown", options);
+      picker.dispatchEvent(down);
+      // Synthetic events have no default focus action. Reproduce Firefox's
+      // focus of the enclosing scroll container only if it was not prevented.
+      if (!down.defaultPrevented) node.querySelector(".strip").focus();
+      picker.dispatchEvent(new MouseEvent("click", options));
+      await flush(ff);
+      assert.equal(node.querySelector(".color-picker"), picker, "picker background must not dismiss it");
+      assert.equal(down.defaultPrevented, true);
+      assert.equal(document.activeElement, focused);
+      assert.equal(control.ui.editing, true); assert.equal(ended, 0); assert.equal(count(), 0);
+      assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 0);
+      const choice = picker.querySelector('[data-color="green"]');
+      const swatchDown = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+      choice.dispatchEvent(swatchDown);
+      assert.equal(swatchDown.defaultPrevented, false, "swatches retain normal pointer focus");
+      choice.focus(); choice.click(); choice.click(); await flush(ff);
+      assert.equal((await ff.browser.tabGroups.get(101)).color, "green");
+      assert.equal(control.ui.editing, false); assert.equal(control.ui.editGroupId, null);
+      assert.equal(ended, 1); assert.equal(count(), 1);
+      assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
+      assert.equal(ff.calls.filter(call => call.api === "tabGroups.update").length, 1);
+    } finally { key(document, "Escape"); await flush(ff); }
+  });
+}
 
 test("current picker colour is visibly larger", async () => {
   const node = await draw(); node.querySelector('[data-group-id="101"] .dot').click();
