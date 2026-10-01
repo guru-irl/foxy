@@ -37,7 +37,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       } catch (error) { console.warn("Foxy: destination window is unavailable", error); }
     }
     try {
-      const win = await api.windows.getLastFocused({ windowTypes: ["normal"] });
+      const win = await api.windows.getLastFocused();
       if (eligibleWindow(win)) return rememberNormalWindow(win);
     } catch (error) { console.warn("Foxy: last focused window is unavailable", error); }
     if (Number.isInteger(state.lastFocusedNormalWindowId)) {
@@ -92,6 +92,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       },
     },
     windows: {
+      getAll: async (...args) => (await api.windows.getAll(...args)).filter(eligibleWindow),
       async getLastFocused() {
         const win = await normalWindow();
         // No eligible window means no shown tab and no destination for pins.

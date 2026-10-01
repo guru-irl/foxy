@@ -150,6 +150,23 @@ test("deleted pinned folder is reset and recreated on the next wake", async () =
   assert.equal((await ff.browser.bookmarks.getChildren(after.pinnedId)).length, 2);
 });
 
+test("a last-focused popup protects the shown tab in the first eligible normal window", async () => {
+  const ff = createFirefox({ ...localSetup,
+    windows: [{ id: 3, type: "popup", focused: true }, { id: 2, incognito: true }, { id: 1 }],
+    tabs: [...localSetup.tabs, { id: 100, windowId: 3, url: "https://popup/", active: true },
+      { id: 101, windowId: 2, url: "https://private/", active: true }] });
+  const sync = wire(ff);
+  await drain(ff, sync);
+  await ff.browser.tabs.update(4, { active: true });
+  await drain(ff, sync);
+  const state = await loadState(ff.browser);
+  assert.equal(state.lastFocusedNormalWindowId, 1);
+  await ff.browser.bookmarks.update(state.tabs[4].bookmarkId, { url: "https://remote-new/" });
+  await drain(ff, sync);
+  assert.equal((await ff.browser.tabs.get(4)).url, "https://work/");
+  assert.deepEqual(ff.errors, []);
+});
+
 test("external app focus does not release shown-tab deferrals; a real activation does", async () => {
   const ff = createFirefox(localSetup), sync = wire(ff);
   await drain(ff, sync);

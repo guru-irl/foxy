@@ -15,11 +15,18 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     if (JSON.stringify(getState()) !== before) await attempt(save);
   };
 
+  async function normalWindow() {
+    const eligible = win => win?.type === "normal" && !win.incognito;
+    const win = await api.windows.getLastFocused();
+    if (eligible(win)) return win;
+    return (await api.windows.getAll({ windowTypes: ["normal"] })).find(eligible);
+  }
+
   async function isShown(tab) {
     if (!tab.active) return false;
     try {
-      const win = await api.windows.getLastFocused({ windowTypes: ["normal"] });
-      return win.id === tab.windowId && win.focused;
+      const win = await normalWindow();
+      return !!win && win.id === tab.windowId && win.focused;
     } catch (error) {
       warn(error);
       return true; // A failed focus read is not permission to destroy a tab.
@@ -143,7 +150,8 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     if (!isOpenableUrl(node.url)) return;
     let tab;
     if (folderId === getState().pinnedId) {
-      const win = await api.windows.getLastFocused({ windowTypes: ["normal"] });
+      const win = await normalWindow();
+      if (!win) throw new Error("No non-private normal window");
       let index = 0;
       const earlier = (await bookmarks(folderId)).filter(other => other.index < node.index).reverse();
       for (const other of earlier) {

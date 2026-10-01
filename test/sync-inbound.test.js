@@ -45,6 +45,25 @@ async function fixture(options = {}) {
     tick: ms => { clock += ms; } };
 }
 
+for (const ineligible of [{ type: "popup" }, { incognito: true }]) {
+  test(`pins fall back to a normal non-private window when last focused is ${ineligible.type ?? "private"}`, async () => {
+    const ff = createFirefox({ windows: [{ id: 2, focused: true, ...ineligible }, { id: 1 }],
+      tabs: [{ id: 1, windowId: 1 }, { id: 2, windowId: 2 }],
+      bookmarks: [{ title: "Foxy", children: [{ title: "📌 Pinned", children: [
+        { title: "Remote", url: url("remote-pin") },
+      ] }] }] });
+    const state = emptyState();
+    [state.rootId] = (await ff.browser.bookmarks.getChildren("unfiled_____")).map(n => n.id);
+    [state.pinnedId] = (await ff.browser.bookmarks.getChildren(state.rootId)).map(n => n.id);
+    const inbound = createInbound({ api: ff.browser, getState: () => state, save: () => saveState(ff.browser, state) });
+    await inbound.reconcileFolder(state.pinnedId);
+    const [pin] = await ff.browser.tabs.query({ pinned: true });
+    assert.equal(pin.windowId, 1);
+    assert.equal(pin.incognito, false);
+    assert.deepEqual(ff.errors, []);
+  });
+}
+
 // Catch missing entry updates, duplicate creates, redirect echoes and repeated writes.
 async function echoAndStable(f) {
   await f.ff.settle();

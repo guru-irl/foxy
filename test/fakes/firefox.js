@@ -445,11 +445,18 @@ export function createFirefox(setup = {}) {
     }
     return windowObject(win, true);
   });
-  api("windows", "getAll", (props = {}) => (props.windowTypes && !props.windowTypes.includes("normal") ? [] : wins)
+  api("windows", "getAll", (props = {}) => wins
+    .filter(w => !props.windowTypes || props.windowTypes.includes(w.type))
     .map(w => windowObject(w, props.populate)));
-  api("windows", "get", (id, props = {}) => windowObject(windowById(id), props.populate));
-  api("windows", "getCurrent", (props = {}) => windowObject(windowById(currentWindowId), props.populate));
-  api("windows", "getLastFocused", (props = {}) => windowObject(windowById(lastFocusedId), props.populate));
+  function getWindow(id, props) {
+    if (Object.hasOwn(props, "windowTypes")) {
+      errors.push(new Error("Warning processing windowTypes: This property is deprecated"));
+    }
+    return windowObject(windowById(id), props.populate);
+  }
+  api("windows", "get", (id, props = {}) => getWindow(id, props));
+  api("windows", "getCurrent", (props = {}) => getWindow(currentWindowId, props));
+  api("windows", "getLastFocused", (props = {}) => getWindow(lastFocusedId, props));
   api("windows", "update", (id, props) => {
     const win = windowById(id);
     if (props.focused === true) {
