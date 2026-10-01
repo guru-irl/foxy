@@ -175,11 +175,14 @@ test("start is single-flight and an event-page wake reuses session maps and drai
 test("settle resets the quiet interval on tab/group events and cleans up listeners", async () => {
   const ff = createFirefox();
   let done = false;
-  const promise = settle(ff.browser, { settleMs: 25, maxWaitMs: 100, now: Date.now }).then(() => { done = true; });
-  await new Promise(resolve => setTimeout(resolve, 15));
+  // The check at ~375ms falls after the original deadline (300ms) and before
+  // the reset one (~450ms), ~75ms from each, so a missing reset still fails
+  // while slow runners have room.
+  const promise = settle(ff.browser, { settleMs: 300, maxWaitMs: 2000, now: Date.now }).then(() => { done = true; });
+  await new Promise(resolve => setTimeout(resolve, 150));
   ff.fire("tabGroups.onUpdated", { id: 1 });
   await ff.settle();
-  await new Promise(resolve => setTimeout(resolve, 15));
+  await new Promise(resolve => setTimeout(resolve, 225));
   assert.equal(done, false);
   await promise;
   // A later event cannot restart or retain a settled waiter.

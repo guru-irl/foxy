@@ -345,8 +345,13 @@ test("a removal timer drains through the queue without another background event"
   await ff.browser.tabs.remove(2);
   await ff.settle();
   await sync.idle();
-  await new Promise(resolve => setTimeout(resolve, 15));
-  await sync.idle();
+  // Only the removal timer may drain it (no further events). Wait for it with
+  // a bounded deadline: slow CI runners fire a 5ms timer well after 15ms.
+  const removed = () => ff.browser.bookmarks.get(state.tabs[2].bookmarkId).then(() => false, () => true);
+  for (const deadline = Date.now() + 2000; !(await removed()) && Date.now() < deadline;) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+    await sync.idle();
+  }
   await assert.rejects(ff.browser.bookmarks.get(state.tabs[2].bookmarkId));
   assert.equal((await loadState(ff.browser)).pendingRemovals[2], undefined);
   await drain(ff, sync);
