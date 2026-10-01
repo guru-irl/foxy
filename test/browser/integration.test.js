@@ -317,6 +317,44 @@ for (const answer of ["reject", "undefined", "malformed"]) {
   });
 }
 
+// Replacing the last good reply with empty arrays hides real saved/missing state.
+for (const answer of ["reject", "undefined", "malformed"]) {
+  test(`fix r2: ${answer} saved read retains the last good column and banner`, async () => {
+    const { ff, sync, root, page, control } = await restarted();
+    const send = ff.browser.runtime.sendMessage;
+    let failing = true;
+    ff.browser.runtime.sendMessage = async message => {
+      const reply = await send(message);
+      if (message.type !== "foxy:saved") return reply;
+      if (!failing) return { saved: [], missing: [] };
+      if (answer === "reject") throw new Error("Transient saved read failure");
+      return answer === "malformed" ? { saved: [], missing: null } : undefined;
+    };
+    await warningsDuring(async warnings => {
+      try {
+        await control.refresh(); await drain(ff, sync);
+        assert.equal(root.querySelectorAll(".saved-row").length, 2, "a failed read must retain saved folders");
+        assert.equal(row(root).querySelector(".row-label").textContent, "Dev");
+        assert.equal(page.querySelector(".banner-text")?.textContent, "2 GROUPS DIDN'T COME BACK",
+          "a failed read must retain the missing banner");
+        ff.fire("bookmarks.onChanged", "dev", { title: "Unrelated notification" });
+        await drain(ff, sync);
+        assert.equal(root.querySelectorAll(".saved-row").length, 2);
+        assert.equal(page.querySelector(".banner-text")?.textContent, "2 GROUPS DIDN'T COME BACK");
+        assert.equal(warnings.length, 1, "saved read failures still warn once per load");
+        assert.ok(warnings[0][0].startsWith("Foxy:"));
+        assert.equal(control.ui.busy.size, 0);
+        failing = false;
+        await control.refresh(); await drain(ff, sync);
+        assert.equal(root.querySelector(".saved"), null, "a valid empty reply must replace stale saved data");
+        assert.equal(page.querySelector(".banner"), null);
+        assert.equal(warnings.length, 1);
+      } finally { ff.browser.runtime.sendMessage = send; await drain(ff, sync); }
+    });
+  });
+}
+
+
 for (const [handler, type, id] of [["onOpenSaved", "foxy:open-saved", "dev"],
   ["onDeleteSaved", "foxy:delete-saved", "dev"], ["onRestoreAll", "foxy:restore-all", "banner"],
   ["onDismissMissing", "foxy:dismiss-missing", "banner"]]) {
@@ -564,6 +602,80 @@ for (const [handler, type, id] of [["onOpenSaved", "foxy:open-saved", "dev"],
 }
 
 
+// A lost saved reply must release single-flight at maxWait, not freeze bookmark reads.
+test("fix r2: saved timeout keeps good data, runs the dirty read and ignores the late reply", async () => {
+  const { ff, sync, root, control } = await setup(false, { maxWait: 150 });
+  const send = ff.browser.runtime.sendMessage, held = gate(), started = gate();
+  let first = true;
+  ff.browser.runtime.sendMessage = async message => {
+    const reply = await send(message);
+    if (message.type === "foxy:saved" && first) { first = false; started.release(); await held.promise; }
+    return reply;
+  };
+  await warningsDuring(async warnings => {
+    try {
+      ff.calls.length = 0;
+      await control.refresh(); await started.promise;
+      assert.ok(root.querySelector('[data-tab-id="10"]'), "tabs must not wait for the saved deadline");
+      await ff.applyRemoteBookmarks([{ id: "dev", parentId: "foxy", index: 1, title: "🔴 After deadline" }]);
+      await drain(ff, sync);
+      assert.equal(row(root).querySelector(".row-label").textContent, "Dev", "good saved data stays visible while waiting");
+      assert.equal(messages(ff, "foxy:saved").length, 1, "dirty callers still share the active read");
+      await new Promise(resolve => setTimeout(resolve, 300)); await drain(ff, sync);
+      assert.equal(warnings.length, 1, "a lost saved reply must warn within maxWait");
+      assert.ok(warnings[0][0].startsWith("Foxy:"));
+      assert.ok(String(warnings[0][1]).includes("foxy:saved timed out"));
+      assert.equal(messages(ff, "foxy:saved").length, 2, "timeout must free single-flight for one dirty follow-up");
+      assert.equal(row(root).querySelector(".row-label").textContent, "After deadline");
+      assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1, "saved timeout must not request another tab snapshot");
+      held.release(); await drain(ff, sync);
+      assert.equal(row(root).querySelector(".row-label").textContent, "After deadline", "a superseded late reply must be ignored");
+      assert.equal(messages(ff, "foxy:saved").length, 2, "late replies cannot re-read");
+      assert.equal(warnings.length, 1, "late replies cannot log again");
+      ff.fire("bookmarks.onChanged", "dev", { title: "Another notification" });
+      await drain(ff, sync);
+      assert.equal(messages(ff, "foxy:saved").length, 3, "later events can still read saved data");
+    } finally { held.release(); ff.browser.runtime.sendMessage = send; await drain(ff, sync); }
+  });
+});
+
+
+test("fix r2: first saved read timeout renders tabs without a saved column", async () => {
+  const ff = createFirefox(config()), send = ff.browser.runtime.sendMessage, held = gate();
+  let waiting = true;
+  ff.browser.runtime.sendMessage = async message => {
+    await send(message);
+    if (message.type === "foxy:reconcile") return { ok: true };
+    if (message.type === "foxy:saved") {
+      if (waiting) await held.promise;
+      return { saved: [], missing: [] };
+    }
+  };
+  await warningsDuring(async warnings => {
+    const { root, page, control } = mount(ff, { maxWait: 150 });
+    try {
+      await control.refresh();
+      assert.ok(root.querySelector('[data-tab-id="10"]'), "the first tab render must not await saved");
+      await new Promise(resolve => setTimeout(resolve, 400)); await drain(ff);
+      assert.equal(warnings.length, 1, "the first saved timeout must warn once per load");
+      assert.ok(warnings[0][0].startsWith("Foxy:"));
+      assert.ok(String(warnings[0][1]).includes("timed out"));
+      assert.equal(root.querySelector(".saved"), null);
+      assert.equal(page.querySelector(".banner"), null);
+      assert.equal(control.ui.busy.size, 0);
+      const reads = messages(ff, "foxy:saved").length;
+      assert.ok(reads <= 2, "timeouts must not create a read loop");
+      waiting = false;
+      ff.fire("bookmarks.onChanged", "dev", { title: "Recovered" }); await drain(ff);
+      assert.equal(messages(ff, "foxy:saved").length, reads + 1, "timeout clears the flight guard for later reads");
+      held.release(); await drain(ff);
+      assert.equal(warnings.length, 1);
+      assert.equal(messages(ff, "foxy:saved").length, reads + 1);
+    } finally { held.release(); ff.browser.runtime.sendMessage = send; await drain(ff); }
+  });
+});
+
+
 // A saved-only publication failure must enter the same bounded refresh retry path.
 for (const failures of [1, Infinity]) {
   test(`fix r1: ${failures === 1 ? "transient" : "persistent"} saved publication failures warn and retry once`, async () => {
@@ -586,6 +698,46 @@ for (const failures of [1, Infinity]) {
         assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
         if (failures === 1) assert.equal(row(root).querySelector(".row-label").textContent, "Retried");
       } finally { root.replaceChildren = replace; await drain(ff, sync); }
+    });
+  });
+}
+
+
+// Inheriting the active read's retry flag makes slow saved publication failures loop.
+for (const latency of [40, 200]) {
+  test(`fix r2: persistent publication failure with ${latency} ms saved replies stays bounded`, async () => {
+    const ff = createFirefox(config());
+    const send = ff.browser.runtime.sendMessage;
+    ff.browser.runtime.sendMessage = async message => {
+      await send(message);
+      if (message.type === "foxy:reconcile") return { ok: true };
+      if (message.type === "foxy:saved") {
+        await new Promise(resolve => setTimeout(resolve, latency));
+        return { saved: [], missing: [] };
+      }
+    };
+    await warningsDuring(async warnings => {
+      const { root } = mount(ff);
+      const replace = root.replaceChildren.bind(root);
+      root.replaceChildren = () => { throw new Error("Persistent render failure"); };
+      try {
+        // Reconcile's refresh reproduces loop.mjs without an extra external event.
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const reads = messages(ff, "foxy:saved").length, warned = warnings.length;
+        await new Promise(resolve => setTimeout(resolve, 400));
+        assert.ok(reads > 0 && reads <= 3, `saved reads must stay bounded: got ${reads}`);
+        assert.equal(messages(ff, "foxy:saved").length, reads, "saved requests must stop without external events");
+        assert.ok(warned > 0 && warned <= 6, `warnings must stay bounded: got ${warned}`);
+        assert.equal(warnings.length, warned, "warnings must stop without external events");
+        assert.ok(warnings.every(args => args[0].startsWith("Foxy:")));
+        assert.ok(ff.calls.filter(call => call.api === "windows.getAll").length <= 3,
+          "only bounded full retries may accompany saved failures");
+      } finally {
+        root.replaceChildren = replace;
+        ff.browser.runtime.sendMessage = send;
+        await new Promise(resolve => setTimeout(resolve, latency + 50));
+        await drain(ff);
+      }
     });
   });
 }

@@ -42,6 +42,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let readsInFlight = 0;
   let savedReadsInFlight = 0;
   let savedDirty = false;
+  let savedDirtyRetry = false;
   let savedGeneration = 0;
   let savedReply = { saved: [], missing: [] };
   let snapshot;
@@ -62,22 +63,27 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   // Saved replies have their own request order: a bookmark-only read must not
   // invalidate an in-flight tab snapshot, nor can an old reply replace a new one.
   async function readSaved(retry = true) {
-    if (savedReadsInFlight) { savedDirty = true; return; }
+    if (savedReadsInFlight) { savedDirty = true; savedDirtyRetry ||= retry; return; }
     const mine = ++savedGeneration;
     ++savedReadsInFlight;
-    let reply;
+    let reply, timer;
     try {
-      reply = await api.runtime.sendMessage({ type: "foxy:saved" });
+      reply = await Promise.race([
+        api.runtime.sendMessage({ type: "foxy:saved" }),
+        new Promise((resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("foxy:saved timed out")), maxWait);
+        }),
+      ]);
       if (!Array.isArray(reply?.saved) || !Array.isArray(reply?.missing)) {
         throw new Error("Background did not return saved and missing arrays");
       }
     } catch (error) {
-      reply = { saved: [], missing: [] };
+      reply = savedReply;
       if (!warnedSaved) {
         warnedSaved = true;
         console.warn("Foxy: could not read saved groups", error);
       }
-    } finally { --savedReadsInFlight; }
+    } finally { clearTimeout(timer); --savedReadsInFlight; }
     try {
       if (mine === savedGeneration) {
         if (held()) {
@@ -96,7 +102,12 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       console.warn("Foxy: could not publish saved groups", error);
       if (retry) schedule(false);
     }
-    if (savedDirty) { savedDirty = false; refreshSaved(retry); }
+    if (savedDirty) {
+      const dirtyRetry = savedDirtyRetry;
+      savedDirty = false;
+      savedDirtyRetry = false;
+      refreshSaved(dirtyRetry);
+    }
   }
 
   function refreshSaved(retry = true) {
