@@ -3,7 +3,7 @@
   "name": "Foxy",
   "version": "2.0.0",
   "description": "A kanban board of your tabs and tab groups on the new tab page.",
-  "permissions": ["tabs", "tabGroups"],
+  "permissions": ["tabs", "tabGroups", "bookmarks", "storage"],
   "background": {
     "scripts": ["background.js"],
     "type": "module"
