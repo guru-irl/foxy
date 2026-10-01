@@ -682,28 +682,12 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
   --tab-background-color-selected: light-dark(rgba(255, 255, 255, 0.40), rgba(255, 255, 255, 0.08)) !important;
   /* Tab hover (Nova Ash uses a 40% gray) */
   --tab-background-color-hover: light-dark(rgba(0, 0, 0, 0.05), rgba(255, 255, 255, 0.05)) !important;
-
-  /* Lift for maximized dark windows (see the dark-mode rule below) */
-  --lf-maximized-wash: rgba(255, 255, 255, 0.05);
 }
 
 /* Dark mode: drop the extra 8% white wash the theme adds on top of the tint */
 @media (prefers-color-scheme: dark) {
   :root:not([windowtype="Toolkit:PictureInPicture"], [inDOMFullscreen])::before {
     background: var(--liquid-window-tint) !important;
-  }
-
-  /* Maximized windows (double-clicked title bar, or a Fill that macOS
-     reports as zoomed): macOS mixes the glass about 50/50 with a dark grey.
-     Measured on full-screen captures of the same screen area, 2026-10-01:
-     maximized = 0.50 x normal + 16 (mean luma 54 -> 43, chroma halved).
-     A layer above the glass can only blend toward a colour, not restore
-     contrast, so this lifts the mean brightness back:
-     (54 - 43) / (255 - 43) = 5% white. */
-  :root[sizemode="maximized"]:not([windowtype="Toolkit:PictureInPicture"], [inDOMFullscreen])::before {
-    background:
-      linear-gradient(var(--lf-maximized-wash), var(--lf-maximized-wash)),
-      var(--liquid-window-tint) !important;
   }
 }
 

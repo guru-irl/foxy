@@ -82,19 +82,6 @@ class ThemeTypographyTest(unittest.TestCase):
     def setUpClass(cls):
         cls.chrome, cls.content = (p.read_text() for p in THEME_FILES)
 
-    def test_maximized_dark_windows_lift_the_dimmed_glass(self):
-        # macOS mixes the glass about 50/50 with dark grey when the window is
-        # maximized; a 5% white wash brings the mean brightness back.
-        self.assertEqual(matching_rule(self.chrome, ":root").get("--lf-maximized-wash"),
-                         "rgba(255, 255, 255, 0.05)")
-        selector = ':root[sizemode="maximized"]:not([windowtype="Toolkit:PictureInPicture"], [inDOMFullscreen])::before'
-        dark = [body for header, body in blocks(self.chrome) if header == "@media (prefers-color-scheme: dark)"]
-        self.assertTrue(any(selector in body for body in dark), "the wash is dark mode only")
-        background = matching_rule(self.chrome, selector)["background"].strip()
-        self.assertIn("var(--lf-maximized-wash)", background)
-        self.assertIn("var(--liquid-window-tint)", background)
-        self.assertTrue(background.endswith("!important"))
-
     def test_no_legacy_font_references(self):
         for path, css in zip(THEME_FILES, (self.chrome, self.content)):
             with self.subTest(path=path.name):
