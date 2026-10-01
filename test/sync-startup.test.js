@@ -130,6 +130,29 @@ test("duplicate roots and pinned folders merge by moving, archive duplicates and
   assert.equal(ff.calls.some(c => c.api.startsWith("bookmarks.remove")), false);
 });
 
+for (const keptGroup of [false, true]) test(`startup identical siblings with ${keptGroup ? "one" : "no"} kept counterpart bind separate folders`, async () => {
+  const dev = id => ({ id, title: "🔴 Dev", children: [{ id: `${id}-bookmark`, url: "https://one/" }] });
+  const ff = createFirefox({ groups: [11, 12].map(id => ({ id, windowId: 1, title: "Dev", color: "red" })),
+    tabs: [localSetup.tabs[0], { id: 2, windowId: 1, groupId: 11, url: "https://one/" },
+      { id: 3, windowId: 1, groupId: 12, url: "https://one/" }],
+    bookmarks: [{ id: "kept", title: "Foxy", children: [{ title: "📌 Pinned" }, ...(keptGroup ? [dev("canonical")] : [])] },
+      { id: "extra", title: "Foxy", children: [dev("first"), dev("second")] }] });
+  const state = await loadState(ff.browser);
+  state.rootId = "extra"; state.openFolders = ["first", "second"];
+  await saveState(ff.browser, state);
+  const sync = wire(ff); await drain(ff, sync);
+  const after = await snapshot(ff);
+  assert.deepEqual(after.tree.folders.map(folder => folder.id), keptGroup ? ["canonical", "second"] : ["first", "second"]);
+  assert.notEqual(after.state.groups[11].folderId, after.state.groups[12].folderId);
+  for (const id of [2, 3]) {
+    const folder = after.tree.folders.find(folder => folder.id === after.state.tabs[id].folderId);
+    assert.equal(after.state.tabs[id].bookmarkId, folder.bookmarks[0].id);
+    assert.equal(folder.bookmarks.length, 1);
+  }
+  assert.deepEqual(await sync.onMessage({ type: "foxy:saved" }), { saved: [], missing: [] });
+  assert.equal(ff.calls.some(call => /^bookmarks\.remove/.test(call.api)), false);
+});
+
 test("start is single-flight and an event-page wake reuses session maps and drains persisted removals", async () => {
   const ff = createFirefox(localSetup), sync = wire(ff);
   await Promise.all([sync.start(), sync.start()]);

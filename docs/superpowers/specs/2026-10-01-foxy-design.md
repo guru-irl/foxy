@@ -232,6 +232,7 @@ pin occurrences, duplicate groups with the same trimmed name, colour and URL
 multiset, and emptied extra root/pinned folders are moved there, never deleted.
 Live tabs are remapped to their canonical bookmarks. Foxy never reads, opens,
 shows as SAVED, matches or promotes anything in the archive.
+Renaming another folder in Other Bookmarks to exactly `Foxy` merges it at the next browser startup, not live.
 
 ### 8.3 Tabs to bookmarks (outbound)
 

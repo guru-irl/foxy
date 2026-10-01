@@ -64,7 +64,8 @@ export async function mergeRoots(api, knownRootId) {
   }
   recordBookmarks(kept.pinned.bookmarks, pinnedId);
   for (const folder of kept.folders) recordBookmarks(folder.bookmarks, folder.id);
-  const extraPins = [...kept.extraPinned];
+  const extraPins = [...kept.extraPinned], matchedGroups = new Set();
+  // Only pre-merge kept folders are counterparts, each consumed at most once.
   for (const extra of await findExtraRoots(api, rootId, knownRootId)) {
     const snapshot = await readTree(api, extra);
     const pins = [snapshot.pinned, ...snapshot.extraPinned].filter(Boolean);
@@ -72,8 +73,9 @@ export async function mergeRoots(api, knownRootId) {
     const groups = new Map(snapshot.folders.map(folder => [folder.id, folder]));
     for (const child of await api.bookmarks.getChildren(extra)) {
       const folder = groups.get(child.id);
-      const same = folder && kept.folders.find(candidate => sameGroup(candidate, folder));
+      const same = folder && kept.folders.find(candidate => !matchedGroups.has(candidate.id) && sameGroup(candidate, folder));
       if (same) {
+        matchedGroups.add(same.id);
         folderRemaps[folder.id] = same.id;
         const matches = matchTabs(folder.bookmarks.map(node => ({ tabId: node.id, url: node.url })), same.bookmarks);
         for (const pair of matches.pairs) bookmarkRemaps[pair.tabId] = { bookmarkId: pair.bookmarkId, folderId: same.id };
@@ -81,7 +83,6 @@ export async function mergeRoots(api, knownRootId) {
       } else {
         await api.bookmarks.move(child.id, { parentId: rootId });
         if (folder) {
-          kept.folders.push(folder);
           recordBookmarks(folder.bookmarks, folder.id);
         }
       }

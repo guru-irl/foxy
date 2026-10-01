@@ -478,6 +478,51 @@ for (const kind of ["moved", "counterpart", "already canonical"]) test(`merge re
   assert.deepEqual(await ff.browser.tabs.query({ pinned: true }), [], "restart must not reopen a pin closed just before merge");
 });
 
+// Catches stale archive mappings when a counterpart is used or a remap read fails.
+for (const reason of ["occupied counterpart", "failed remap read"]) test(`merge forgets archived group bookmark after ${reason} and navigation creates a fresh GUID`, async t => {
+  const ff = createFirefox({ groups: [11, 12].map(id => ({ id, windowId: 1, title: "Dev", color: "red" })),
+    tabs: [home, { id: 2, windowId: 1, groupId: 11, url: "https://one/" },
+      { id: 3, windowId: 1, groupId: 12, url: "https://one/" }] });
+  let sync = wire(ff); await drain(ff, sync);
+  const before = await loadState(ff.browser), sourceFolder = before.groups[12].folderId;
+  const archivedBookmark = before.tabs[3].bookmarkId;
+  unwire(ff);
+  const extra = await ff.browser.bookmarks.create({ title: "Foxy" });
+  await ff.browser.bookmarks.move(sourceFolder, { parentId: extra.id });
+  if (reason === "failed remap read") {
+    // Leave the canonical counterpart unused, then fail this remap only.
+    delete before.tabs[2];
+    await saveState(ff.browser, before);
+    sync = wire(ff); await sync.start(); unwire(ff);
+    const getChildren = ff.browser.bookmarks.getChildren;
+    let reads = 0;
+    t.mock.method(ff.browser.bookmarks, "getChildren", async id => {
+      if (id === before.groups[11].folderId && ++reads === 2) throw new Error("remap unavailable");
+      return getChildren(id);
+    });
+    t.mock.method(console, "warn", () => {});
+  }
+  await ff.settle();
+  const start = ff.calls.length;
+  await sync.handlers["bookmarks.onCreated"](extra.id, extra);
+  const merged = await loadState(ff.browser);
+  assert.equal(merged.tabs[3], undefined, "a tab cannot retain an archived bookmark when remapping cannot pair it");
+  assert.equal(merged.pendingRemovals[3], undefined);
+  const outboundStart = ff.calls.length;
+  await ff.browser.tabs.update(3, { url: "https://new-navigation/" });
+  await sync.handlers["tabs.onUpdated"](3);
+  const after = await loadState(ff.browser);
+  assert.notEqual(after.tabs[3].bookmarkId, archivedBookmark);
+  assert.equal(after.tabs[3].folderId, before.groups[11].folderId);
+  const calls = ff.calls.slice(start);
+  assert.equal(calls.some(call => ["bookmarks.get", "bookmarks.getChildren", "bookmarks.getSubTree"].includes(call.api)
+    && [sourceFolder, archivedBookmark].includes(call.args[0])), false, "controller must never read the archived GUIDs");
+  assert.equal(ff.calls.slice(outboundStart).some(call => /^bookmarks\.(?:move|update|remove)/.test(call.api)
+    && [sourceFolder, archivedBookmark].includes(call.args[0])), false, "outbound must never edit or promote the archived GUIDs");
+  const [root] = await ff.browser.bookmarks.getSubTree(after.rootId);
+  assert.ok(root.children.some(folder => folder.children?.some(node => node.id === after.tabs[3].bookmarkId && node.url === "https://new-navigation/")));
+});
+
 // Catches a local navigation breaking remapping and reopening/reading an archived duplicate.
 test("merge remaps an unpublished pin navigation without reading or promoting its archived bookmark", async () => {
   const ff = createFirefox({ tabs: [home, { id: 2, windowId: 1, pinned: true, url: "https://mail/" }] });

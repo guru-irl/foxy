@@ -408,6 +408,17 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       for (const [groupId, entry] of Object.entries(state.groups)) {
         await remapMergedTabs(entry.folderId, { groupId: Number(groupId) });
       }
+      // A used counterpart or failed read can leave an archived GUID mapped.
+      // Identify it from the pre-archive remaps, never by reading the archive.
+      // Outbound can create a fresh bookmark for any still-open forgotten tab.
+      for (const [tabId, entry] of Object.entries(state.tabs)) {
+        const target = merged.bookmarkRemaps[entry.bookmarkId];
+        if (!target || target.bookmarkId === entry.bookmarkId) continue;
+        delete state.tabs[tabId];
+        delete state.pendingRemovals[tabId];
+        delete state.quietUntil[tabId];
+        delete state.failedCreates[tabId];
+      }
       await save();
       await inbound.reconcileFolder(state.pinnedId);
     }

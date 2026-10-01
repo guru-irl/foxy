@@ -346,6 +346,26 @@ test("merge archive preserves URL multiplicity and only identical decoded groups
   assert.deepEqual(await ff.browser.bookmarks.getTree(), before);
 });
 
+// Catches reuse of a kept folder and matching siblings moved from any extra root.
+for (const keptGroup of [false, true]) test(`merge identical groups across extra roots consumes ${keptGroup ? "one kept" : "no moved"} counterpart`, async () => {
+  const dev = id => ({ id, title: "🔴 Dev", children: [{ id: `${id}-bookmark`, url: "https://one/" }] });
+  const ff = createFirefox({ bookmarks: [
+    { id: "kept", title: "Foxy", children: [{ id: "pins", title: "📌 Pinned" }, ...(keptGroup ? [dev("canonical")] : [])] },
+    { id: "extra-a", title: "Foxy", children: [dev("a1"), dev("a2")] },
+    { id: "extra-b", title: "Foxy", children: [dev("b1")] },
+  ] });
+  const merged = await tree.mergeRoots(ff.browser, "extra-a");
+  const managed = await readTree(ff.browser, "kept");
+  assert.deepEqual(managed.folders.map(folder => folder.id), keptGroup ? ["canonical", "a2", "b1"] : ["a1", "a2", "b1"]);
+  assert.deepEqual(merged.folderRemaps, keptGroup ? { a1: "canonical" } : {});
+  assert.deepEqual(managed.folders.map(folder => folder.bookmarks.map(node => node.id)),
+    keptGroup ? [["canonical-bookmark"], ["a2-bookmark"], ["b1-bookmark"]] : [["a1-bookmark"], ["a2-bookmark"], ["b1-bookmark"]]);
+  assert.equal(ff.calls.some(call => /^bookmarks\.remove/.test(call.api)), false);
+  const before = await ff.browser.bookmarks.getTree();
+  await tree.mergeRoots(ff.browser, "kept");
+  assert.deepEqual(await ff.browser.bookmarks.getTree(), before);
+});
+
 test("archive is not selected as a root or extra root, even when older", async () => {
   const ff = createFirefox({ bookmarks: [{ id: "archive", title: "Foxy merge leftovers", dateAdded: 1,
     children: [{ title: "Foxy" }] }, { id: "root", title: "Foxy", dateAdded: 2 }, { id: "extra", title: "Foxy", dateAdded: 3 }] });

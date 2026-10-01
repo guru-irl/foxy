@@ -256,6 +256,60 @@ test("first-run same-URL pins and groups retain one canonical mapping across eit
   }
 });
 
+// Catches matching moved siblings, or reusing one kept counterpart for two groups.
+for (const keptGroup of [false, true]) test(`first-run identical siblings with ${keptGroup ? "one" : "no"} kept counterpart stay separate across restarts`, async () => {
+  const dev = id => ({ id, windowId: 1, title: "Dev", color: "red" });
+  const a = createFirefox({ bookmarkPrefix: "a", groups: [dev(11), dev(12)],
+    tabs: [home, { id: 2, windowId: 1, groupId: 11, url: "https://one/" },
+      { id: 3, windowId: 1, groupId: 12, url: "https://one/" }] });
+  const b = createFirefox({ bookmarkPrefix: "z", bookmarks: [{ id: "older-root", title: "Foxy", dateAdded: 1 }],
+    groups: keptGroup ? [dev(11)] : [],
+    tabs: keptGroup ? [home, { id: 2, windowId: 1, groupId: 11, url: "https://one/" }] : [home] });
+  const server = createSyncServer({ deliveryOrder, seed: 42 });
+  for (const ff of [a, b]) { ff.sync = wire(ff); await drain(ff, ff.sync); server.attach(ff); }
+  const originalA = await loadState(a.browser), originalB = await loadState(b.browser);
+  const sourceFolders = [originalA.groups[11].folderId, originalA.groups[12].folderId];
+  const sourceBookmarks = [originalA.tabs[2].bookmarkId, originalA.tabs[3].bookmarkId];
+  async function check() {
+    await converge(server, a, b);
+    for (const ff of [a, b]) {
+      const state = await loadState(ff.browser), managed = await tree(ff);
+      assert.equal(managed.folders.length, 2, "two identical Dev folders survive");
+      assert.deepEqual(managed.folders.map(folder => folder.bookmarks.map(node => node.url)), [["https://one/"], ["https://one/"]]);
+      const localGroups = await ff.browser.tabGroups.query({});
+      const mappedFolders = localGroups.map(group => state.groups[group.id].folderId);
+      assert.equal(new Set(mappedFolders).size, localGroups.length, "each local group owns its own folder");
+      for (const group of localGroups) {
+        const folder = managed.folders.find(folder => folder.id === state.groups[group.id].folderId);
+        const tabs = await ff.browser.tabs.query({ groupId: group.id });
+        assert.deepEqual(tabs.map(tab => tab.url), ["https://one/"]);
+        assert.equal(state.tabs[tabs[0].id].bookmarkId, folder.bookmarks[0].id);
+        assert.equal(state.tabs[tabs[0].id].folderId, folder.id);
+      }
+      const saved = await ff.sync.onMessage({ type: "foxy:saved" });
+      assert.equal(saved.saved.length, ff === a ? 0 : keptGroup ? 1 : 2);
+      assert.deepEqual(saved.missing, []);
+      // Look only at the managed tree: archived sibling GUIDs are never reused.
+      assert.equal(sourceFolders.filter(id => managed.folders.some(folder => folder.id === id)).length, keptGroup ? 1 : 2);
+      assert.equal(sourceBookmarks.filter(id => managed.folders.some(folder => folder.bookmarks.some(node => node.id === id))).length, keptGroup ? 1 : 2);
+      if (keptGroup) assert.ok(managed.folders.some(folder => folder.id === originalB.groups[11].folderId));
+      const archives = (await ff.browser.bookmarks.getChildren("unfiled_____"))
+        .filter(node => node.title === "Foxy merge leftovers").map(node => node.id);
+      const archivedGroups = ff.calls.filter(call => call.api === "bookmarks.move" && sourceFolders.includes(call.args[0])
+        && archives.includes(call.args[1].parentId)).map(call => call.args[0]);
+      assert.equal(new Set(archivedGroups).size, keptGroup ? 1 : 0, "only the one matched pair is archived");
+      assert.equal(ff.calls.some(call => call.api === "bookmarks.move" && sourceBookmarks.includes(call.args[0])), false,
+        "group bookmarks never move, including out of the archive");
+      assert.equal(ff.calls.some(call => /^bookmarks\.remove/.test(call.api)), false);
+    }
+  }
+  await check();
+  for (const ff of [a, b]) {
+    ff.restart({ restore: true }); ff.sync = wire(ff); await drain(ff, ff.sync);
+    await check();
+  }
+});
+
 test("probe 8b: closing the merged shared pin cannot promote an archived leftover on either restart", async () => {
   const setup = { tabs: [home, { id: 2, windowId: 1, pinned: true, url: "https://shared-pin/" }] };
   const a = createFirefox({ ...setup, bookmarkPrefix: "a" });
