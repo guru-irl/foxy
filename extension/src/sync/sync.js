@@ -12,6 +12,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   settleMs = 3000, maxWaitMs = 20000 }) {
   const queue = createQueue();
   let state, starting;
+  const returnTimers = new Map();
   const save = () => saveState(api, state);
   const outbound = createOutbound({ api, getState: () => state, save, now, removeDelayMs, quietMs,
     extensionBaseUrl: api.runtime.getURL(""),
@@ -19,15 +20,33 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   });
   // Losing OS focus doesn't stop showing the last Firefox window's active tab.
   // Keep this adapter local to sync; never mutate the injected browser object.
+  const eligibleWindow = win => win && !win.incognito && win.type === "normal";
+  async function rememberNormalWindow(win) {
+    if (state.lastFocusedNormalWindowId !== win.id) {
+      state.lastFocusedNormalWindowId = win.id;
+      await save();
+    }
+    return win;
+  }
   async function normalWindow(windowId) {
     if (windowId !== undefined) {
-      const win = await api.windows.get(windowId);
-      if (!win.incognito && win.type === "normal") return win;
+      try {
+        const win = await api.windows.get(windowId);
+        if (eligibleWindow(win)) return win;
+      } catch (error) { console.warn("Foxy: destination window is unavailable", error); }
     }
-    const win = await api.windows.getLastFocused({ windowTypes: ["normal"] });
-    if (!win.incognito && win.type === "normal") return win;
-    return (await api.windows.getAll({ windowTypes: ["normal"] }))
-      .find(candidate => !candidate.incognito && candidate.type === "normal") ?? null;
+    try {
+      const win = await api.windows.getLastFocused({ windowTypes: ["normal"] });
+      if (eligibleWindow(win)) return rememberNormalWindow(win);
+    } catch (error) { console.warn("Foxy: last focused window is unavailable", error); }
+    if (Number.isInteger(state.lastFocusedNormalWindowId)) {
+      try {
+        const win = await api.windows.get(state.lastFocusedNormalWindowId);
+        if (eligibleWindow(win)) return win;
+      } catch { /* Last normal window may have closed. Fall back to a live one. */ }
+    }
+    const win = (await api.windows.getAll({ windowTypes: ["normal"] })).find(eligibleWindow);
+    return win ? rememberNormalWindow(win) : null;
   }
   // Explicit receiver-preserving wrappers: Firefox namespaces need not have
   // own enumerable methods. Pins and shown-tab decisions use non-private windows.
@@ -98,6 +117,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     if (!starting) {
       starting = queue.run(async () => {
         state = await loadState(api);
+        await normalWindow();
         const session = await api.storage.session.get("foxySession");
         if (!session.foxySession) {
           await settle(api, { settleMs, maxWaitMs, now });
@@ -106,6 +126,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
         }
         // Once per event-page lifetime; queue-owned timers cover later deadlines.
         await ensureTree();
+        for (const id of Object.keys(state.groups)) scheduleReturningGroup(Number(id));
         await flush();
       }).catch(error => { starting = undefined; throw error; });
     }
@@ -147,10 +168,12 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     await folderRemoved(folderId);
     return false;
   }
-  async function syncGroup(groupId) {
+  async function syncGroup(groupId, finishingReturn = false) {
     let group;
     try { group = await api.tabGroups.get(groupId); } catch { return false; }
-    const win = await api.windows.get(group.windowId);
+    let win;
+    try { win = await api.windows.get(group.windowId); }
+    catch (error) { console.warn("Foxy: group window is unavailable", error); return false; }
     if (win.incognito || !await managedGroup(groupId)) return false;
     if (!state.groups[groupId]) {
       const local = (await api.tabs.query({ groupId })).filter(tab => !tab.incognito && !tab.pinned
@@ -158,10 +181,16 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       if (!local.length) return false; // Restore can announce a group before its real tabs.
       const candidates = new Set([...state.missing, ...state.openFolders]
         .filter(id => groupOfFolder(state, id) === null));
-      if (candidates.size) {
+      {
         const tree = await readTree(api, state.rootId), urls = new Set(local.map(tab => tab.url));
-        const folders = tree.folders.filter(folder => candidates.has(folder.id)
-          && folder.bookmarks.some(bookmark => urls.has(bookmark.url)));
+        const folders = tree.folders.filter(folder => {
+          if (groupOfFolder(state, folder.id) !== null) return false;
+          if (candidates.has(folder.id)) return folder.bookmarks.some(bookmark => urls.has(bookmark.url));
+          // Firefox's saved-group reopen is not marked missing/open here. Only
+          // an exact openable URL set plus name/colour is safe to bind at runtime.
+          const openable = new Set(folder.bookmarks.filter(bookmark => isOpenableUrl(bookmark.url)).map(bookmark => bookmark.url));
+          return openable.size === urls.size && [...urls].every(url => openable.has(url));
+        });
         const [pair] = matchGroups([{ groupId, title: group.title, color: group.color, urls: [...urls] }], folders).pairs;
         if (pair) {
           const folder = folders.find(folder => folder.id === pair.folderId);
@@ -172,7 +201,8 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
             delete state.quietUntil[id];
             delete state.failedCreates[id];
           }
-          state.groups[groupId] = { folderId: folder.id, title: encodeFolderTitle(group) };
+          state.groups[groupId] = { folderId: folder.id, title: encodeFolderTitle(group),
+            rebindUntil: now() + (quietMs ?? 10000) };
           if (!state.openFolders.includes(folder.id)) state.openFolders.push(folder.id);
           state.missing = state.missing.filter(id => id !== folder.id);
           const tabs = matchTabs(local.map(tab => ({ tabId: tab.id, url: tab.url })), folder.bookmarks);
@@ -183,12 +213,58 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
           }
           await save();
           for (const id of tabs.unmatchedTabs) await outbound.syncTab(id);
-          await inbound.reconcileFolder(folder.id);
+          scheduleReturningGroup(groupId);
         }
+      }
+    }
+    if (Number.isFinite(state.groups[groupId]?.rebindUntil)) {
+      await matchReturningTabs(groupId);
+      if (!finishingReturn) {
+        state.groups[groupId].rebindUntil = now() + (quietMs ?? 10000);
+        await save();
+        scheduleReturningGroup(groupId);
       }
     }
     await outbound.syncGroup(groupId);
     return true;
+  }
+  async function matchReturningTabs(groupId) {
+    const entry = state.groups[groupId];
+    if (!entry) return;
+    const local = (await api.tabs.query({ groupId })).filter(tab => !tab.incognito && !tab.pinned
+      && !state.tabs[tab.id] && isSyncableUrl(tab.url, api.runtime.getURL(""))).sort((a, b) => a.index - b.index);
+    const mapped = new Set(Object.values(state.tabs).map(tab => tab.bookmarkId));
+    const bookmarks = (await api.bookmarks.getChildren(entry.folderId)).filter(node => node.type === "bookmark" && !mapped.has(node.id));
+    const tabs = matchTabs(local.map(tab => ({ tabId: tab.id, url: tab.url })), bookmarks);
+    for (const pair of tabs.pairs) {
+      const tab = local.find(tab => tab.id === pair.tabId);
+      state.tabs[tab.id] = { bookmarkId: pair.bookmarkId, folderId: entry.folderId,
+        url: tab.url, title: tab.title ?? "" };
+    }
+    if (tabs.pairs.length) await save();
+  }
+  function scheduleReturningGroup(groupId) {
+    clearTimeout(returnTimers.get(groupId));
+    returnTimers.delete(groupId);
+    const entry = state.groups[groupId];
+    if (!Number.isFinite(entry?.rebindUntil)) return;
+    returnTimers.set(groupId, setTimeout(() => {
+      returnTimers.delete(groupId);
+      queue.run(async () => {
+        const entry = state.groups[groupId];
+        if (!Number.isFinite(entry?.rebindUntil)) return;
+        if (entry.rebindUntil > now()) { scheduleReturningGroup(groupId); return; }
+        // The group may have moved into a private window or its folder may
+        // have left Foxy while the timer waited. Use the same controller guards.
+        const managed = await syncGroup(groupId, true);
+        delete entry.rebindUntil;
+        await save();
+        if (!managed) return;
+        // Tabs can arrive without a delivered event before quiet completes.
+        for (const tab of await api.tabs.query({ groupId })) await syncTab(tab.id);
+        await inbound.reconcileFolder(entry.folderId);
+      }).catch(() => {});
+    }, Math.max(0, entry.rebindUntil - now())));
   }
   async function syncTab(tabId) {
     let tab;
@@ -197,9 +273,25 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     if (tab.incognito) return;
     if (!tab.pinned && tab.groupId != null && tab.groupId !== -1) {
       // Prevent outbound's internal group creation from bypassing return matching.
-      if (!await syncGroup(tab.groupId)) return;
+      if (!await syncGroup(tab.groupId)) {
+        if (state.tabs[tabId] && !state.groups[tab.groupId]
+          && !isSyncableUrl(tab.url, api.runtime.getURL(""))) await outbound.syncTab(tabId);
+        return;
+      }
     }
     await outbound.syncTab(tabId);
+  }
+  async function syncMovedTab(tabId) {
+    await syncTab(tabId);
+    let tab;
+    try { tab = await api.tabs.get(tabId); } catch { return; }
+    if (tab.incognito || (!tab.pinned && (tab.groupId == null || tab.groupId === -1))) return;
+    // A multi-drag can invert several bookmark neighbours before any tab event
+    // runs. Publishing only the dragged ids leaves shifted neighbours stranded.
+    // One strip-order pass publishes the final relative order with per-id deltas.
+    const members = await api.tabs.query({ windowId: tab.windowId,
+      ...(tab.pinned ? { pinned: true } : { groupId: tab.groupId }) });
+    for (const member of members.sort((a, b) => a.index - b.index)) await syncTab(member.id);
   }
   async function flush() {
     for (const folderId of new Set(Object.values(state.pendingRemovals).map(removal => removal.folderId))) {
@@ -237,7 +329,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       try { win = await api.windows.get(info.windowId); } catch { /* Window already closed. */ }
       if (!win?.incognito) outbound.tabRemoved(id, info);
     },
-    "tabs.onMoved": syncTab,
+    "tabs.onMoved": syncMovedTab,
     "tabs.onAttached": syncTab,
     "tabs.onDetached": syncTab,
     "tabs.onActivated": applyDeferred,
@@ -266,7 +358,12 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       }
     },
     "windows.onFocusChanged": async id => {
-      if (id !== api.windows.WINDOW_ID_NONE) await applyDeferred();
+      if (id === api.windows.WINDOW_ID_NONE) return;
+      try {
+        const win = await api.windows.get(id);
+        if (eligibleWindow(win)) await rememberNormalWindow(win);
+      } catch (error) { console.warn("Foxy: focused window is unavailable", error); return; }
+      await applyDeferred();
     },
   };
   const handlers = Object.fromEntries(Object.entries(jobs).map(([name, fn]) => [name, (...args) => run(() => fn(...args))]));

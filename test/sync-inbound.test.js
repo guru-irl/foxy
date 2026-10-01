@@ -251,6 +251,7 @@ test("a matching later echo removes preceding entries but keeps later pending mo
     { parentId: folderId, index: 1, at: 101 },
     { parentId: folderId, index: 2, at: 102 },
   ] };
+  f.tick(2); // All records must be at or before now; future stamps are stale.
   await f.inbound.bookmarkMoved(bid, { oldParentId: folderId, parentId: folderId, index: 1 });
   assert.deepEqual(f.state.expectedMoves[bid], [{ parentId: folderId, index: 2, at: 102 }]);
   assert.deepEqual(await loadState(f.api), f.state);
@@ -951,5 +952,16 @@ test("replacing every bookmark in an open group preserves the group while openin
   assert.equal(f.state.tabs[200].bookmarkId, b.id);
   assert.equal((await f.api.tabGroups.get(7)).title.trim(), "Work");
   for (const id of [30, 10, 20]) assert.equal(f.state.tabs[id], undefined);
+  await echoAndStable(f);
+});
+
+// Clock rollback must not make an obsolete echo swallow a genuine remote sort.
+test("future-stamped expected move is stale inbound", async () => {
+  const f = await fixture(), bid = f.bookmark(20), folderId = f.folder();
+  f.state.expectedMoves = { [bid]: [{ parentId: folderId, index: 0, at: 101 }] };
+  await f.api.bookmarks.move(bid, { index: 0 });
+  await f.inbound.bookmarkMoved(bid, { oldParentId: folderId, parentId: folderId, index: 0 });
+  assert.equal(f.ff.layout(1), "| [7: 20 30 10] 99");
+  assert.equal(f.state.expectedMoves[bid], undefined);
   await echoAndStable(f);
 });

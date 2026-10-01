@@ -76,7 +76,8 @@ export function createOutbound({
       await save();
     }
     let folderId = tab.pinned ? state.pinnedId : folderOfGroup(state, tab.groupId);
-    if (!tab.pinned && tab.groupId != null && tab.groupId !== -1 && !folderId) {
+    if (!tab.pinned && tab.groupId != null && tab.groupId !== -1 && !folderId
+      && isSyncableUrl(tab.url, extensionBaseUrl)) {
       await syncGroup(tab.groupId);
       state = getState();
       folderId = folderOfGroup(state, tab.groupId);
@@ -114,7 +115,7 @@ export function createOutbound({
       }
       const expected = state.expectedMoves;
       for (const [id, moves] of Object.entries(expected)) {
-        const fresh = Array.isArray(moves) ? moves.filter(move => move && at - move.at <= 60000) : [];
+        const fresh = Array.isArray(moves) ? moves.filter(move => move && move.at <= at && at - move.at <= 60000) : [];
         if (fresh.length) expected[id] = fresh;
         else delete expected[id];
       }

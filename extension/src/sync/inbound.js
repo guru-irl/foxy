@@ -230,6 +230,9 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     const state = getState(), pinned = folderId && folderId === state.pinnedId;
     const groupId = groupOfFolder(state, folderId);
     if (!pinned && groupId === null) return; // Saved here, never auto-open.
+    // The controller rematches late restore tabs before releasing this durable
+    // quiet-period marker. Bookmark echoes must not open duplicates meanwhile.
+    if (!pinned && Number.isFinite(state.groups[groupId]?.rebindUntil)) return;
     let folder;
     try { [folder] = await api.bookmarks.get(folderId); }
     catch (error) {
@@ -341,7 +344,7 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     const expected = state.expectedMoves[id];
     if (expected !== undefined) {
       const at = now(), fresh = Array.isArray(expected)
-        ? expected.filter(move => move && at - move.at <= 60000) : [];
+        ? expected.filter(move => move && move.at <= at && at - move.at <= 60000) : [];
       const match = fresh.findIndex(move => move.parentId === moveInfo.parentId && move.index === moveInfo.index);
       const remaining = match < 0 ? [] : fresh.slice(match + 1);
       if (remaining.length) state.expectedMoves[id] = remaining;

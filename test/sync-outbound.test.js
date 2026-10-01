@@ -1025,3 +1025,13 @@ test("failed bookmark update is logged without advancing lastSynced", async (t) 
   assert.deepEqual(f.state.tabs[10], before);
   assert.match(warn.mock.calls[0].arguments[0], /^Foxy:/);
 });
+
+test("future-stamped expected moves are pruned outbound after clock rollback", async () => {
+  const f = await synced(), bid = f.state.tabs[20].bookmarkId;
+  f.state.expectedMoves = { future: [{ parentId: f.folder(), index: 0, at: 101 }],
+    [bid]: [{ parentId: f.folder(), index: 2, at: 101 }] };
+  await f.api.tabs.move(20, { index: 0 });
+  await f.outbound.syncTab(20);
+  assert.deepEqual(f.state.expectedMoves, { [bid]: [{ parentId: f.folder(), index: 0, at: 100 }] });
+  assert.deepEqual(await f.pages(), [abc[2], abc[0], abc[1]]);
+});
