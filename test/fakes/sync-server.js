@@ -16,21 +16,34 @@ export function createSyncServer({ deliveryOrder = "forward", seed = 42 } = {}) 
     return batch;
   }
   const flatten = nodes => nodes.flatMap(({ children, ...node }) => [node, ...flatten(children ?? [])]);
+  async function upload(device) {
+    const changes = device.ff.bookmarkChanges(device.cursor);
+    device.cursor = changes.cursor;
+    for (const node of changes.nodes) {
+      if (node.deleted) deleted.set(node.id, node);
+      else deleted.delete(node.id);
+    }
+    await replica.applyRemoteBookmarks(changes.nodes);
+    device.ff.markUploaded(changes.cursor);
+    return changes.nodes.length;
+  }
+  async function snapshot() {
+    return [...flatten(await replica.browser.bookmarks.getTree()), ...deleted.values()];
+  }
   return {
     attach(ff) { devices.push({ ff, cursor: 0 }); },
+    async syncDevice(ff) {
+      const device = devices.find(device => device.ff === ff);
+      if (!device) throw new Error("Device is not attached");
+      await ff.applyRemoteBookmarks(await snapshot(), { orderEvents });
+      await ff.settle();
+      await ff.sync.idle();
+      return { uploaded: await upload(device) };
+    },
     async syncAll() {
       let uploaded = 0;
-      for (const device of devices) {
-        const changes = device.ff.bookmarkChanges(device.cursor);
-        device.cursor = changes.cursor;
-        uploaded += changes.nodes.length;
-        for (const node of changes.nodes) {
-          if (node.deleted) deleted.set(node.id, node);
-          else deleted.delete(node.id);
-        }
-        await replica.applyRemoteBookmarks(changes.nodes);
-      }
-      const merged = [...flatten(await replica.browser.bookmarks.getTree()), ...deleted.values()];
+      for (const device of devices) uploaded += await upload(device);
+      const merged = await snapshot();
       for (const { ff } of devices) {
         await ff.applyRemoteBookmarks(merged, { orderEvents });
         await ff.settle();

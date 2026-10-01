@@ -263,7 +263,7 @@ test("background registers every wake listener at module evaluation and routes s
   const previous = globalThis.browser;
   t.after(() => { globalThis.browser = previous; });
   globalThis.browser = ff.browser;
-  const registered = [];
+  const registered = [], filters = [];
   for (const [namespace, names] of Object.entries({
     runtime: ["onStartup", "onInstalled", "onMessage"],
     tabs: ["onCreated", "onUpdated", "onRemoved", "onMoved", "onAttached", "onDetached", "onActivated"],
@@ -272,7 +272,11 @@ test("background registers every wake listener at module evaluation and routes s
     windows: ["onFocusChanged"],
   })) for (const name of names) {
     const source = ff.browser[namespace][name], add = source.addListener;
-    source.addListener = listener => { registered.push(`${namespace}.${name}`); add(listener); };
+    source.addListener = (listener, filter) => {
+      registered.push(`${namespace}.${name}`);
+      if (namespace === "tabs" && name === "onUpdated") filters.push(filter);
+      add(listener, filter);
+    };
   }
   await import(`../extension/background.js?task5=${Date.now()}`);
   assert.deepEqual(registered.sort(), [
@@ -281,6 +285,7 @@ test("background registers every wake listener at module evaluation and routes s
     "tabGroups.onCreated", "tabGroups.onUpdated", "tabGroups.onRemoved", "tabGroups.onMoved",
     "bookmarks.onCreated", "bookmarks.onChanged", "bookmarks.onMoved", "bookmarks.onRemoved", "windows.onFocusChanged",
   ].sort());
+  assert.deepEqual(filters, [{ properties: ["url", "title", "pinned", "groupId", "status"] }]);
   const saved = await ff.browser.runtime.sendMessage({ type: "foxy:saved" });
   assert.equal(saved.saved.length, 2);
   const opened = await ff.browser.runtime.sendMessage({ type: "foxy:open-saved", folderId: saved.saved[1].folderId, windowId: 1 });
@@ -381,4 +386,31 @@ test("outbound does not write to a moved-out folder while its shown tab waits to
   await drain(ff, sync);
   assert.equal((await ff.browser.tabs.get(4)).groupId, -1);
   assert.equal((await ff.browser.tabs.get(4)).url, "https://local-after-removal/");
+});
+
+test("background falls back to unfiltered updates when the properties filter is unavailable", async t => {
+  const { ff } = await savedSetup(); unwire(ff);
+  const previous = globalThis.browser;
+  t.after(() => { globalThis.browser = previous; });
+  globalThis.browser = ff.browser;
+  const source = ff.browser.tabs.onUpdated, add = source.addListener, filters = [];
+  source.addListener = (listener, filter) => {
+    filters.push(filter);
+    if (filter) throw new Error("filter unavailable");
+    add(listener);
+  };
+  const warn = t.mock.method(console, "warn", () => {});
+  await import(`../extension/background.js?filter-fallback=${Date.now()}`);
+  assert.deepEqual(filters, [{ properties: ["url", "title", "pinned", "groupId", "status"] }, undefined]);
+  assert.ok(warn.mock.calls.every(call => call.arguments[0].startsWith("Foxy:")));
+  const saved = await ff.browser.runtime.sendMessage({ type: "foxy:saved" });
+  assert.equal(saved.saved.length, 2);
+  const opened = await ff.browser.runtime.sendMessage({ type: "foxy:open-saved", folderId: saved.saved[0].folderId });
+  await ff.settle();
+  const tab = (await ff.browser.tabs.query({ groupId: opened.groupId }))[0];
+  await ff.browser.tabs.update(tab.id, { pinned: true }); await ff.settle();
+  await ff.browser.runtime.sendMessage({ type: "foxy:saved" });
+  const state = await loadState(ff.browser);
+  assert.equal((await ff.browser.bookmarks.get(state.tabs[tab.id].bookmarkId))[0].parentId, state.pinnedId);
+  assert.deepEqual(ff.errors, []);
 });

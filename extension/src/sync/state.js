@@ -5,6 +5,7 @@ export function emptyState() {
   return {
     rootId: null, pinnedId: null, groups: {}, tabs: {}, openFolders: [], missing: [],
     cantReopen: {}, deferred: [], quietUntil: {}, pendingRemovals: {}, failedCreates: {},
+    removedIds: {}, folderSnapshots: {},
   };
 }
 
@@ -16,11 +17,52 @@ export async function loadState(api) {
     if (!entries(state.pendingRemovals, entry => record(entry)
       && string(entry.bookmarkId) && string(entry.folderId) && Number.isFinite(entry.due))) state.pendingRemovals = {};
     if (!entries(state.failedCreates, string)) state.failedCreates = {};
+    if (!entries(state.removedIds, Number.isFinite)) state.removedIds = {};
+    if (!entries(state.folderSnapshots, entry => record(entry) && string(entry.title)
+      && string(entry.color) && strings(entry.urls))) state.folderSnapshots = {};
     return state;
   } catch (error) {
     console.warn("Foxy: could not load sync state", error);
     return emptyState();
   }
+}
+
+export const isBookmarkNotFound = error => /^(?:Bookmark not found[.!]?$|Invalid bookmark ID:)/i
+  .test(error?.message ?? String(error));
+
+export function pruneRemovedIds(state, at = Date.now()) {
+  let changed = false;
+  for (const [id, time] of Object.entries(state.removedIds ?? {})) {
+    if (time > at || at - time > 600000) { delete state.removedIds[id]; changed = true; }
+  }
+  return changed;
+}
+
+export function wasRemoved(state, id, at = Date.now()) {
+  const time = state.removedIds?.[id];
+  return Number.isFinite(time) && time <= at && at - time <= 600000;
+}
+
+/** Called on onRemoved, before queued reconciliation can discard the mappings. */
+export function recordRemoved(state, id, info, at = Date.now()) {
+  pruneRemovedIds(state, at);
+  state.removedIds ??= {};
+  const ids = new Set([id]);
+  if (info?.node?.type === "folder") {
+    if (id === state.rootId) {
+      ids.add(state.pinnedId);
+      for (const entry of Object.values(state.groups)) ids.add(entry.folderId);
+      for (const folder of [...state.openFolders, ...state.missing]) ids.add(folder);
+    }
+    for (const entry of [...Object.values(state.tabs), ...Object.values(state.pendingRemovals)]) {
+      if (id === state.rootId || entry.folderId === id) ids.add(entry.bookmarkId);
+    }
+    function descendants(node) {
+      for (const child of node?.children ?? []) { ids.add(child.id); descendants(child); }
+    }
+    descendants(info.node);
+  }
+  for (const removed of ids) if (removed) state.removedIds[removed] = at;
 }
 
 /** Write failures propagate to the queue, which logs them and keeps draining. */

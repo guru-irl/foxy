@@ -735,6 +735,8 @@ test("missing bookmarks during removal still clear entries and do not break late
   t.mock.method(console, "warn", () => {});
   const f = await synced();
   await f.api.bookmarks.remove(f.state.tabs[10].bookmarkId);
+  f.state.removedIds[f.state.tabs[10].bookmarkId] = 100; // Explicit onRemoved evidence.
+  await f.ff.settle();
   await f.api.tabs.remove([10, 20]);
   f.outbound.tabRemoved(10, { isWindowClosing: false });
   f.outbound.tabRemoved(20, { isWindowClosing: false });

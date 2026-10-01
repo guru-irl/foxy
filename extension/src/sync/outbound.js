@@ -1,5 +1,5 @@
-import { encodeFolderTitle, isSyncableUrl } from "./codec.js";
-import { folderOfGroup, groupOfFolder } from "./state.js";
+import { encodeFolderTitle, decodeFolderTitle, isSyncableUrl } from "./codec.js";
+import { folderOfGroup, groupOfFolder, isBookmarkNotFound, wasRemoved } from "./state.js";
 
 /**
  * Call every method through the controller's serial queue, including flush().
@@ -10,16 +10,40 @@ import { folderOfGroup, groupOfFolder } from "./state.js";
  */
 export function createOutbound({
   api, getState, save, now = Date.now, removeDelayMs = 2000, quietMs = 10000, extensionBaseUrl,
-  schedule = () => {},
+  schedule = () => {}, lostIdentity = () => {},
 }) {
   const warn = error => console.warn("Foxy: outbound sync failed", error);
   const guarded = fn => async (...args) => {
-    try { await fn(...args); } catch (error) { warn(error); }
+    try { await fn(...args); } catch (error) {
+      if (isBookmarkNotFound(error)) console.debug("Foxy: outbound identity unavailable", error);
+      else warn(error);
+    }
   };
   async function read(fn) {
     // Tabs, groups and bookmarks may disappear between queued events.
     try { return await fn(); }
     catch (error) { console.debug("Foxy: outbound read skipped", error); return null; }
+  }
+
+  async function bookmarkCall(ids, fn) {
+    try { return await fn(); }
+    catch (error) {
+      if (isBookmarkNotFound(error)) {
+        const id = ids.find(id => error.message?.endsWith(`: ${id}`)) ?? ids[0];
+        if (id && !wasRemoved(getState(), id, now())) lostIdentity(id);
+      }
+      throw error;
+    }
+  }
+  async function readBookmark(id) {
+    try { return await bookmarkCall([id], () => api.bookmarks.get(id)); }
+    catch (error) {
+      if (isBookmarkNotFound(error)) {
+        if (wasRemoved(getState(), id, now())) return null;
+        throw error; // Abort neighbour/create paths too.
+      }
+      console.debug("Foxy: outbound read skipped", error); return null;
+    }
   }
 
   function scheduleRemoval(tabId) {
@@ -46,7 +70,7 @@ export function createOutbound({
       .filter(other => other.id !== tab.id && state.tabs[other.id]?.folderId === folderId);
     async function neighbour(candidates) {
       for (const other of candidates) {
-        const nodes = await read(() => api.bookmarks.get(state.tabs[other.id].bookmarkId));
+        const nodes = await readBookmark(state.tabs[other.id].bookmarkId);
         if (nodes?.[0]?.parentId === folderId) return nodes[0];
       }
       return null;
@@ -64,7 +88,7 @@ export function createOutbound({
     }
     if (previous) return previous.index + 1;
     if (next) return next.index;
-    return tab.pinned ? (await api.bookmarks.getChildren(folderId)).length : 0;
+    return tab.pinned ? (await bookmarkCall([folderId], () => api.bookmarks.getChildren(folderId))).length : 0;
   }
 
   const syncTab = guarded(async tabId => {
@@ -89,16 +113,18 @@ export function createOutbound({
       return;
     }
     await cancelRemoval(tabId);
-    const nodes = entry ? await read(() => api.bookmarks.get(entry.bookmarkId)) : null;
+    const nodes = entry ? await readBookmark(entry.bookmarkId) : null;
     const bookmark = nodes?.[0];
     if (entry && !bookmark) return; // A remote deletion belongs to inbound.
     if (!entry && state.failedCreates[tabId] === tab.url) return;
     const index = await position(tab, folderId, bookmark);
     const title = tab.title ?? "";
     if (!entry) {
+      if (!(await readBookmark(folderId))?.[0]) return;
       let created;
-      try { created = await api.bookmarks.create({ parentId: folderId, index, url: tab.url, title }); }
+      try { created = await bookmarkCall([folderId], () => api.bookmarks.create({ parentId: folderId, index, url: tab.url, title })); }
       catch (error) {
+        if (isBookmarkNotFound(error)) throw error;
         state.failedCreates[tabId] = tab.url;
         warn(error);
         await save();
@@ -122,7 +148,7 @@ export function createOutbound({
       const record = { parentId: folderId, index, at };
       const moves = expected[entry.bookmarkId] = [...(expected[entry.bookmarkId] ?? []), record].slice(-8);
       await save();
-      try { await api.bookmarks.move(entry.bookmarkId, { parentId: folderId, index }); }
+      try { await bookmarkCall([entry.bookmarkId, folderId], () => api.bookmarks.move(entry.bookmarkId, { parentId: folderId, index })); }
       catch (error) {
         const remaining = moves.filter(move => move !== record);
         if (remaining.length) expected[entry.bookmarkId] = remaining;
@@ -139,13 +165,13 @@ export function createOutbound({
     // If the actual bookmark already matches, advance bookkeeping without an echo.
     if (tab.status === "complete" && tab.url !== entry.url && !(state.quietUntil[tabId] > now())) {
       if (bookmark.url !== tab.url || bookmark.title !== title) {
-        await api.bookmarks.update(entry.bookmarkId, { url: tab.url, title });
+        await bookmarkCall([entry.bookmarkId], () => api.bookmarks.update(entry.bookmarkId, { url: tab.url, title }));
       }
       entry.url = tab.url;
       entry.title = title;
       await save();
     } else if (tab.status === "complete" && tab.url === entry.url && title !== entry.title) {
-      if (bookmark.title !== title) await api.bookmarks.update(entry.bookmarkId, { title });
+      if (bookmark.title !== title) await bookmarkCall([entry.bookmarkId], () => api.bookmarks.update(entry.bookmarkId, { title }));
       entry.title = title;
       await save();
     }
@@ -157,15 +183,16 @@ export function createOutbound({
     const state = getState(), title = encodeFolderTitle(group), entry = state.groups[groupId];
     if (entry) {
       if (title !== entry.title) {
-        const nodes = await read(() => api.bookmarks.get(entry.folderId));
+        const nodes = await readBookmark(entry.folderId);
         if (!nodes?.[0]) return;
-        if (nodes[0].title !== title) await api.bookmarks.update(entry.folderId, { title });
+        if (nodes[0].title !== title) await bookmarkCall([entry.folderId], () => api.bookmarks.update(entry.folderId, { title }));
         entry.title = title;
         await save();
       }
       return;
     }
-    const created = await api.bookmarks.create({ parentId: state.rootId, title });
+    if (!(await readBookmark(state.rootId))?.[0]) return;
+    const created = await bookmarkCall([state.rootId], () => api.bookmarks.create({ parentId: state.rootId, title }));
     state.groups[groupId] = { folderId: created.id, title };
     if (!state.openFolders.includes(created.id)) state.openFolders.push(created.id);
     await save();
@@ -185,6 +212,10 @@ export function createOutbound({
   const groupRemoved = guarded(async (group, removeInfo = {}) => {
     const state = getState(), entry = state.groups[group.id];
     if (!entry) return;
+    const decoded = decodeFolderTitle(entry.title);
+    state.folderSnapshots ??= {};
+    state.folderSnapshots[entry.folderId] = { title: decoded.title, color: decoded.color,
+      urls: Object.values(state.tabs).filter(tab => tab.folderId === entry.folderId).map(tab => tab.url) };
     delete state.groups[group.id];
     if (!removeInfo.isWindowClosing) {
       state.openFolders = state.openFolders.filter(id => id !== entry.folderId);
@@ -206,7 +237,7 @@ export function createOutbound({
         const live = entry.folderId === state.pinnedId || (groupId !== null
           && await read(() => api.tabGroups.get(groupId)));
         if (live) {
-          const nodes = await read(() => api.bookmarks.get(entry.bookmarkId));
+          const nodes = await readBookmark(entry.bookmarkId);
           if (nodes?.[0]) await api.bookmarks.remove(entry.bookmarkId);
         }
         delete state.tabs[tabId];

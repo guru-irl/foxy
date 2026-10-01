@@ -53,7 +53,8 @@ the group. An empty group name appears as `UNNAMED`.
 
 Closing a whole group or its window keeps it saved. Closing an individual tab
 removes its bookmark after a short delay. To delete a saved group everywhere,
-click its ×, then `DELETE?`; moving away cancels the confirmation.
+click its ×, then deliberately click `DELETE?` after at least 400ms. Double-clicks
+never confirm deletion; moving away cancels the confirmation.
 
 If groups previously open here are missing after a restart, the board shows
 `N GROUPS DIDN'T COME BACK` with `RESTORE ALL` and `DISMISS`. They also appear
@@ -70,6 +71,9 @@ You can also rename folders and edit bookmarks there to change groups and tabs.
 First-run merges move duplicates and emptied extra folders into
 `Other Bookmarks/Foxy merge leftovers` rather than deleting them. Foxy does not
 manage or reopen that folder; it is safe to delete by hand after checking its contents.
+Firefox Sync can also silently change bookmark IDs when it dedupes new local items.
+Foxy rebinds those identities without closing or replacing their existing tabs;
+a missing ID alone is not treated as a deletion.
 
 Sync never closes, moves or navigates the tab you are looking at in the focused
 window. Such changes wait until you switch away and are applied only if still valid.

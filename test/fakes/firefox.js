@@ -479,7 +479,7 @@ export function createFirefox(setup = {}) {
 
   const nodes = [], localStore = {};
   let nextBookmark = 1, bookmarkClock = 0, remoteBookmarks = false;
-  const bookmarkJournal = [];
+  const bookmarkJournal = [], unuploaded = new Set();
   function recordBookmark(node) {
     if (!remoteBookmarks) bookmarkJournal.push(copy(node));
   }
@@ -522,7 +522,10 @@ export function createFirefox(setup = {}) {
       type: props.url == null ? "folder" : "bookmark", dateAdded: props.dateAdded ?? ++bookmarkClock };
     if (props.url != null) node.url = props.url;
     nodes.push(node);
-    if (notify) { recordBookmark(node); queue("bookmarks.onCreated", node.id, node); }
+    if (notify) {
+      if (!remoteBookmarks) unuploaded.add(node.id);
+      recordBookmark(node); queue("bookmarks.onCreated", node.id, node);
+    }
     return node;
   }
   nodes.push({ id: ROOTS[0], index: 0, title: "", type: "folder", dateAdded: ++bookmarkClock });
@@ -596,7 +599,23 @@ export function createFirefox(setup = {}) {
   });
   api("bookmarks", "removeTree", id => removeNode(mutableNode(id)));
 
-  // Sync changes emit normal events but are not re-uploaded as local edits.
+  function markUploaded(cursor) {
+    for (const node of bookmarkJournal.slice(0, cursor)) unuploaded.delete(node.id);
+  }
+  function rekeyBookmark(node, id) {
+    const old = node.id;
+    node.id = id;
+    unuploaded.delete(old);
+    for (const child of nodes) if (child.parentId === old) child.parentId = id;
+    for (const entry of bookmarkJournal) {
+      if (entry.id === old) entry.id = id;
+      if (entry.parentId === old) entry.parentId = id;
+    }
+    // Places emits bookmark-guid-changed, which ext-bookmarks does not expose.
+  }
+
+  // Sync changes emit normal events, except dedupe GUID changes, and are not
+  // re-uploaded as local edits. Only locally created, never-uploaded items dedupe.
   async function applyRemoteBookmarks(changes, { orderEvents = batch => batch } = {}) {
     const eventStart = pending.length;
     remoteBookmarks = true;
@@ -614,14 +633,21 @@ export function createFirefox(setup = {}) {
         if (!ready.length) throw new Error("Remote bookmark parent missing");
         for (const change of ready) {
           let node = nodes.find(node => node.id === change.id);
-          if (!node) node = insertNode(change);
-          else {
-            if (node.title !== change.title || node.url !== change.url) {
-              await browser.bookmarks.update(node.id, { title: change.title, url: change.url });
-            }
-            if (node.parentId !== change.parentId || node.index !== change.index) {
-              await browser.bookmarks.move(node.id, { parentId: change.parentId, index: change.index });
-            }
+          if (!node) {
+            const type = change.type ?? (change.url == null ? "folder" : "bookmark");
+            node = nodes.find(local => unuploaded.has(local.id) && local.parentId === change.parentId
+              && local.type === type && local.title === (change.title ?? "")
+              && (type === "folder" || local.url === change.url));
+            if (node) {
+              rekeyBookmark(node, change.id);
+              node.dateAdded = change.dateAdded ?? node.dateAdded;
+            } else node = insertNode(change);
+          }
+          if (node.title !== change.title || node.url !== change.url) {
+            await browser.bookmarks.update(node.id, { title: change.title, url: change.url });
+          }
+          if (node.parentId !== change.parentId || node.index !== change.index) {
+            await browser.bookmarks.move(node.id, { parentId: change.parentId, index: change.index });
           }
         }
         waiting = waiting.filter(node => !ready.includes(node));
@@ -713,5 +739,5 @@ export function createFirefox(setup = {}) {
     }
     return `${pinned ? `${pinned} ` : ""}| ${items.join(" ")}`;
   }
-  return { browser, settle, layout, closeWindow, restart, bookmarkChanges, applyRemoteBookmarks, fire: queue, errors, calls };
+  return { browser, settle, layout, closeWindow, restart, bookmarkChanges, markUploaded, applyRemoteBookmarks, fire: queue, errors, calls };
 }

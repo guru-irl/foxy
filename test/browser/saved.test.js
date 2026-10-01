@@ -147,6 +147,9 @@ test("SAVED keyboard open/delete and DELETE? activation never cross-trigger", as
   row(root).querySelector(".saved-delete").click();
   assert.equal(row(root).querySelector(".saved-delete").textContent, "DELETE?");
   key(row(root).querySelector(".saved-delete"), "Enter");
+  assert.deepEqual(calls.slice(3), [["confirm", "f1"]], "rapid keyboard activation must not confirm");
+  await new Promise(resolve => setTimeout(resolve, 410));
+  key(row(root).querySelector(".saved-delete"), "Enter");
   assert.deepEqual(calls.slice(3), [["confirm", "f1"], ["delete", "f1"]]);
   ui.confirmFolderId = null; renderBoard(root, board, ui, handlers); calls.length = 0;
   const open = row(root, "f2").querySelector(".row-open"); open.focus(); key(open, "Delete");

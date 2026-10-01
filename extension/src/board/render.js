@@ -5,6 +5,7 @@ import { openNameEditor, openColorPicker } from "./edit.js";
 const editors = new WeakMap();
 const renameStarts = new WeakMap();
 const banners = new WeakMap();
+const confirmations = new WeakMap();
 
 const layouts = new WeakSet();
 function alignColumns(root) {
@@ -14,6 +15,10 @@ function alignColumns(root) {
 
 // Text is always assigned as textContent, never parsed as markup.
 export function renderBoard(root, board, ui, handlers) {
+  if (ui.confirmFolderId == null) confirmations.delete(root);
+  else if (confirmations.get(root)?.folderId !== ui.confirmFolderId) {
+    confirmations.set(root, { folderId: ui.confirmFolderId, at: performance.now() });
+  }
   const focus = savedFocus(root);
   // A vanished editor must also release its document listeners. Controller
   // identity checks prevent this old cleanup from ending a newer editor.
@@ -161,6 +166,9 @@ function savedRow(root, group, ui, handlers) {
   const busy = () => ui.busy?.has(group.folderId);
   const confirm = () => {
     if (busy()) return;
+    if (confirmations.get(root)?.folderId !== group.folderId) {
+      confirmations.set(root, { folderId: group.folderId, at: performance.now() });
+    }
     handlers.onConfirmDelete?.(group.folderId);
   };
   const cancel = () => {
@@ -172,9 +180,11 @@ function savedRow(root, group, ui, handlers) {
   });
   remove.addEventListener("click", event => {
     event.stopPropagation();
-    if (busy()) return;
-    if (confirming) handlers.onDeleteSaved?.(group.folderId);
-    else confirm();
+    if (busy() || event.detail > 1) return;
+    if (confirming) {
+      const armed = confirmations.get(root);
+      if (armed?.folderId === group.folderId && performance.now() - armed.at >= 400) handlers.onDeleteSaved?.(group.folderId);
+    } else confirm();
   });
   row.addEventListener("keydown", event => {
     if (event.isComposing) return;

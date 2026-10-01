@@ -1,8 +1,9 @@
 import { decodeFolderTitle, encodeFolderTitle, isOpenableUrl } from "./codec.js";
-import { emptyState, groupOfFolder, tabsInFolder } from "./state.js";
+import { emptyState, groupOfFolder, tabsInFolder, isBookmarkNotFound, wasRemoved } from "./state.js";
+import { matchTabs } from "./match.js";
 
 /** All methods run inside the controller's queue. Inner work never re-enqueues. */
-export function createInbound({ api, getState, save, now = Date.now, quietMs = 10000, orderReleased = () => {} }) {
+export function createInbound({ api, getState, save, now = Date.now, quietMs = 10000, orderReleased = () => {}, lostIdentity = () => {} }) {
   const warn = error => console.warn("Foxy: inbound sync failed", error);
   const attempt = async fn => {
     try { return await fn(); } catch (error) { warn(error); return null; }
@@ -41,6 +42,7 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     const state = getState();
     delete state.tabs[tabId];
     delete state.quietUntil[tabId];
+    delete state.pendingRemovals[tabId];
   }
   const mapped = bookmarkId => Object.entries(getState().tabs)
     .find(([, entry]) => entry.bookmarkId === bookmarkId);
@@ -266,10 +268,10 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     let folder;
     try { [folder] = await api.bookmarks.get(folderId); }
     catch (error) {
-      // Firefox's missing-GUID error (and the strict fake's equivalent) is
-      // deletion evidence. Permission/backend errors are not.
-      if (/^(?:Bookmark not found[.!]?$|Invalid bookmark ID:)/i.test(error?.message ?? String(error))) {
+      if (error?.foxyMovedOut || (isBookmarkNotFound(error) && wasRemoved(state, folderId, now()))) {
         await folderRemoved(folderId);
+      } else if (isBookmarkNotFound(error)) {
+        lostIdentity(folderId);
       } else {
         warn(error);
         if (retryOrder) defer(folderId);
@@ -279,7 +281,42 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     if (!folder) return;
     const group = pinned ? null : await attempt(() => api.tabGroups.get(groupId));
     if (!pinned && !group) return; // A missing group at startup is not deletion.
-    const nodes = await bookmarks(folderId), ids = new Set(nodes.map(n => n.id));
+    let nodes;
+    try { nodes = await bookmarks(folderId); }
+    catch (error) {
+      if (isBookmarkNotFound(error) && !wasRemoved(state, folderId, now())) lostIdentity(folderId);
+      else throw error;
+      return;
+    }
+    const ids = new Set(nodes.map(n => n.id)), departures = [], lost = [];
+    for (const [tabId, entry] of tabsInFolder(state, folderId)) {
+      if (ids.has(entry.bookmarkId)) continue;
+      if (wasRemoved(state, entry.bookmarkId, now())) { departures.push([tabId, entry]); continue; }
+      // A surviving GUID in another parent is movement, not lost identity.
+      let node;
+      try { [node] = await api.bookmarks.get(entry.bookmarkId); }
+      catch (error) { if (!isBookmarkNotFound(error)) throw error; }
+      if (node && node.parentId !== folderId) { departures.push([tabId, entry]); continue; }
+      let tab;
+      try { tab = await api.tabs.get(tabId); }
+      catch (error) { console.debug("Foxy: identity tab unavailable", error); }
+      const pending = state.pendingRemovals[tabId]?.bookmarkId === entry.bookmarkId;
+      lost.push({ tabId, url: tab?.url ?? (pending ? entry.url : undefined) });
+    }
+    const available = nodes.filter(node => !mapped(node.id));
+    const matches = matchTabs(lost, available);
+    for (const { tabId, bookmarkId } of matches.pairs) {
+      const entry = state.tabs[tabId], old = entry.bookmarkId;
+      entry.bookmarkId = bookmarkId;
+      if (state.pendingRemovals[tabId]?.bookmarkId === old) state.pendingRemovals[tabId].bookmarkId = bookmarkId;
+      if (state.expectedMoves?.[old]) {
+        state.expectedMoves[bookmarkId] = state.expectedMoves[old]; delete state.expectedMoves[old];
+      }
+    }
+    for (const tabId of matches.unmatchedTabs) {
+      console.debug("Foxy: lost bookmark identity, leaving tab untouched", tabId);
+      forgetTab(tabId);
+    }
     const unopenable = [...new Set(nodes.filter(node => !isOpenableUrl(node.url)).map(node => node.url))];
     if (unopenable.length) state.cantReopen[folderId] = unopenable;
     else delete state.cantReopen[folderId];
@@ -297,9 +334,7 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
         }
       }
     }
-    for (const [tabId, entry] of tabsInFolder(state, folderId)) {
-      if (!ids.has(entry.bookmarkId)) await attempt(() => departure(tabId, entry));
-    }
+    for (const [tabId, entry] of departures) await attempt(() => departure(tabId, entry));
     for (const node of nodes) {
       await attempt(async () => {
         let pair = mapped(node.id);
@@ -347,13 +382,24 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
 
   async function reconcileAll() {
     const state = getState();
+    if (state.rootId) {
+      try { await api.bookmarks.get(state.rootId); }
+      catch (error) {
+        if (isBookmarkNotFound(error) && !wasRemoved(state, state.rootId, now())) lostIdentity(state.rootId);
+        else warn(error);
+        return;
+      }
+    }
     const folders = new Set([state.pinnedId, ...Object.values(state.groups).map(entry => entry.folderId)]);
     for (const id of folders) if (id) await attempt(() => reconcileFolder(id));
   }
 
   async function folderRemoved(folderId) {
     const state = getState();
-    if (folderId === state.rootId) { Object.assign(state, emptyState()); return; }
+    if (folderId === state.rootId) {
+      const removedIds = state.removedIds;
+      Object.assign(state, emptyState(), { removedIds }); return;
+    }
     const groupId = groupOfFolder(state, folderId);
     let blocked = false;
     if (groupId !== null) {

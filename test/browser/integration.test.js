@@ -122,6 +122,7 @@ test("integration: delete requires confirmation, survives refresh, and removes t
   assert.equal(row(root).querySelector(".saved-delete").textContent, "DELETE?");
   await control.refresh(); await drain(ff, sync);
   assert.equal(row(root).querySelector(".saved-delete").textContent, "DELETE?");
+  await new Promise(resolve => setTimeout(resolve, 410));
   row(root).querySelector(".saved-delete").click();
   await drain(ff, sync);
   assert.equal(row(root), undefined);
@@ -129,6 +130,31 @@ test("integration: delete requires confirmation, survives refresh, and removes t
   assert.deepEqual(messages(ff, "foxy:delete-saved")[0].args[0], { type: "foxy:delete-saved", folderId: "dev" });
   assert.equal(control.ui.confirmFolderId, null); assert.equal(control.ui.busy.size, 0);
   assert.ok(await ff.browser.tabs.get(99));
+});
+
+test("final r1: double-click SAVED delete arms without deleting, deliberate later click deletes", async () => {
+  const { ff, sync, root, control } = await setup();
+  const click = detail => row(root).querySelector(".saved-delete").dispatchEvent(new MouseEvent("click", {
+    bubbles: true, cancelable: true, detail,
+  }));
+  click(1);
+  await new Promise(resolve => setTimeout(resolve, 50));
+  click(2);
+  await drain(ff, sync);
+  assert.equal((await ff.browser.bookmarks.get("dev"))[0].title, "🔴 Dev");
+  assert.equal(messages(ff, "foxy:delete-saved").length, 0);
+  assert.equal(row(root).querySelector(".saved-delete").textContent, "DELETE?");
+  // A detail=1 rapid second activation is also blocked, across DOM refresh.
+  await control.refresh(); await drain(ff, sync);
+  click(1);
+  assert.equal(messages(ff, "foxy:delete-saved").length, 0);
+  await new Promise(resolve => setTimeout(resolve, 410));
+  click(2); // Even a late multi-click must never confirm.
+  assert.equal(messages(ff, "foxy:delete-saved").length, 0);
+  click(1);
+  await drain(ff, sync);
+  await assert.rejects(ff.browser.bookmarks.get("dev"), /Invalid bookmark ID/);
+  assert.equal(messages(ff, "foxy:delete-saved").length, 1);
 });
 
 for (const departure of ["mouseleave", "blur", "Escape"]) {

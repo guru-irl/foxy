@@ -156,7 +156,7 @@ everywhere. Only group titles are slanted.
 | × on a tab row | Closes the tab (a normal Recently Closed entry). |
 | × on a group header | Closes all its tabs on this device. The group stays saved and appears in SAVED. |
 | Click a SAVED entry | Opens that group in this window: tabs created unloaded, grouped, named and coloured. |
-| × on a SAVED entry | Turns into "DELETE?"; a second click deletes the group everywhere (removes its bookmarks folder). Moving away cancels. |
+| × on a SAVED entry | Turns into "DELETE?"; a deliberate single click after 400ms deletes the group everywhere (removes its bookmarks folder). Double-clicks are ignored. Moving away cancels. |
 
 - Dragging and editing never close the page; only clicking a tab can.
 - After every move the page re-reads the real state. If a tab ended up in the
@@ -225,6 +225,17 @@ Other Bookmarks
   otherwise it is created. The contents of any other Foxy folder (and of the
   stored one, if it's no longer the chosen root) are moved into it; nothing
   is deleted.
+
+Firefox Sync can dedupe never-uploaded local bookmarks and folders by silently
+changing their GUIDs, without a WebExtension event. Disappearance without
+`bookmarks.onRemoved` is lost identity, never deletion: missing mapped bookmarks
+are rekeyed by URL to unused children, keeping their tabs; an unmatched mapping
+is forgotten with its tab untouched. Missing stored folder GUIDs or outbound
+GUID failures request one debounced, queued rebuild using the startup matcher,
+retaining this device's open/missing intent and live deferred bookkeeping.
+Explicit removals (including known descendants) are recorded for ten minutes
+before reconciliation. Folder-removal cleanup requires removal or move-out
+of Foxy evidence; confirmed bookmark moves retain their transfer semantics.
 
 Merge leftovers go into `Foxy merge leftovers`, an unmanaged folder directly
 under Other Bookmarks, created on first need and found by exact title. Surplus
