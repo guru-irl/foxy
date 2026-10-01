@@ -126,7 +126,7 @@ test("integration: delete requires confirmation, survives refresh, and removes t
   row(root).querySelector(".saved-delete").click();
   await drain(ff, sync);
   assert.equal(row(root), undefined);
-  await assert.rejects(ff.browser.bookmarks.get("dev"), /Invalid bookmark ID/);
+  await assert.rejects(ff.browser.bookmarks.get("dev"), /Bookmark not found/);
   assert.deepEqual(messages(ff, "foxy:delete-saved")[0].args[0], { type: "foxy:delete-saved", folderId: "dev" });
   assert.equal(control.ui.confirmFolderId, null); assert.equal(control.ui.busy.size, 0);
   assert.ok(await ff.browser.tabs.get(99));
@@ -153,7 +153,7 @@ test("final r1: double-click SAVED delete arms without deleting, deliberate late
   assert.equal(messages(ff, "foxy:delete-saved").length, 0);
   click(1);
   await drain(ff, sync);
-  await assert.rejects(ff.browser.bookmarks.get("dev"), /Invalid bookmark ID/);
+  await assert.rejects(ff.browser.bookmarks.get("dev"), /Bookmark not found/);
   assert.equal(messages(ff, "foxy:delete-saved").length, 1);
 });
 

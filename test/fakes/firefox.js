@@ -492,14 +492,14 @@ export function createFirefox(setup = {}) {
     return { cursor: bookmarkJournal.length, nodes: [...changed.values()].map(entry =>
       entry.deleted ? entry : copy(nodes.find(node => node.id === entry.id) ?? { id: entry.id, deleted: true })) };
   }
-  function nodeById(id) {
+  function nodeById(id, message = "Bookmark not found") {
     const node = nodes.find(n => n.id === id);
-    if (!node) throw new Error(`Invalid bookmark ID: ${id}`);
+    if (!node) throw new Error(message);
     return node;
   }
   function children(id) { return nodes.filter(n => n.parentId === id).sort((a, b) => a.index - b.index); }
-  function folderById(id) {
-    const node = nodeById(id);
+  function folderById(id, message) {
+    const node = nodeById(id, message);
     if (node.type !== "folder") throw new Error("Parent must be a folder");
     return node;
   }
@@ -514,7 +514,7 @@ export function createFirefox(setup = {}) {
   function insertNode(props, notify = true) {
     const parentId = props.parentId ?? "unfiled_____";
     if (parentId === ROOTS[0]) throw new Error("The bookmark root cannot be modified");
-    folderById(parentId);
+    folderById(parentId, "parentGuid must be valid");
     if (props.url != null) checkURL(props.url, true);
     const siblings = children(parentId), index = Math.max(0, Math.min(props.index ?? siblings.length, siblings.length));
     for (const n of siblings.slice(index)) { n.index++; recordBookmark(n); }
@@ -541,13 +541,19 @@ export function createFirefox(setup = {}) {
   seedBookmarks(setup.bookmarks ?? [], "unfiled_____");
   for (const node of nodes) if (!ROOTS.includes(node.id)) recordBookmark(node);
   api("bookmarks", "getTree", () => [treeNode(nodeById(ROOTS[0]))]);
-  api("bookmarks", "getSubTree", id => [treeNode(nodeById(id))]);
-  api("bookmarks", "getChildren", id => { folderById(id); return children(id); });
-  api("bookmarks", "get", ids => asArray(ids).map(nodeById));
+  api("bookmarks", "getSubTree", id => {
+    if (!nodes.some(node => node.id === id)) throw new TypeError('can\'t access property "guid", node is null');
+    return [treeNode(nodeById(id))];
+  });
+  api("bookmarks", "getChildren", id => {
+    if (!nodes.some(node => node.id === id)) throw new TypeError('can\'t access property "children", root is null');
+    folderById(id); return children(id);
+  });
+  api("bookmarks", "get", ids => asArray(ids).map(id => nodeById(id)));
   api("bookmarks", "search", q => nodes.filter(n => (q.title == null || n.title === q.title) && (q.url == null || n.url === q.url)));
   api("bookmarks", "create", insertNode);
   api("bookmarks", "update", (id, props) => {
-    const node = nodeById(id);
+    const node = nodeById(id, "No bookmarks found for the provided GUID");
     if (props.url != null) {
       checkURL(props.url, true);
       if (node.type !== "bookmark") throw new Error("Cannot set a folder URL");
@@ -561,14 +567,14 @@ export function createFirefox(setup = {}) {
     }
     return node;
   });
-  function mutableNode(id) {
+  function mutableNode(id, message = "No bookmarks found for the provided GUID") {
     if (ROOTS.includes(id)) throw new Error("Cannot modify a built-in root");
-    return nodeById(id);
+    return nodeById(id, message);
   }
   api("bookmarks", "move", (id, props) => {
     const node = mutableNode(id), oldParentId = node.parentId, oldIndex = node.index;
     const parentId = props.parentId ?? oldParentId;
-    let ancestor = folderById(parentId);
+    let ancestor = folderById(parentId, "No bookmarks found for the provided parentGuid");
     while (ancestor) {
       if (ancestor.id === id) throw new Error("Cannot move a folder into itself");
       ancestor = ancestor.parentId ? nodeById(ancestor.parentId) : undefined;
@@ -593,11 +599,11 @@ export function createFirefox(setup = {}) {
     if (notify) queue("bookmarks.onRemoved", node.id, info);
   }
   api("bookmarks", "remove", id => {
-    const node = mutableNode(id);
+    const node = mutableNode(id, "No bookmarks found for the provided GUID.");
     if (children(id).length) throw new Error("Cannot remove a non-empty folder");
     removeNode(node);
   });
-  api("bookmarks", "removeTree", id => removeNode(mutableNode(id)));
+  api("bookmarks", "removeTree", id => removeNode(mutableNode(id, "No bookmarks found for the provided GUID.")));
 
   function markUploaded(cursor) {
     for (const node of bookmarkJournal.slice(0, cursor)) unuploaded.delete(node.id);

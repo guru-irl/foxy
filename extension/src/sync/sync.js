@@ -1,6 +1,6 @@
 import { handleMessage } from "../close.js";
 import { isOpenableUrl, isSyncableUrl, encodeFolderTitle, ROOT_TITLE, isPinnedFolderTitle } from "./codec.js";
-import { createQueue, loadState, saveState, groupOfFolder, isBookmarkNotFound,
+import { createQueue, loadState, saveState, groupOfFolder, probeMissingBookmark,
   recordRemoved, pruneRemovedIds, wasRemoved } from "./state.js";
 import { ensurePinnedFolder, readTree, mergeRoots, OTHER_BOOKMARKS } from "./tree.js";
 import { createOutbound } from "./outbound.js";
@@ -87,7 +87,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
         const nodes = await api.bookmarks.get(ids);
         for (const node of nodes) {
           if (node.type === "folder" && groupOfFolder(state, node.id) !== null && node.parentId !== state.rootId) {
-            if (!await getNode(state.rootId)) throw new Error(`Invalid bookmark ID: ${state.rootId}`);
+            if (!await getNode(state.rootId)) return []; // Root identity recovery owns this case.
             // Safety-blocked move-outs retain mappings, not import permission.
             const error = new Error(`Foxy folder moved outside root: ${node.id}`);
             error.foxyMovedOut = true;
@@ -159,8 +159,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       if (pruneRemovedIds(state, now())) await save();
       try { return { value: await fn() }; }
       catch (error) {
-        if (!isBookmarkNotFound(error)) throw error;
-        scheduleRebuild(state.rootId);
+        if (!await missingIdentity(state.rootId)) throw error;
         return { error };
       }
     });
@@ -170,28 +169,44 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     if (result.error) return queue.run(fn);
     return result.value;
   }
+  async function missingIdentity(id) {
+    if (!await probeMissingBookmark(api, id)) return false;
+    if (!wasRemoved(state, id, now())) scheduleRebuild(id);
+    return true;
+  }
   async function getNode(id) {
-    try { return (await api.bookmarks.get(id))[0]; }
-    catch (error) {
-      if (isBookmarkNotFound(error)) {
-        if (!wasRemoved(state, id, now())) scheduleRebuild(id);
-        return null;
-      }
+    try {
+      const [node] = await api.bookmarks.get(id);
+      if (!node && !wasRemoved(state, id, now())) scheduleRebuild(id);
+      return node ?? null;
+    } catch (error) {
+      if (await missingIdentity(id)) return null;
       throw error;
     }
   }
   async function managedNode(id) {
     if (id === state.rootId) return getNode(id);
-    const [root] = await api.bookmarks.getSubTree(state.rootId);
-    return root.children.flatMap(node => [node, ...(node.children ?? [])]).find(node => node.id === id) ?? null;
+    try {
+      const [root] = await api.bookmarks.getSubTree(state.rootId);
+      return root.children.flatMap(node => [node, ...(node.children ?? [])]).find(node => node.id === id) ?? null;
+    } catch (error) {
+      if (await missingIdentity(state.rootId)) return null;
+      throw error;
+    }
   }
   async function relevant(id, parentId) {
     if (id === state.rootId || id === state.pinnedId || groupOfFolder(state, id) !== null) return true;
     if (parentId === state.rootId) return true;
     // Inspect only managed parents. Unrelated folders (including the archive)
     // must not be read merely because a bookmark event mentions them.
-    return parentId && (await api.bookmarks.getChildren(state.rootId))
-      .some(node => node.id === parentId && node.type === "folder");
+    if (!parentId) return false;
+    try {
+      return (await api.bookmarks.getChildren(state.rootId))
+        .some(node => node.id === parentId && node.type === "folder");
+    } catch (error) {
+      if (await missingIdentity(state.rootId)) return false;
+      throw error;
+    }
   }
   async function folderRemoved(id) {
     const root = id === state.rootId, pinned = id === state.pinnedId;

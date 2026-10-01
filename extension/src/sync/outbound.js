@@ -1,5 +1,5 @@
 import { encodeFolderTitle, decodeFolderTitle, isSyncableUrl } from "./codec.js";
-import { folderOfGroup, groupOfFolder, isBookmarkNotFound, wasRemoved } from "./state.js";
+import { folderOfGroup, groupOfFolder, probeMissingBookmark, wasRemoved } from "./state.js";
 
 /**
  * Call every method through the controller's serial queue, including flush().
@@ -15,7 +15,7 @@ export function createOutbound({
   const warn = error => console.warn("Foxy: outbound sync failed", error);
   const guarded = fn => async (...args) => {
     try { await fn(...args); } catch (error) {
-      if (isBookmarkNotFound(error)) console.debug("Foxy: outbound identity unavailable", error);
+      if (error?.foxyMissingId) console.debug("Foxy: outbound identity unavailable", error);
       else warn(error);
     }
   };
@@ -28,9 +28,12 @@ export function createOutbound({
   async function bookmarkCall(ids, fn) {
     try { return await fn(); }
     catch (error) {
-      if (isBookmarkNotFound(error)) {
-        const id = ids.find(id => error.message?.endsWith(`: ${id}`)) ?? ids[0];
-        if (id && !wasRemoved(getState(), id, now())) lostIdentity(id);
+      for (const id of ids) {
+        if (!await probeMissingBookmark(api, id)) continue;
+        if (!wasRemoved(getState(), id, now())) lostIdentity(id);
+        const missing = new Error("Foxy: outbound identity unavailable", { cause: error });
+        missing.foxyMissingId = id;
+        throw missing;
       }
       throw error;
     }
@@ -38,7 +41,7 @@ export function createOutbound({
   async function readBookmark(id) {
     try { return await bookmarkCall([id], () => api.bookmarks.get(id)); }
     catch (error) {
-      if (isBookmarkNotFound(error)) {
+      if (error?.foxyMissingId) {
         if (wasRemoved(getState(), id, now())) return null;
         throw error; // Abort neighbour/create paths too.
       }
@@ -124,7 +127,7 @@ export function createOutbound({
       let created;
       try { created = await bookmarkCall([folderId], () => api.bookmarks.create({ parentId: folderId, index, url: tab.url, title })); }
       catch (error) {
-        if (isBookmarkNotFound(error)) throw error;
+        if (error?.foxyMissingId) throw error;
         state.failedCreates[tabId] = tab.url;
         warn(error);
         await save();
@@ -238,7 +241,7 @@ export function createOutbound({
           && await read(() => api.tabGroups.get(groupId)));
         if (live) {
           const nodes = await readBookmark(entry.bookmarkId);
-          if (nodes?.[0]) await api.bookmarks.remove(entry.bookmarkId);
+          if (nodes?.[0]) await bookmarkCall([entry.bookmarkId], () => api.bookmarks.remove(entry.bookmarkId));
         }
         delete state.tabs[tabId];
         delete state.pendingRemovals[tabId];

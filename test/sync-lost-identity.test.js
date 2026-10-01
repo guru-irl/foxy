@@ -38,7 +38,7 @@ for (const deliveryOrder of ["forward", "reverse", "shuffle"]) test(`silent dedu
   b.calls.length = 0;
   await server.syncDevice(b);
   assert.equal(events, 0, "all equal-content GUID changes must be silent to the extension");
-  await assert.rejects(b.browser.bookmarks.get(original.rootId), /Invalid bookmark ID/);
+  await assert.rejects(b.browser.bookmarks.get(original.rootId), /Bookmark not found/);
   const burst = await Promise.all([b.sync.onMessage({ type: "foxy:reconcile" }),
     ...[2, 3, 4].map(id => b.sync.handlers["tabs.onUpdated"](id))]);
   assert.deepEqual(burst[0], { ok: true });
@@ -104,7 +104,7 @@ for (const kind of ["root", "pinned", "group"]) test(`not-found ${kind} requests
   const id = kind === "root" ? state.rootId : kind === "pinned" ? state.pinnedId : state.groups[11].folderId;
   const get = ff.browser.bookmarks.get;
   t.mock.method(ff.browser.bookmarks, "get", async key => {
-    if (key === id) throw new Error(`Invalid bookmark ID: ${id}`);
+    if (key === id) throw new Error("Bookmark not found");
     return get(key);
   });
   ff.calls.length = 0;
@@ -121,9 +121,17 @@ for (const method of ["get", "update", "move"]) test(`outbound stored bookmark $
   const id = state.tabs[4].bookmarkId;
   const original = ff.browser.bookmarks[method];
   t.mock.method(ff.browser.bookmarks, method, async (...args) => {
-    if (args[0] === id) throw new Error(`Invalid bookmark ID: ${id}`);
+    if (args[0] === id) { originalFailure = true; throw new Error(method === "get" ? "Bookmark not found" : "operation rejected"); }
     return original(...args);
   });
+  if (method !== "get") {
+    const get = ff.browser.bookmarks.get;
+    t.mock.method(ff.browser.bookmarks, "get", async key => {
+      if (key === id && originalFailure) throw new Error("Bookmark not found");
+      return get(key);
+    });
+  }
+  let originalFailure = false;
   if (method === "update") await ff.browser.tabs.update(4, { url: "https://local/" });
   if (method === "move") await ff.browser.tabs.move(4, { index: 2 });
   ff.calls.length = 0;
@@ -235,7 +243,7 @@ test("not-found move of an explicitly removed bookmark does not request identity
   state.removedIds[id] = 1000;
   const outbound = createOutbound({ api: ff.browser, getState: () => state, save: () => saveState(ff.browser, state),
     now: () => 1000, lostIdentity: id => requests.push(id) });
-  t.mock.method(ff.browser.bookmarks, "move", async () => { throw new Error(`Invalid bookmark ID: ${id}`); });
+  t.mock.method(ff.browser.bookmarks, "move", async () => { throw new Error("Bookmark not found"); });
   await ff.browser.tabs.move(4, { index: 2 });
   await outbound.syncTab(4);
   assert.deepEqual(requests, []);

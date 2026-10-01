@@ -27,20 +27,39 @@ export async function loadState(api) {
   }
 }
 
-export const isBookmarkNotFound = error => /^(?:Bookmark not found[.!]?$|Invalid bookmark ID:)/i
-  .test(error?.message ?? String(error));
+export const isBookmarkNotFound = error => error?.message === "Bookmark not found";
+
+/** Tree/mutation errors vary by method. Only a get(id) probe proves absence. */
+export async function probeMissingBookmark(api, id) {
+  if (!id) return false;
+  try { return (await api.bookmarks.get(id)).length === 0; }
+  catch (error) { return isBookmarkNotFound(error); }
+}
 
 export function pruneRemovedIds(state, at = Date.now()) {
+  const referenced = new Set([state.rootId, state.pinnedId,
+    ...state.openFolders, ...state.missing, ...state.deferred]);
+  for (const entry of [...Object.values(state.tabs), ...Object.values(state.pendingRemovals)]) {
+    referenced.add(entry.bookmarkId);
+    referenced.add(entry.folderId);
+  }
+  // Group identities also own their pending-order and return/rebind work.
+  for (const entry of Object.values(state.groups)) referenced.add(entry.folderId);
+  for (const [id, moves] of Object.entries(state.expectedMoves ?? {})) {
+    referenced.add(id);
+    if (Array.isArray(moves)) for (const move of moves) referenced.add(move?.parentId);
+  }
   let changed = false;
   for (const [id, time] of Object.entries(state.removedIds ?? {})) {
-    if (time > at || at - time > 600000) { delete state.removedIds[id]; changed = true; }
+    if (at - time > 600000 && !referenced.has(id)) { delete state.removedIds[id]; changed = true; }
   }
   return changed;
 }
 
 export function wasRemoved(state, id, at = Date.now()) {
   const time = state.removedIds?.[id];
-  return Number.isFinite(time) && time <= at && at - time <= 600000;
+  // TTL applies only when pruning unreferenced evidence, not during a retry.
+  return Number.isFinite(time) && time <= at;
 }
 
 /** Called on onRemoved, before queued reconciliation can discard the mappings. */

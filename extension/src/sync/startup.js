@@ -1,7 +1,7 @@
 import { encodeFolderTitle, isSyncableUrl } from "./codec.js";
 import { mergeRoots, readTree } from "./tree.js";
 import { matchGroups, matchTabs } from "./match.js";
-import { isBookmarkNotFound } from "./state.js";
+import { probeMissingBookmark } from "./state.js";
 
 /** Temporary listeners observe restore activity, independently of the serial queue. */
 export function settle(api, { settleMs = 3000, maxWaitMs = 20000, now = Date.now } = {}) {
@@ -35,8 +35,11 @@ export async function rebuild({ api, state, outbound, inbound, lostIdentity = fa
   let knownRootId = state.rootId;
   const previousOpen = [...new Set([...state.openFolders, ...state.missing])];
   if (lostIdentity && knownRootId) {
-    try { await api.bookmarks.get(knownRootId); }
-    catch (error) { if (isBookmarkNotFound(error)) knownRootId = null; else throw error; }
+    try { if (!(await api.bookmarks.get(knownRootId)).length) knownRootId = null; }
+    catch (error) {
+      if (await probeMissingBookmark(api, knownRootId)) knownRootId = null;
+      else throw error;
+    }
   }
   // Browser-session ids can be reused. Clear before the first outbound operation.
   state.groups = {};
