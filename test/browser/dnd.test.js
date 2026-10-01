@@ -86,6 +86,7 @@ async function controller(set = setup()) {
   const { createController } = await import("../../extension/src/main.js");
   const control = createController(root, ff.browser);
   await control.refresh();
+  await flush(ff); // Drain the one-time reconcile completion before interaction assertions.
   return { root, ff, control };
 }
 
@@ -434,7 +435,7 @@ test("DOM drop holds the action after early dragend and does not close the page"
   await flush(ff);
   assert.equal(rebuilds, 1);
   assert.ok(root.querySelector('.rows[data-group-id="101"] [data-tab-id="21"]'));
-  assert.equal(ff.calls.some(call => call.api === "runtime.sendMessage" || call.api === "tabs.remove"), false);
+  assert.equal(ff.calls.some(call => (call.api === "runtime.sendMessage" && call.args[0].type === "blank-and-close") || call.api === "tabs.remove"), false);
 });
 for (const [id, next] of [[101, 102], [201, 102]]) {
   test(`vanished focused group ${id} falls back to nearest column ${next}`, async () => {
@@ -515,7 +516,7 @@ for (const [zone, one, two] of [
     await flush(ff);
     assert.equal(ff.layout(1), one); assert.equal(ff.layout(2), two);
     assert.deepEqual(ff.errors, []);
-    assert.equal(ff.calls.some(call => call.api === "runtime.sendMessage" || call.api === "tabs.remove"), false);
+    assert.equal(ff.calls.some(call => (call.api === "runtime.sendMessage" && call.args[0].type === "blank-and-close") || call.api === "tabs.remove"), false);
   });
 }
 test("a stale DOM tab drop warns and re-reads after dragend without closing the page", async () => {
@@ -533,7 +534,7 @@ test("a stale DOM tab drop warns and re-reads after dragend without closing the 
     await flush(ff);
     assert.equal(tab(root), null);
     assert.ok(warnings.length > 0); assert.ok(warnings.every(args => args[0].startsWith("Foxy:")));
-    assert.equal(ff.calls.some(call => call.api === "runtime.sendMessage" || call.api === "tabs.remove"), false);
+    assert.equal(ff.calls.some(call => (call.api === "runtime.sendMessage" && call.args[0].type === "blank-and-close") || call.api === "tabs.remove"), false);
     assert.ok(await ff.browser.tabs.get(99));
   } finally { console.warn = warn; dispatchDrag("dragend", source, { dataTransfer: dt }); }
 });
@@ -553,3 +554,27 @@ test("a scrolled row list places its marker in scroll-content coordinates", asyn
     assert.deepEqual(calls.tabs, [[15, { zone: "group", groupId: 101, slot: 8, tabId: 15 }]]);
   } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
 });
+
+// SAVED headings look like ordinary drop headings but are never drop zones.
+for (const kind of ["tab", "group"]) {
+  test(`${kind} drag over SAVED has no feedback and drop calls no handler`, async () => {
+    const { root, board, calls, handlers, renderBoard } = await draw();
+    renderBoard(root, { ...board, saved: [{ folderId: "f1", title: "Saved", color: "grey", count: 1, cantReopen: [] }] }, {}, handlers);
+    const source = kind === "tab" ? tab(root) : header(root);
+    const dt = start(source);
+    try {
+      for (const selector of [".saved", ".saved .column-title", ".saved .rows", ".saved-row .row-open"]) {
+        const target = root.querySelector(selector);
+        const valid = root.querySelector(kind === "tab" ? '.rows[data-zone="pinned"]' : ".strip");
+        // The start edge is not adjacent to the remote source group's slot.
+        dispatchDrag("dragover", valid, { dataTransfer: dt, ...point(valid, 0.5, 0) });
+        assert.ok(root.querySelector(".drop-line"));
+        const event = dispatchDrag("dragover", target, { dataTransfer: dt, ...point(target) });
+        assert.equal(event.defaultPrevented, false); assert.equal(dt.dropEffect, "none");
+        assert.equal(root.querySelector(".drop-line, .drop-target"), null);
+        dispatchDrag("drop", target, { dataTransfer: dt, ...point(target) });
+      }
+      assert.deepEqual(calls.tabs, []); assert.deepEqual(calls.groups, []);
+    } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
+  });
+}

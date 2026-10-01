@@ -109,7 +109,12 @@ function updateBanner(banner, ui, handlers) {
   banner.querySelector(".banner-dismiss").onclick = () => {
     if (!ui.busy?.has("banner")) handlers.onDismissMissing?.();
   };
-  setBusy(banner, ui.busy?.has("banner"));
+  const busy = Boolean(ui.busy?.has("banner"));
+  banner.classList.toggle("busy", busy);
+  for (const button of banner.querySelectorAll("button")) {
+    button.setAttribute("aria-busy", String(busy));
+    button.setAttribute("aria-disabled", String(busy));
+  }
 }
 
 function savedColumn(root, saved, ui, handlers) {
@@ -133,7 +138,7 @@ function savedRow(root, group, ui, handlers) {
   const title = unnamed ? "Unnamed" : group.title;
   row.title = title;
   const blockedLabel = group.cantReopen.length ? `, ${group.cantReopen.length} can't reopen` : "";
-  const open = button("row-open", `Open saved group: ${title}, ${group.count} bookmarks${blockedLabel}`);
+  const open = button("row-open", `Open saved group: ${title}, ${group.count} ${group.count === 1 ? "bookmark" : "bookmarks"}${blockedLabel}`);
   const dot = el("span", "dot");
   dot.dataset.palette = colorKey(group.color);
   const label = el("span", "row-label");

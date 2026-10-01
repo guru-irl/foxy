@@ -283,7 +283,7 @@ test("saved and missing normalise malformed entries and drop absent folder ident
   const expected = [
     { folderId: "partial", title: "", color: "grey", count: 0, cantReopen: [] },
     { folderId: "valid", title: "  Work  ", color: "red", count: 4, cantReopen: ["about:config"] },
-    { folderId: "nonfinite", title: "", count: 0, cantReopen: [] },
+    { folderId: "nonfinite", title: "", color: "grey", count: 0, cantReopen: [] },
   ];
   assert.deepEqual(board.saved, expected); assert.deepEqual(board.missing, expected);
   assert.deepEqual(input, before);

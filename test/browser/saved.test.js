@@ -76,6 +76,7 @@ test("malformed saved replies render safe defaults and omit entries without fold
   assert.equal(row(root, "partial").querySelector(".row-label").textContent, "UNNAMED");
   assert.equal(row(root, "partial").querySelector(".saved-count").textContent, "0");
   assert.equal(row(root, "partial").querySelector(".cant-reopen"), null);
+  assert.equal(row(root, "partial").dataset.color, "grey");
   assert.equal(page.querySelector(".banner-text").textContent, "1 GROUP DIDN'T COME BACK");
 });
 
@@ -337,4 +338,17 @@ test("banner is updated once and removed when missing becomes empty", async () =
   assert.equal(page.querySelectorAll(".banner").length, 1);
   renderBoard(root, { ...board, missing: [] }, {}, {});
   assert.equal(page.querySelector(".banner"), null);
+});
+
+
+test("single bookmark uses a singular accessible label", async () => {
+  const { root } = await draw({ saved: [{ folderId: "f1", title: "One", color: "grey", count: 1 }] });
+  assert.equal(row(root).querySelector(".row-open").getAttribute("aria-label"), "Open saved group: One, 1 bookmark");
+});
+
+test("banner actions expose busy state without suppressing the status live region", async () => {
+  const { page } = await draw({ missing: entries(), ui: { busy: new Set(["banner"]) } });
+  const banner = page.querySelector(".banner");
+  assert.equal(banner.hasAttribute("aria-busy"), false);
+  for (const button of banner.querySelectorAll("button")) assert.equal(button.getAttribute("aria-busy"), "true");
 });

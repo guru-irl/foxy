@@ -40,6 +40,7 @@ async function controller(set = setup()) {
   const { createController } = await import("../../extension/src/main.js");
   const control = createController(node, ff.browser);
   await control.refresh();
+  await flush(ff); // Drain the one-time reconcile completion before interaction assertions.
   return { ff, node, control };
 }
 async function flush(ff) { await ff.settle(); await nextFrame(); await nextFrame(); }
@@ -448,7 +449,7 @@ test("row close removes only its tab without activation or closing the page", as
   const { ff, node } = await controller(); ff.calls.length = 0;
   node.querySelector('[data-tab-id="12"] .row-close').click(); await flush(ff);
   assert.equal(ff.layout(1), "P11 | [101: 13] [102: 14] 15 99");
-  assert.equal(ff.calls.some(call => call.api === "tabs.update" || call.api === "runtime.sendMessage"), false);
+  assert.equal(ff.calls.some(call => call.api === "tabs.update" || (call.api === "runtime.sendMessage" && call.args[0].type === "blank-and-close")), false);
   assert.equal((await ff.browser.tabs.get(99)).active, true);
 });
 test("header close removes group members but ungroups and preserves the page", async () => {

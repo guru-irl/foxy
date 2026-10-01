@@ -56,6 +56,7 @@ function normaliseSaved(entries) {
     .map(entry => ({
       ...entry,
       title: typeof entry.title === "string" ? entry.title : "",
+      color: entry.color ?? "grey",
       count: Number.isFinite(entry.count) ? entry.count : 0,
       cantReopen: Array.isArray(entry.cantReopen) ? entry.cantReopen.filter(url => typeof url === "string") : [],
     }));
