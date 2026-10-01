@@ -17,7 +17,6 @@ api.runtime.onMessage.addListener((message, sender) => {
     return sync.onMessage(message, sender).catch(() => ({ ok: false }));
   }
   // Preserve the close helper's sender validation and fire-and-forget response.
-  sync.start().then(() => handleMessage(api, message, sender))
-    .catch(error => console.warn("Foxy: close message failed", error));
+  handleMessage(api, message, sender)?.catch(error => console.warn("Foxy: close message failed", error));
   return undefined;
 });

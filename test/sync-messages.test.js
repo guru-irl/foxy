@@ -283,7 +283,7 @@ test("background registers every wake listener at module evaluation and routes s
   await sync.idle();
 });
 
-test("restore-all clears the banner after trying a folder with no openable bookmarks, without deleting it", async () => {
+test("restore-all retains missing folders with no openable bookmarks, without deleting them", async () => {
   const { ff, sync } = await missingSetup();
   const before = await sync.onMessage({ type: "foxy:saved" });
   const folderId = before.missing[1].folderId;
@@ -293,7 +293,7 @@ test("restore-all clears the banner after trying a folder with no openable bookm
   assert.deepEqual(await sync.onMessage({ type: "foxy:restore-all", windowId: 1 }), { ok: false });
   await drain(ff, sync);
   const after = await sync.onMessage({ type: "foxy:saved" });
-  assert.deepEqual(after.missing, []);
+  assert.deepEqual(after.missing, [before.missing[1]]);
   assert.equal(after.saved[0].folderId, folderId);
   assert.deepEqual(after.saved[0].cantReopen, ["file:///cannot-reopen"]);
   assert.equal((await ff.browser.bookmarks.getChildren(folderId)).length, 1);

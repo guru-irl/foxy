@@ -8,7 +8,7 @@ const ROOTS = ["root________", "menu________", "toolbar_____", "unfiled_____", "
 export function createFirefox(setup = {}) {
   const calls = [], errors = [], pending = [], events = new Map(), messages = new Set();
   const wins = (setup.windows ?? [{ id: 1, focused: true }]).map(w => ({
-    id: w.id, focused: w.focused ?? false, type: "normal", incognito: false, tabs: [],
+    id: w.id, focused: w.focused ?? false, type: w.type ?? "normal", incognito: w.incognito ?? false, tabs: [],
   }));
   const groups = (setup.groups ?? []).map(g => ({
     id: g.id, windowId: g.windowId, title: g.title ?? "", color: g.color ?? "blue", collapsed: g.collapsed ?? false,
@@ -104,10 +104,10 @@ export function createFirefox(setup = {}) {
   function tabObject(t) {
     return { id: t.id, windowId: t.windowId, index: t.index, pinned: t.pinned, groupId: t.groupId,
       url: t.url, title: t.title, favIconUrl: t.favIconUrl, active: t.active, discarded: t.discarded,
-      hidden: false, status: "complete", lastAccessed: t.lastAccessed, incognito: false };
+      hidden: false, status: "complete", lastAccessed: t.lastAccessed, incognito: windowById(t.windowId).incognito };
   }
   function windowObject(w, populate = false) {
-    const result = { id: w.id, focused: w.focused, type: w.type, incognito: false };
+    const result = { id: w.id, focused: w.focused, type: w.type, incognito: w.incognito };
     if (populate) result.tabs = w.tabs.map(tabObject);
     return result;
   }
@@ -432,6 +432,7 @@ export function createFirefox(setup = {}) {
   browser.windows.WINDOW_ID_NONE = -1;
   api("windows", "getAll", (props = {}) => (props.windowTypes && !props.windowTypes.includes("normal") ? [] : wins)
     .map(w => windowObject(w, props.populate)));
+  api("windows", "get", (id, props = {}) => windowObject(windowById(id), props.populate));
   api("windows", "getCurrent", (props = {}) => windowObject(windowById(currentWindowId), props.populate));
   api("windows", "getLastFocused", (props = {}) => windowObject(windowById(lastFocusedId), props.populate));
   api("windows", "update", (id, props) => {
@@ -594,7 +595,7 @@ export function createFirefox(setup = {}) {
     return response;
   });
 
-  function restart({ restore = true } = {}) {
+  function restart({ restore = false } = {}) {
     if (settling || messages.size) throw new Error("Settle Firefox before restarting");
     pending.length = 0;
     for (const listeners of events.values()) listeners.clear();

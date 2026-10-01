@@ -1,11 +1,14 @@
-import { encodeFolderTitle } from "./codec.js";
+import { encodeFolderTitle, isSyncableUrl } from "./codec.js";
 import { findOrCreateRoot, findExtraRoots, ensurePinnedFolder, readTree } from "./tree.js";
 import { matchGroups, matchTabs } from "./match.js";
 
 /** Temporary listeners observe restore activity, independently of the serial queue. */
 export function settle(api, { settleMs = 3000, maxWaitMs = 20000, now = Date.now } = {}) {
-  const events = [...Object.values(api.tabs), ...Object.values(api.tabGroups)]
-    .filter(value => value?.addListener && value?.removeListener);
+  const events = [
+    ...["onCreated", "onUpdated", "onRemoved", "onMoved", "onAttached", "onDetached", "onActivated"]
+      .map(name => api.tabs[name]),
+    ...["onCreated", "onUpdated", "onRemoved", "onMoved"].map(name => api.tabGroups[name]),
+  ];
   return new Promise(resolve => {
     const deadline = now() + maxWaitMs;
     let quietTimer, limitTimer;
@@ -27,7 +30,7 @@ export function settle(api, { settleMs = 3000, maxWaitMs = 20000, now = Date.now
 
 /** Never infer bookmark deletion from absent tabs, even after failed restore. */
 export async function rebuild({ api, state, outbound, inbound }) {
-  const knownRootId = state.rootId, previousOpen = [...state.openFolders];
+  const knownRootId = state.rootId, previousOpen = [...new Set([...state.openFolders, ...state.missing])];
   // Browser-session ids can be reused. Clear before the first outbound operation.
   state.groups = {};
   state.tabs = {};
@@ -51,8 +54,11 @@ export async function rebuild({ api, state, outbound, inbound }) {
     urls.add(bookmark.url);
   }
   tree = await readTree(api, state.rootId);
-  const tabs = (await api.tabs.query({})).sort((a, b) => a.windowId - b.windowId || a.index - b.index);
-  const groups = await api.tabGroups.query({});
+  const tabs = (await api.tabs.query({})).filter(tab => !tab.incognito).sort((a, b) => a.windowId - b.windowId || a.index - b.index);
+  const normalIds = new Set((await api.windows.getAll({ windowTypes: ["normal"] }))
+    .filter(win => !win.incognito && win.type === "normal").map(win => win.id));
+  const groups = (await api.tabGroups.query({})).filter(group => normalIds.has(group.windowId)
+    && tabs.some(tab => tab.groupId === group.id && !tab.pinned && isSyncableUrl(tab.url, api.runtime.getURL(""))));
   const matches = matchGroups(groups.map(group => ({ groupId: group.id,
     title: group.title, color: group.color, urls: tabs.filter(tab => tab.groupId === group.id).map(tab => tab.url) })), tree.folders);
 
