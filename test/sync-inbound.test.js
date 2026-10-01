@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createFirefox } from "./fakes/firefox.js";
-import { emptyState, loadState, saveState, createQueue } from "../extension/src/sync/state.js";
+import { emptyState, loadState, saveState, createQueue, recordRemoved } from "../extension/src/sync/state.js";
 import { createOutbound } from "../extension/src/sync/outbound.js";
 import { createInbound } from "../extension/src/sync/inbound.js";
 
@@ -33,7 +33,14 @@ async function fixture(options = {}) {
   let clock = 100;
   const config = { api, getState: () => state, save: () => saveState(api, state), now: () => clock, ...options };
   const outbound = createOutbound({ ...config, removeDelayMs: 0, extensionBaseUrl: api.runtime.getURL("") });
-  const inbound = createInbound(config);
+  api.bookmarks.onRemoved.addListener((id, info) => recordRemoved(state, id, info, clock));
+  function inboundWithEvents() {
+    const engine = createInbound(config);
+    return Object.fromEntries(Object.entries(engine).map(([name, fn]) => [name, async (...args) => {
+      await ff.settle(); return fn(...args);
+    }]));
+  }
+  const inbound = inboundWithEvents();
   await outbound.syncGroup(7);
   await outbound.syncGroup(8);
   await ff.settle();
@@ -41,8 +48,27 @@ async function fixture(options = {}) {
   return { ff, api, get state() { return state; }, outbound, inbound,
     folder: (id = 7) => state.groups[id].folderId,
     bookmark: id => state.tabs[id].bookmarkId,
-    config, restart: async () => { state = await loadState(api); return createInbound(config); },
+    config, restart: async () => { state = await loadState(api); return inboundWithEvents(); },
     tick: ms => { clock += ms; } };
+}
+
+for (const ineligible of [{ type: "popup" }, { incognito: true }]) {
+  test(`pins fall back to a normal non-private window when last focused is ${ineligible.type ?? "private"}`, async () => {
+    const ff = createFirefox({ windows: [{ id: 2, focused: true, ...ineligible }, { id: 1 }],
+      tabs: [{ id: 1, windowId: 1 }, { id: 2, windowId: 2 }],
+      bookmarks: [{ title: "Foxy", children: [{ title: "📌 Pinned", children: [
+        { title: "Remote", url: url("remote-pin") },
+      ] }] }] });
+    const state = emptyState();
+    [state.rootId] = (await ff.browser.bookmarks.getChildren("unfiled_____")).map(n => n.id);
+    [state.pinnedId] = (await ff.browser.bookmarks.getChildren(state.rootId)).map(n => n.id);
+    const inbound = createInbound({ api: ff.browser, getState: () => state, save: () => saveState(ff.browser, state) });
+    await inbound.reconcileFolder(state.pinnedId);
+    const [pin] = await ff.browser.tabs.query({ pinned: true });
+    assert.equal(pin.windowId, 1);
+    assert.equal(pin.incognito, false);
+    assert.deepEqual(ff.errors, []);
+  });
 }
 
 // Catch missing entry updates, duplicate creates, redirect echoes and repeated writes.
@@ -511,9 +537,9 @@ test("root removal resets identities and stale folder bookkeeping without closin
   f.state.cantReopen[f.folder()] = ["about:config"];
   await f.api.bookmarks.removeTree(f.state.rootId);
   await f.inbound.folderRemoved(f.state.rootId);
-  assert.deepEqual(f.state, emptyState());
+  assert.deepEqual(f.state, { ...emptyState(), removedIds: f.state.removedIds });
   assert.deepEqual([f.ff.layout(1), f.ff.layout(2)], before);
-  assert.deepEqual(await loadState(f.api), emptyState());
+  assert.deepEqual(await loadState(f.api), { ...emptyState(), removedIds: f.state.removedIds });
 });
 
 async function addPins(f) {

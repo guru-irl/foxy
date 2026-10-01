@@ -27,7 +27,7 @@ export function attachDnd(root, handlers, board) {
     return null;
   }
   function targetAt(kind, target) {
-    if (!(target instanceof Element) || !root.contains(target)) return null;
+    if (!(target instanceof Element) || !root.contains(target) || target.closest('[data-zone="saved"]')) return null;
     if (kind === "tab") return target.closest('.rows[data-zone="group"], .rows[data-zone="pinned"], .rows[data-zone="tabs"], .new-group, .column-header, .column-title, .other-window');
     if (kind === "group" && !target.closest(".new-group, .fixed, .saved")) return target.closest(".strip");
     return null;

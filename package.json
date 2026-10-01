@@ -1,10 +1,11 @@
 {
   "name": "foxy",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node --test --test-timeout=10000 test/*.test.js && python3 -m unittest discover -s scripts -p 'test_*.py'",
-    "test:browser": "python3 scripts/browser_test.py"
+    "test:browser": "python3 scripts/browser_test.py",
+    "test:smoke": "python3 scripts/smoke_firefox.py"
   }
 }

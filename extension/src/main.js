@@ -29,12 +29,24 @@ function startClock(timeEl, dateEl) {
 }
 
 /** All board interactions share this state; DnD and editors set it via handlers. */
-export function createController(root, api, ui = { editGroupId: null, dragging: false, editing: false }) {
+export function createController(root, api, ui = { editGroupId: null, dragging: false, editing: false },
+  { maxWait = 30000 } = {}) {
+  ui.confirmFolderId ??= null;
+  ui.busy ??= new Set();
   let board;
   let self;
   let generation = 0;
   let queued = false;
   let pending = false;
+  let pendingSaved = false;
+  let readsInFlight = 0;
+  let savedReadsInFlight = 0;
+  let savedDirty = false;
+  let savedDirtyRetry = false;
+  let savedGeneration = 0;
+  let savedReply = { saved: [], missing: [] };
+  let snapshot;
+  let warnedSaved = false;
   let retryQueued = true;
   let lastRenderedKey;
   let actionsInFlight = 0;
@@ -48,7 +60,64 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     ++generation;
   }
 
+  // Saved replies have their own request order: a bookmark-only read must not
+  // invalidate an in-flight tab snapshot, nor can an old reply replace a new one.
+  async function readSaved(retry = true) {
+    if (savedReadsInFlight) { savedDirty = true; savedDirtyRetry ||= retry; return; }
+    const mine = ++savedGeneration;
+    ++savedReadsInFlight;
+    let reply, timer;
+    try {
+      reply = await Promise.race([
+        api.runtime.sendMessage({ type: "foxy:saved" }),
+        new Promise((resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("foxy:saved timed out")), maxWait);
+        }),
+      ]);
+      if (!Array.isArray(reply?.saved) || !Array.isArray(reply?.missing)) {
+        throw new Error("Background did not return saved and missing arrays");
+      }
+    } catch (error) {
+      reply = savedReply;
+      if (!warnedSaved) {
+        warnedSaved = true;
+        console.warn("Foxy: could not read saved groups", error);
+      }
+    } finally { clearTimeout(timer); --savedReadsInFlight; }
+    try {
+      if (mine === savedGeneration) {
+        if (held()) {
+          pendingSaved = true;
+          enqueue();
+        } else {
+          // Saved data is independent of the tab snapshot's generation.
+          savedReply = reply;
+          if (snapshot) {
+            board = buildBoard({ ...snapshot, ...savedReply });
+            publish();
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("Foxy: could not publish saved groups", error);
+      if (retry) schedule(false);
+    }
+    if (savedDirty) {
+      const dirtyRetry = savedDirtyRetry;
+      savedDirty = false;
+      savedDirtyRetry = false;
+      refreshSaved(dirtyRetry);
+    }
+  }
+
+  function refreshSaved(retry = true) {
+    if (held()) { pendingSaved = true; return; }
+    pendingSaved = false;
+    return readSaved(retry);
+  }
+
   async function refresh(retry = true) {
+    let reading = false;
     try {
       if (held()) {
         pending = true;
@@ -62,14 +131,21 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       }
       const mine = ++generation;
       pending = false;
+      pendingSaved = false;
+      // Do not await the background: startup settling can take up to 20s.
+      readSaved(retry);
+      reading = true;
+      ++readsInFlight;
       const [windows, tabs, groups, current] = await Promise.all([
         api.windows.getAll({ windowTypes: ["normal"] }), api.tabs.query({}),
         api.tabGroups.query({}), api.tabs.getCurrent(),
       ]);
       if (held()) { pending = true; return; }
       if (mine !== generation) { pending = true; return; }
-      const nextBoard = buildBoard({ windows, tabs, groups, currentWindowId: current.windowId,
-        selfTabId: current.id, selfUrl: location.origin + location.pathname });
+      const nextSnapshot = { windows, tabs, groups, currentWindowId: current.windowId,
+        selfTabId: current.id, selfUrl: location.origin + location.pathname };
+      const nextBoard = buildBoard({ ...nextSnapshot, ...savedReply });
+      snapshot = nextSnapshot;
       self = current;
       board = nextBoard;
       // Introduce a newly created column/editor in the final action snapshot.
@@ -79,39 +155,60 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
           ? requestedEditGroupId : null;
         requestedEditGroupId = null;
       }
-      const key = JSON.stringify({ board, ui });
-      if (key !== lastRenderedKey) {
-        const saved = captureView(root);
-        renderBoard(root, board, ui, handlers);
-        restoreView(root, saved);
-        lastRenderedKey = key;
-      }
+      publish();
     } catch (error) {
       pending = true;
       console.warn("Foxy: could not refresh board", error);
       // One bounded retry re-reads after a transient API error. Further events
       // can retry again, without a permanent failure creating a frame loop.
       if (retry) schedule(false);
-    }
+    } finally { if (reading) --readsInFlight; }
+  }
+
+  function publish() {
+    if (!board) return;
+    // JSON.stringify(Set) is {}, so serialize its folder IDs explicitly.
+    const key = JSON.stringify({ board, ui: { ...ui, busy: [...ui.busy].sort() } });
+    if (key === lastRenderedKey) return;
+    const saved = captureView(root);
+    renderBoard(root, board, ui, handlers);
+    restoreView(root, saved);
+    lastRenderedKey = key;
   }
 
   function schedule(retry = true) {
     pending = true;
-    if (held() && !canCheckEdit()) return;
+    enqueue(retry);
+  }
+
+  function scheduleSaved() {
+    pendingSaved = true;
+    enqueue();
+  }
+
+  function enqueue(retry = true) {
+    if (held() && !(pending && canCheckEdit())) return;
     if (queued) { retryQueued ||= retry; return; }
     queued = true;
     retryQueued = retry;
     requestAnimationFrame(() => {
       queued = false;
-      if ((held() && !canCheckEdit()) || !pending) return;
-      refresh(retryQueued);
+      if ((held() && !(pending && canCheckEdit())) || (!pending && !pendingSaved)) return;
+      if (pending) refresh(retryQueued);
+      else refreshSaved(retryQueued);
     });
   }
 
   function interaction(key, active) {
     ui[key] = active;
-    if (active) { ++generation; pending = true; }
-    else if ((!held() || canCheckEdit()) && pending) schedule();
+    if (active) {
+      ++generation;
+      // Only invalidated reads require replacement; bookmark-only updates
+      // during an otherwise idle interaction must not cause tab re-read storms.
+      if (readsInFlight) pending = true;
+      if (savedReadsInFlight) pendingSaved = true;
+    } else if (pending || pendingSaved) enqueue();
+    else if (!held()) publish();
   }
 
   async function action(run) {
@@ -125,7 +222,47 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     }
   }
 
+  function savedAction(id, message, deleting = false) {
+    if (ui.busy.has(id)) return;
+    ui.busy.add(id);
+    // Busy is a UI-only publication, deliberately not deferred by action holds.
+    publish();
+    return action(async () => {
+      let timer;
+      try {
+        const reply = await Promise.race([
+          api.runtime.sendMessage(message),
+          new Promise((resolve, reject) => {
+            timer = setTimeout(() => reject(new Error(`${message.type} timed out`)), maxWait);
+          }),
+        ]);
+        if (reply?.ok !== true) throw new Error(`${message.type} was not accepted`);
+        return reply;
+      } finally {
+        clearTimeout(timer);
+        ui.busy.delete(id);
+        if (deleting && ui.confirmFolderId === id) ui.confirmFolderId = null;
+        publish();
+      }
+    });
+  }
+
   const handlers = {
+    onConfirmDelete: folderId => {
+      if (ui.confirmFolderId === folderId) return;
+      ui.confirmFolderId = folderId;
+      if (held()) pending = true;
+      else publish();
+    },
+    onOpenSaved: folderId => savedAction(folderId, {
+      type: "foxy:open-saved", folderId, windowId: self?.windowId,
+    }),
+    onDeleteSaved: folderId => {
+      if (ui.confirmFolderId !== folderId) return;
+      return savedAction(folderId, { type: "foxy:delete-saved", folderId }, true);
+    },
+    onRestoreAll: () => savedAction("banner", { type: "foxy:restore-all", windowId: self?.windowId }),
+    onDismissMissing: () => savedAction("banner", { type: "foxy:dismiss-missing" }),
     onOpen: row => action(() => openTab(api, row, self, { close: history.length === 1 })),
     onCloseTab: tabId => action(() => closeTabs(api, [tabId], self?.id)),
     onCloseGroup: groupId => action(() => closeGroup(api, groupId, self?.id)),
@@ -160,7 +297,6 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     onEditEnd: groupId => {
       if (groupId != null && ui.editGroupId !== groupId) return;
       ui.editGroupId = null;
-      pending = true;
       interaction("editing", false);
     },
   };
@@ -190,6 +326,23 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       schedule();
     }
   }
+  for (const event of [api.bookmarks?.onCreated, api.bookmarks?.onChanged,
+    api.bookmarks?.onMoved, api.bookmarks?.onRemoved]) {
+    try { event?.addListener(scheduleSaved); }
+    catch (error) {
+      console.warn("Foxy: could not listen to bookmark changes", error);
+      scheduleSaved();
+    }
+  }
+  // Opening the board reconciles once. The initial caller's refresh remains
+  // independent, and completion (including failure) requests a fresh snapshot.
+  (async () => {
+    try {
+      const reply = await api.runtime.sendMessage({ type: "foxy:reconcile" });
+      if (reply?.ok !== true) console.warn("Foxy: background reconcile was not accepted");
+    } catch (error) { console.warn("Foxy: could not reconcile on board open", error); }
+    finally { await refresh(); }
+  })();
   return { refresh, schedule, handlers, ui };
 }
 

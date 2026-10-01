@@ -72,7 +72,7 @@ test("only non-private normal windows contribute sections or group columns", asy
   input.windows.find(win => win.id === 3).type = "popup";
   input.windows.find(win => win.id === 4).type = "panel";
   assert.deepEqual(buildBoard(input), {
-    windowOrder: [1], pinned: [], columns: [],
+    windowOrder: [1], pinned: [], columns: [], saved: [], missing: [],
     tabs: [{ windowId: 1, current: true, rows: [{
       id: 11, windowId: 1, index: 0, title: "about:blank", url: "about:blank",
       icon: null, pinned: false, groupId: -1, active: true,
@@ -245,8 +245,56 @@ for (const suffix of ["", "?q=self", "#page", "?q=self#page"]) {
   });
 }
 
+test("saved and missing default to empty arrays before the background answers", async () => {
+  const input = await snapshot();
+  const board = buildBoard({ ...input, saved: undefined, missing: undefined });
+  assert.deepEqual(board.saved, []);
+  assert.deepEqual(board.missing, []);
+});
+
+test("saved and missing preserve folder order, literal titles and API colours without changing tab zones", async () => {
+  const input = await snapshot({
+    groups: [{ id: 10, windowId: 1 }],
+    tabs: [{ id: 1, windowId: 1, pinned: true }, { id: 2, windowId: 1, groupId: 10 }, { id: 3, windowId: 1 }],
+  });
+  const saved = [
+    { folderId: "z", title: "  Work  ", color: "grey", count: 4, cantReopen: ["about:config"] },
+    { folderId: "a", title: "", color: "red", count: 0, cantReopen: [] },
+  ];
+  const missing = [{ folderId: "a", title: "", color: "red" }, { folderId: "z", title: "  Work  ", color: "grey" }];
+  const before = structuredClone({ ...input, saved, missing });
+  const { saved: actualSaved, missing: actualMissing, ...zones } = buildBoard(freeze({ ...input, saved, missing }));
+  assert.deepEqual(actualSaved, saved);
+  assert.deepEqual(actualMissing, missing.map(group => ({ ...group, count: 0, cantReopen: [] })));
+  const { saved: ignoredSaved, missing: ignoredMissing, ...originalZones } = buildBoard(input);
+  assert.deepEqual(zones, originalZones);
+  assert.deepEqual({ ...input, saved, missing }, before);
+});
+
+// Passing raw partial entries through leaves trim/length unsafe in the renderer.
+test("saved and missing normalise malformed entries and drop absent folder identities without mutation", () => {
+  const entries = [null, {}, { folderId: "" }, { folderId: 12 },
+    { folderId: "partial", title: 42, color: "grey", count: "4", cantReopen: null },
+    { folderId: "valid", title: "  Work  ", color: "red", count: 4, cantReopen: ["about:config", null] },
+    { folderId: "nonfinite", count: Infinity, cantReopen: "about:config" }];
+  const input = freeze({ windows: [], tabs: [], groups: [], saved: entries, missing: entries });
+  const before = structuredClone(input);
+  const board = buildBoard(input);
+  const expected = [
+    { folderId: "partial", title: "", color: "grey", count: 0, cantReopen: [] },
+    { folderId: "valid", title: "  Work  ", color: "red", count: 4, cantReopen: ["about:config"] },
+    { folderId: "nonfinite", title: "", color: "grey", count: 0, cantReopen: [] },
+  ];
+  assert.deepEqual(board.saved, expected); assert.deepEqual(board.missing, expected);
+  assert.deepEqual(input, before);
+  for (const malformed of [null, {}, "wrong"]) {
+    const empty = buildBoard({ windows: [], tabs: [], groups: [], saved: malformed, missing: malformed });
+    assert.deepEqual(empty.saved, []); assert.deepEqual(empty.missing, []);
+  }
+});
+
 test("no eligible windows gives an empty board, without inventing a current window", () => {
   assert.deepEqual(buildBoard({ windows: [], tabs: [], groups: [], currentWindowId: 1, selfTabId: 99 }), {
-    windowOrder: [], pinned: [], columns: [], tabs: [],
+    windowOrder: [], pinned: [], columns: [], tabs: [], saved: [], missing: [],
   });
 });

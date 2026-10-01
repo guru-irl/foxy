@@ -1,6 +1,7 @@
 import { handleMessage } from "../close.js";
 import { isOpenableUrl, isSyncableUrl, encodeFolderTitle, ROOT_TITLE, isPinnedFolderTitle } from "./codec.js";
-import { createQueue, loadState, saveState, groupOfFolder } from "./state.js";
+import { createQueue, loadState, saveState, groupOfFolder, probeMissingBookmark,
+  recordRemoved, pruneRemovedIds, wasRemoved } from "./state.js";
 import { ensurePinnedFolder, readTree, mergeRoots, OTHER_BOOKMARKS } from "./tree.js";
 import { createOutbound } from "./outbound.js";
 import { createInbound } from "./inbound.js";
@@ -11,13 +12,15 @@ import { settle, rebuild } from "./startup.js";
 export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   settleMs = 3000, maxWaitMs = 20000 }) {
   const queue = createQueue();
-  let state, starting;
+  let state, starting, rebuilding;
+  const earlyRemovals = [];
   const returnTimers = new Map(), movedTabs = new Set();
   let moveTimer;
   const save = () => saveState(api, state);
   const outbound = createOutbound({ api, getState: () => state, save, now, removeDelayMs, quietMs,
     extensionBaseUrl: api.runtime.getURL(""),
     schedule: ms => setTimeout(() => queue.run(flush).catch(() => {}), ms),
+    lostIdentity: scheduleRebuild,
   });
   // Losing OS focus doesn't stop showing the last Firefox window's active tab.
   // Keep this adapter local to sync; never mutate the injected browser object.
@@ -37,7 +40,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       } catch (error) { console.warn("Foxy: destination window is unavailable", error); }
     }
     try {
-      const win = await api.windows.getLastFocused({ windowTypes: ["normal"] });
+      const win = await api.windows.getLastFocused();
       if (eligibleWindow(win)) return rememberNormalWindow(win);
     } catch (error) { console.warn("Foxy: last focused window is unavailable", error); }
     if (Number.isInteger(state.lastFocusedNormalWindowId)) {
@@ -84,14 +87,18 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
         const nodes = await api.bookmarks.get(ids);
         for (const node of nodes) {
           if (node.type === "folder" && groupOfFolder(state, node.id) !== null && node.parentId !== state.rootId) {
-            // Safety-blocked removals retain mappings, not import permission.
-            throw new Error(`Invalid bookmark ID: ${node.id}`);
+            if (!await getNode(state.rootId)) return []; // Root identity recovery owns this case.
+            // Safety-blocked move-outs retain mappings, not import permission.
+            const error = new Error(`Foxy folder moved outside root: ${node.id}`);
+            error.foxyMovedOut = true;
+            throw error;
           }
         }
         return nodes;
       },
     },
     windows: {
+      getAll: async (...args) => (await api.windows.getAll(...args)).filter(eligibleWindow),
       async getLastFocused() {
         const win = await normalWindow();
         // No eligible window means no shown tab and no destination for pins.
@@ -100,12 +107,21 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     },
   };
   const inbound = createInbound({ api: inboundApi, getState: () => state, save, now, quietMs,
+    lostIdentity: scheduleRebuild,
     orderReleased: members => { for (const tab of members) syncMovedTab(tab.id); },
   });
 
-  async function rebuildMaps() {
-    await rebuild({ api, state, outbound, inbound });
+  async function rebuildMaps(lostIdentity = false) {
+    await rebuild({ api, state, outbound, inbound, lostIdentity });
     await save();
+    if (lostIdentity) for (const id of Object.keys(state.groups)) scheduleReturningGroup(Number(id));
+  }
+  function scheduleRebuild(id) {
+    if (rebuilding || wasRemoved(state, id, now())) return;
+    console.debug("Foxy: lost bookmark identity, rebuilding mappings", id);
+    // Enqueue once for the entire burst. Never await this from an owning job.
+    rebuilding = queue.run(() => rebuildMaps(true)).finally(() => { rebuilding = undefined; });
+    rebuilding.catch(() => {});
   }
   async function ensureTree() {
     if (!state.rootId) await rebuildMaps();
@@ -120,6 +136,8 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     if (!starting) {
       starting = queue.run(async () => {
         state = await loadState(api);
+        for (const [id, info, at] of earlyRemovals.splice(0)) recordRemoved(state, id, info, at);
+        if (pruneRemovedIds(state, now()) || Object.keys(state.removedIds).length) await save();
         const session = await api.storage.session.get("foxySession");
         if (!session.foxySession) {
           await settle(api, { settleMs, maxWaitMs, now });
@@ -137,27 +155,58 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   }
   async function run(fn) {
     await start();
-    return queue.run(fn);
+    const result = await queue.run(async () => {
+      if (pruneRemovedIds(state, now())) await save();
+      try { return { value: await fn() }; }
+      catch (error) {
+        if (!await missingIdentity(state.rootId)) throw error;
+        return { error };
+      }
+    });
+    // This is outside the queue job. Recovery may be awaited here, never by
+    // an inner handler. A failed read-only page request gets one fresh retry.
+    if (rebuilding) await rebuilding;
+    if (result.error) return queue.run(fn);
+    return result.value;
+  }
+  async function missingIdentity(id) {
+    if (!await probeMissingBookmark(api, id)) return false;
+    if (!wasRemoved(state, id, now())) scheduleRebuild(id);
+    return true;
   }
   async function getNode(id) {
-    try { return (await api.bookmarks.get(id))[0]; }
-    catch (error) {
-      if (/^(?:Bookmark not found[.!]?$|Invalid bookmark ID:)/i.test(error?.message ?? "")) return null;
+    try {
+      const [node] = await api.bookmarks.get(id);
+      if (!node && !wasRemoved(state, id, now())) scheduleRebuild(id);
+      return node ?? null;
+    } catch (error) {
+      if (await missingIdentity(id)) return null;
       throw error;
     }
   }
   async function managedNode(id) {
     if (id === state.rootId) return getNode(id);
-    const [root] = await api.bookmarks.getSubTree(state.rootId);
-    return root.children.flatMap(node => [node, ...(node.children ?? [])]).find(node => node.id === id) ?? null;
+    try {
+      const [root] = await api.bookmarks.getSubTree(state.rootId);
+      return root.children.flatMap(node => [node, ...(node.children ?? [])]).find(node => node.id === id) ?? null;
+    } catch (error) {
+      if (await missingIdentity(state.rootId)) return null;
+      throw error;
+    }
   }
   async function relevant(id, parentId) {
     if (id === state.rootId || id === state.pinnedId || groupOfFolder(state, id) !== null) return true;
     if (parentId === state.rootId) return true;
     // Inspect only managed parents. Unrelated folders (including the archive)
     // must not be read merely because a bookmark event mentions them.
-    return parentId && (await api.bookmarks.getChildren(state.rootId))
-      .some(node => node.id === parentId && node.type === "folder");
+    if (!parentId) return false;
+    try {
+      return (await api.bookmarks.getChildren(state.rootId))
+        .some(node => node.id === parentId && node.type === "folder");
+    } catch (error) {
+      if (await missingIdentity(state.rootId)) return false;
+      throw error;
+    }
   }
   async function folderRemoved(id) {
     const root = id === state.rootId, pinned = id === state.pinnedId;
@@ -173,8 +222,10 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   async function managedGroup(groupId) {
     const folderId = state.groups[groupId]?.folderId;
     if (!folderId) return true;
+    if (!await getNode(state.rootId)) return false;
     const node = await getNode(folderId);
     if (node?.parentId === state.rootId) return true;
+    if (!node && !wasRemoved(state, folderId, now())) return false;
     await folderRemoved(folderId);
     return false;
   }
@@ -452,9 +503,17 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       await syncGroup(group.id);
       for (const tab of await api.tabs.query({ groupId: group.id })) await syncTab(tab.id);
     },
-    "bookmarks.onCreated": (id, node) => changed(id, node),
+    "bookmarks.onCreated": async (id, node) => {
+      if (id in state.removedIds) {
+        delete state.removedIds[id];
+        await save();
+      }
+      await changed(id, node);
+    },
     "bookmarks.onChanged": async id => changed(id, await managedNode(id)),
     "bookmarks.onRemoved": async (id, info) => {
+      recordRemoved(state, id, info, now());
+      await save();
       if (!await relevant(id, info.parentId)) return;
       if (info.node?.type === "folder") await folderRemoved(id);
       else await inbound.reconcileFolder(info.parentId);
@@ -479,7 +538,13 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       await applyDeferred();
     },
   };
-  const handlers = Object.fromEntries(Object.entries(jobs).map(([name, fn]) => [name, (...args) => run(() => fn(...args))]));
+  const handlers = Object.fromEntries(Object.entries(jobs).map(([name, fn]) => [name, (...args) => {
+    if (name === "bookmarks.onRemoved") {
+      if (state) recordRemoved(state, args[0], args[1], now());
+      else earlyRemovals.push([args[0], args[1], now()]);
+    }
+    return run(() => fn(...args));
+  }]));
 
   async function saved() {
     const tree = await readTree(api, state.rootId);

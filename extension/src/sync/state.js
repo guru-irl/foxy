@@ -5,6 +5,7 @@ export function emptyState() {
   return {
     rootId: null, pinnedId: null, groups: {}, tabs: {}, openFolders: [], missing: [],
     cantReopen: {}, deferred: [], quietUntil: {}, pendingRemovals: {}, failedCreates: {},
+    removedIds: {}, folderSnapshots: {},
   };
 }
 
@@ -16,11 +17,71 @@ export async function loadState(api) {
     if (!entries(state.pendingRemovals, entry => record(entry)
       && string(entry.bookmarkId) && string(entry.folderId) && Number.isFinite(entry.due))) state.pendingRemovals = {};
     if (!entries(state.failedCreates, string)) state.failedCreates = {};
+    if (!entries(state.removedIds, Number.isFinite)) state.removedIds = {};
+    if (!entries(state.folderSnapshots, entry => record(entry) && string(entry.title)
+      && string(entry.color) && strings(entry.urls))) state.folderSnapshots = {};
     return state;
   } catch (error) {
     console.warn("Foxy: could not load sync state", error);
     return emptyState();
   }
+}
+
+export const isBookmarkNotFound = error => error?.message === "Bookmark not found";
+
+/** Tree/mutation errors vary by method. Only a get(id) probe proves absence. */
+export async function probeMissingBookmark(api, id) {
+  if (!id) return false;
+  try { return (await api.bookmarks.get(id)).length === 0; }
+  catch (error) { return isBookmarkNotFound(error); }
+}
+
+export function pruneRemovedIds(state, at = Date.now()) {
+  const referenced = new Set([state.rootId, state.pinnedId,
+    ...state.openFolders, ...state.missing, ...state.deferred]);
+  for (const entry of [...Object.values(state.tabs), ...Object.values(state.pendingRemovals)]) {
+    referenced.add(entry.bookmarkId);
+    referenced.add(entry.folderId);
+  }
+  // Group identities also own their pending-order and return/rebind work.
+  for (const entry of Object.values(state.groups)) referenced.add(entry.folderId);
+  for (const [id, moves] of Object.entries(state.expectedMoves ?? {})) {
+    referenced.add(id);
+    if (Array.isArray(moves)) for (const move of moves) referenced.add(move?.parentId);
+  }
+  let changed = false;
+  for (const [id, time] of Object.entries(state.removedIds ?? {})) {
+    if (at - time > 600000 && !referenced.has(id)) { delete state.removedIds[id]; changed = true; }
+  }
+  return changed;
+}
+
+export function wasRemoved(state, id, at = Date.now()) {
+  const time = state.removedIds?.[id];
+  // TTL applies only when pruning unreferenced evidence, not during a retry.
+  return Number.isFinite(time);
+}
+
+/** Called on onRemoved, before queued reconciliation can discard the mappings. */
+export function recordRemoved(state, id, info, at = Date.now()) {
+  pruneRemovedIds(state, at);
+  state.removedIds ??= {};
+  const ids = new Set([id]);
+  if (info?.node?.type === "folder") {
+    if (id === state.rootId) {
+      ids.add(state.pinnedId);
+      for (const entry of Object.values(state.groups)) ids.add(entry.folderId);
+      for (const folder of [...state.openFolders, ...state.missing]) ids.add(folder);
+    }
+    for (const entry of [...Object.values(state.tabs), ...Object.values(state.pendingRemovals)]) {
+      if (id === state.rootId || entry.folderId === id) ids.add(entry.bookmarkId);
+    }
+    function descendants(node) {
+      for (const child of node?.children ?? []) { ids.add(child.id); descendants(child); }
+    }
+    descendants(info.node);
+  }
+  for (const removed of ids) if (removed) state.removedIds[removed] = at;
 }
 
 /** Write failures propagate to the queue, which logs them and keeps draining. */

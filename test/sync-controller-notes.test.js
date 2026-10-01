@@ -529,6 +529,8 @@ test("merge remaps an unpublished pin navigation without reading or promoting it
   const sync = wire(ff); await drain(ff, sync);
   const before = await loadState(ff.browser);
   unwire(ff);
+  // This is the existing uploaded-root merge path, not never-uploaded dedupe.
+  ff.markUploaded(ff.bookmarkChanges().cursor);
   await ff.browser.tabs.update(2, { url: "https://local-navigation/", active: true });
   await ff.applyRemoteBookmarks([{ id: "older-root", parentId: "unfiled_____", index: 0, title: "Foxy", type: "folder", dateAdded: 1 },
     { id: "remote-pins", parentId: "older-root", index: 0, title: "📌 Pinned", type: "folder", dateAdded: 2 },

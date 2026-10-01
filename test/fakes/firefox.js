@@ -445,11 +445,18 @@ export function createFirefox(setup = {}) {
     }
     return windowObject(win, true);
   });
-  api("windows", "getAll", (props = {}) => (props.windowTypes && !props.windowTypes.includes("normal") ? [] : wins)
+  api("windows", "getAll", (props = {}) => wins
+    .filter(w => !props.windowTypes || props.windowTypes.includes(w.type))
     .map(w => windowObject(w, props.populate)));
-  api("windows", "get", (id, props = {}) => windowObject(windowById(id), props.populate));
-  api("windows", "getCurrent", (props = {}) => windowObject(windowById(currentWindowId), props.populate));
-  api("windows", "getLastFocused", (props = {}) => windowObject(windowById(lastFocusedId), props.populate));
+  function getWindow(id, props) {
+    if (Object.hasOwn(props, "windowTypes")) {
+      errors.push(new Error("Warning processing windowTypes: This property is deprecated"));
+    }
+    return windowObject(windowById(id), props.populate);
+  }
+  api("windows", "get", (id, props = {}) => getWindow(id, props));
+  api("windows", "getCurrent", (props = {}) => getWindow(currentWindowId, props));
+  api("windows", "getLastFocused", (props = {}) => getWindow(lastFocusedId, props));
   api("windows", "update", (id, props) => {
     const win = windowById(id);
     if (props.focused === true) {
@@ -472,7 +479,7 @@ export function createFirefox(setup = {}) {
 
   const nodes = [], localStore = {};
   let nextBookmark = 1, bookmarkClock = 0, remoteBookmarks = false;
-  const bookmarkJournal = [];
+  const bookmarkJournal = [], unuploaded = new Set();
   function recordBookmark(node) {
     if (!remoteBookmarks) bookmarkJournal.push(copy(node));
   }
@@ -485,14 +492,14 @@ export function createFirefox(setup = {}) {
     return { cursor: bookmarkJournal.length, nodes: [...changed.values()].map(entry =>
       entry.deleted ? entry : copy(nodes.find(node => node.id === entry.id) ?? { id: entry.id, deleted: true })) };
   }
-  function nodeById(id) {
+  function nodeById(id, message = "Bookmark not found") {
     const node = nodes.find(n => n.id === id);
-    if (!node) throw new Error(`Invalid bookmark ID: ${id}`);
+    if (!node) throw new Error(message);
     return node;
   }
   function children(id) { return nodes.filter(n => n.parentId === id).sort((a, b) => a.index - b.index); }
-  function folderById(id) {
-    const node = nodeById(id);
+  function folderById(id, message) {
+    const node = nodeById(id, message);
     if (node.type !== "folder") throw new Error("Parent must be a folder");
     return node;
   }
@@ -507,7 +514,7 @@ export function createFirefox(setup = {}) {
   function insertNode(props, notify = true) {
     const parentId = props.parentId ?? "unfiled_____";
     if (parentId === ROOTS[0]) throw new Error("The bookmark root cannot be modified");
-    folderById(parentId);
+    folderById(parentId, "parentGuid must be valid");
     if (props.url != null) checkURL(props.url, true);
     const siblings = children(parentId), index = Math.max(0, Math.min(props.index ?? siblings.length, siblings.length));
     for (const n of siblings.slice(index)) { n.index++; recordBookmark(n); }
@@ -515,7 +522,10 @@ export function createFirefox(setup = {}) {
       type: props.url == null ? "folder" : "bookmark", dateAdded: props.dateAdded ?? ++bookmarkClock };
     if (props.url != null) node.url = props.url;
     nodes.push(node);
-    if (notify) { recordBookmark(node); queue("bookmarks.onCreated", node.id, node); }
+    if (notify) {
+      if (!remoteBookmarks) unuploaded.add(node.id);
+      recordBookmark(node); queue("bookmarks.onCreated", node.id, node);
+    }
     return node;
   }
   nodes.push({ id: ROOTS[0], index: 0, title: "", type: "folder", dateAdded: ++bookmarkClock });
@@ -531,13 +541,19 @@ export function createFirefox(setup = {}) {
   seedBookmarks(setup.bookmarks ?? [], "unfiled_____");
   for (const node of nodes) if (!ROOTS.includes(node.id)) recordBookmark(node);
   api("bookmarks", "getTree", () => [treeNode(nodeById(ROOTS[0]))]);
-  api("bookmarks", "getSubTree", id => [treeNode(nodeById(id))]);
-  api("bookmarks", "getChildren", id => { folderById(id); return children(id); });
-  api("bookmarks", "get", ids => asArray(ids).map(nodeById));
+  api("bookmarks", "getSubTree", id => {
+    if (!nodes.some(node => node.id === id)) throw new TypeError('can\'t access property "guid", node is null');
+    return [treeNode(nodeById(id))];
+  });
+  api("bookmarks", "getChildren", id => {
+    if (!nodes.some(node => node.id === id)) throw new TypeError('can\'t access property "children", root is null');
+    folderById(id); return children(id);
+  });
+  api("bookmarks", "get", ids => asArray(ids).map(id => nodeById(id)));
   api("bookmarks", "search", q => nodes.filter(n => (q.title == null || n.title === q.title) && (q.url == null || n.url === q.url)));
   api("bookmarks", "create", insertNode);
   api("bookmarks", "update", (id, props) => {
-    const node = nodeById(id);
+    const node = nodeById(id, "No bookmarks found for the provided GUID");
     if (props.url != null) {
       checkURL(props.url, true);
       if (node.type !== "bookmark") throw new Error("Cannot set a folder URL");
@@ -551,14 +567,14 @@ export function createFirefox(setup = {}) {
     }
     return node;
   });
-  function mutableNode(id) {
+  function mutableNode(id, message = "No bookmarks found for the provided GUID") {
     if (ROOTS.includes(id)) throw new Error("Cannot modify a built-in root");
-    return nodeById(id);
+    return nodeById(id, message);
   }
   api("bookmarks", "move", (id, props) => {
     const node = mutableNode(id), oldParentId = node.parentId, oldIndex = node.index;
     const parentId = props.parentId ?? oldParentId;
-    let ancestor = folderById(parentId);
+    let ancestor = folderById(parentId, "No bookmarks found for the provided parentGuid");
     while (ancestor) {
       if (ancestor.id === id) throw new Error("Cannot move a folder into itself");
       ancestor = ancestor.parentId ? nodeById(ancestor.parentId) : undefined;
@@ -583,13 +599,29 @@ export function createFirefox(setup = {}) {
     if (notify) queue("bookmarks.onRemoved", node.id, info);
   }
   api("bookmarks", "remove", id => {
-    const node = mutableNode(id);
+    const node = mutableNode(id, "No bookmarks found for the provided GUID.");
     if (children(id).length) throw new Error("Cannot remove a non-empty folder");
     removeNode(node);
   });
-  api("bookmarks", "removeTree", id => removeNode(mutableNode(id)));
+  api("bookmarks", "removeTree", id => removeNode(mutableNode(id, "No bookmarks found for the provided GUID.")));
 
-  // Sync changes emit normal events but are not re-uploaded as local edits.
+  function markUploaded(cursor) {
+    for (const node of bookmarkJournal.slice(0, cursor)) unuploaded.delete(node.id);
+  }
+  function rekeyBookmark(node, id) {
+    const old = node.id;
+    node.id = id;
+    unuploaded.delete(old);
+    for (const child of nodes) if (child.parentId === old) child.parentId = id;
+    for (const entry of bookmarkJournal) {
+      if (entry.id === old) entry.id = id;
+      if (entry.parentId === old) entry.parentId = id;
+    }
+    // Places emits bookmark-guid-changed, which ext-bookmarks does not expose.
+  }
+
+  // Sync changes emit normal events, except dedupe GUID changes, and are not
+  // re-uploaded as local edits. Only locally created, never-uploaded items dedupe.
   async function applyRemoteBookmarks(changes, { orderEvents = batch => batch } = {}) {
     const eventStart = pending.length;
     remoteBookmarks = true;
@@ -607,14 +639,21 @@ export function createFirefox(setup = {}) {
         if (!ready.length) throw new Error("Remote bookmark parent missing");
         for (const change of ready) {
           let node = nodes.find(node => node.id === change.id);
-          if (!node) node = insertNode(change);
-          else {
-            if (node.title !== change.title || node.url !== change.url) {
-              await browser.bookmarks.update(node.id, { title: change.title, url: change.url });
-            }
-            if (node.parentId !== change.parentId || node.index !== change.index) {
-              await browser.bookmarks.move(node.id, { parentId: change.parentId, index: change.index });
-            }
+          if (!node) {
+            const type = change.type ?? (change.url == null ? "folder" : "bookmark");
+            node = nodes.find(local => unuploaded.has(local.id) && local.parentId === change.parentId
+              && local.type === type && local.title === (change.title ?? "")
+              && (type === "folder" || local.url === change.url));
+            if (node) {
+              rekeyBookmark(node, change.id);
+              node.dateAdded = change.dateAdded ?? node.dateAdded;
+            } else node = insertNode(change);
+          }
+          if (node.title !== change.title || node.url !== change.url) {
+            await browser.bookmarks.update(node.id, { title: change.title, url: change.url });
+          }
+          if (node.parentId !== change.parentId || node.index !== change.index) {
+            await browser.bookmarks.move(node.id, { parentId: change.parentId, index: change.index });
           }
         }
         waiting = waiting.filter(node => !ready.includes(node));
@@ -706,5 +745,5 @@ export function createFirefox(setup = {}) {
     }
     return `${pinned ? `${pinned} ` : ""}| ${items.join(" ")}`;
   }
-  return { browser, settle, layout, closeWindow, restart, bookmarkChanges, applyRemoteBookmarks, fire: queue, errors, calls };
+  return { browser, settle, layout, closeWindow, restart, bookmarkChanges, markUploaded, applyRemoteBookmarks, fire: queue, errors, calls };
 }

@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import browser_test  # noqa: E402
@@ -63,6 +64,20 @@ class ArgumentsTest(unittest.TestCase):
         self.assertIn("Foxy: test file is outside the worktree", output.getvalue())
         for sig, handler in previous.items():
             self.assertEqual(signal.getsignal(sig), handler)
+
+
+class CleanupTest(unittest.TestCase):
+    def test_permission_error_for_zombie_group_still_reaps_parent(self):
+        process = Mock(pid=987654321)
+        with patch.object(browser_test.os, "killpg", side_effect=PermissionError) as killpg:
+            browser_test.terminate_firefox(process)
+        self.assertEqual(killpg.call_args_list, [
+            unittest.mock.call(process.pid, signal.SIGTERM),
+            unittest.mock.call(process.pid, signal.SIGKILL),
+        ])
+        self.assertEqual(process.wait.call_args_list, [
+            unittest.mock.call(timeout=5), unittest.mock.call(),
+        ])
 
 
 class RunnerTest(unittest.TestCase):

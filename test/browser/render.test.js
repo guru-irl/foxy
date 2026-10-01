@@ -1,5 +1,5 @@
 import { test, assert, fixture, nextFrame, withPseudoState } from "./harness.js";
-import { createFirefox } from "../fakes/firefox.js";
+import { createBoardFirefox as createFirefox } from "./controller.js";
 import { buildBoard } from "../../extension/src/board/model.js";
 
 const setup = () => ({
@@ -192,6 +192,57 @@ for (const state of ["hover", "active", "focus-visible"]) {
   }
 }
 
+test("controller owns saved confirmation and serializes busy folder IDs in its render key", async () => {
+  const { ff, node, control } = await controller();
+  assert.equal(control.ui.confirmFolderId, null);
+  assert.ok(control.ui.busy instanceof Set);
+  const rebuilds = countRebuilds(node);
+  control.handlers.onConfirmDelete("f1");
+  assert.equal(control.ui.confirmFolderId, "f1");
+  assert.equal(rebuilds(), 1);
+  await control.refresh();
+  assert.equal(rebuilds(), 1, "unchanged confirmation must skip a rebuild");
+  control.ui.busy.add("f1"); await control.refresh();
+  assert.equal(rebuilds(), 2, "Set membership must invalidate the render key");
+  control.ui.busy.add("banner"); await control.refresh();
+  assert.equal(rebuilds(), 3);
+  control.ui.busy.delete("f1"); await control.refresh();
+  assert.equal(rebuilds(), 4);
+  control.handlers.onConfirmDelete(null);
+  assert.equal(control.ui.confirmFolderId, null); assert.equal(rebuilds(), 5);
+  assert.equal(ff.calls.some(call => call.api === "runtime.sendMessage" && call.args[0].type === "blank-and-close"), false,
+    "confirmation must never send the page-close message");
+});
+
+for (const hold of ["drag", "edit", "action"]) {
+  test(`saved confirmation plumbing preserves the ${hold} hold and refreshes once on release`, async () => {
+    const { ff, node, control } = await controller();
+    const rebuilds = countRebuilds(node);
+    let release, running;
+    if (hold === "drag") control.handlers.onDragState(true);
+    else if (hold === "edit") control.handlers.onEditState(true);
+    else {
+      const update = ff.browser.tabGroups.update;
+      ff.browser.tabGroups.update = async (...args) => {
+        await new Promise(resolve => { release = resolve; });
+        return update(...args);
+      };
+      running = control.handlers.onRename(101, "Action rename");
+    }
+    control.handlers.onConfirmDelete("f1");
+    assert.equal(control.ui.confirmFolderId, "f1"); assert.equal(rebuilds(), 0);
+    await ff.browser.tabs.update(23, { url: `https://example.com/${hold}-confirm` });
+    await flush(ff);
+    assert.equal(rebuilds(), 0);
+    if (hold === "drag") control.handlers.onDragState(false);
+    else if (hold === "edit") control.handlers.onEditEnd();
+    else { release(); await running; }
+    await flush(ff);
+    assert.equal(rebuilds(), 1);
+    assert.equal(control.ui.confirmFolderId, "f1");
+  });
+}
+
 test("empty board still offers fixed columns and new group", async () => {
   const node = await root();
   const { renderBoard } = await import("../../extension/src/board/render.js");
@@ -217,6 +268,7 @@ async function controller(set = setup()) {
   const { createController } = await import("../../extension/src/main.js");
   const control = createController(node, ff.browser);
   await control.refresh();
+  await flush(ff); // Drain the one-time reconcile completion before interaction assertions.
   return { ff, node, control };
 }
 async function flush(ff) {
@@ -806,7 +858,7 @@ test("stale row actions warn and re-read instead of throwing or closing the page
     assert.ok(warnings.some(args => args[0].startsWith("Foxy:")));
     assert.equal(node.querySelector('[data-tab-id="23"]'), null);
     assert.ok(await ff.browser.tabs.get(99));
-    assert.equal(ff.calls.filter(call => call.api === "runtime.sendMessage").length, 0);
+    assert.equal(ff.calls.filter(call => call.api === "runtime.sendMessage" && call.args[0].type === "blank-and-close").length, 0);
   } finally { console.warn = warn; }
   await flush(ff);
 });
@@ -840,7 +892,7 @@ test("onOpen closes only a history-free page and activates remote tabs and follo
     await control.handlers.onOpen({ id: 23, windowId: 2 });
     assert.equal((await ff.browser.tabs.get(23)).active, true);
     assert.equal((await ff.browser.windows.getAll({})).find(win => win.id === 2).focused, true);
-    assert.equal(ff.calls.filter(call => call.api === "runtime.sendMessage").length, 1);
+    assert.equal(ff.calls.filter(call => call.api === "runtime.sendMessage" && call.args[0].type === "blank-and-close").length, 1);
     win.history.pushState(null, "");
     ff.calls.length = 0;
     await control.handlers.onOpen({ id: 21, windowId: 2, pinned: true });
@@ -848,7 +900,7 @@ test("onOpen closes only a history-free page and activates remote tabs and follo
     assert.equal(pin.windowId, 1);
     assert.equal(pin.active, true);
     assert.equal(pin.pinned, true);
-    assert.equal(ff.calls.filter(call => call.api === "runtime.sendMessage").length, 0);
+    assert.equal(ff.calls.filter(call => call.api === "runtime.sendMessage" && call.args[0].type === "blank-and-close").length, 0);
     assert.ok(await ff.browser.tabs.get(99));
     await ff.settle();
     await new Promise(resolve => win.requestAnimationFrame(resolve));
@@ -872,4 +924,13 @@ test("generic button interaction fills do not erase the group-dot colour", async
     dot.classList.add("focus-test");
     assert.ok(getComputedStyle(dot).backgroundImage.includes("gradient"), "generic focus fill must not erase the group colour");
   } finally { rule.selectorText = selector; }
+});
+
+
+// Legacy tab-board tests should not exercise the absent saved-background error path.
+test("fix r1: legacy render controller helper reads without background warnings", async () => {
+  const warn = console.warn, warnings = [];
+  console.warn = (...args) => warnings.push(args);
+  try { await controller(); assert.deepEqual(warnings, []); }
+  finally { console.warn = warn; }
 });

@@ -2,6 +2,27 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createFirefox } from "./fakes/firefox.js";
 
+for (const method of ["get", "getCurrent", "getLastFocused"]) {
+  test(`windows.${method} ignores deprecated windowTypes and records a warning`, async () => {
+    const ff = createFirefox({ windows: [{ id: 1 }, { id: 2, type: "popup", focused: true }],
+      currentWindowId: 2, tabs: [{ id: 2, windowId: 2 }] });
+    const props = { windowTypes: ["normal"], populate: true };
+    const win = await ff.browser.windows[method](...(method === "get" ? [2, props] : [props]));
+    assert.equal(win.id, 2);
+    assert.equal(win.type, "popup");
+    assert.equal(win.tabs[0].id, 2);
+    assert.equal(ff.errors.length, 1);
+    assert.match(ff.errors[0].message, /windowTypes.*deprecated/i);
+  });
+}
+
+test("windows.getAll filters actual window types without deprecation warnings", async () => {
+  const ff = createFirefox({ windows: [{ id: 2, type: "popup", focused: true }, { id: 1 }] });
+  assert.deepEqual((await ff.browser.windows.getAll({ windowTypes: ["normal"] })).map(w => w.id), [1]);
+  assert.deepEqual((await ff.browser.windows.getAll({ windowTypes: ["popup"] })).map(w => w.id), [2]);
+  assert.deepEqual(ff.errors, []);
+});
+
 function strip() {
   return createFirefox({
     groups: [{ id: 101, windowId: 1, title: "Group", color: "red" }],

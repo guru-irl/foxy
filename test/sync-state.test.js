@@ -9,6 +9,7 @@ import {
 const blank = () => ({
   rootId: null, pinnedId: null, groups: {}, tabs: {}, openFolders: [], missing: [],
   cantReopen: {}, deferred: [], quietUntil: {}, pendingRemovals: {}, failedCreates: {},
+  removedIds: {}, folderSnapshots: {},
 });
 const populated = () => ({
   rootId: "root-guid", pinnedId: "pins-guid",
@@ -23,6 +24,7 @@ const populated = () => ({
   deferred: ["folder-a"], quietUntil: { 42: 1234567890 },
   pendingRemovals: { 9: { bookmarkId: "bookmark-b", folderId: "folder-b", due: 1234567895 } },
   failedCreates: { 15: "data:text/plain,rejected" },
+  removedIds: {}, folderSnapshots: {},
 });
 
 // Catch missing bookkeeping fields and shared mutable defaults across event-page loads.
@@ -87,6 +89,12 @@ test("disposable outbound state: malformed fields default to empty without losin
     ["pendingRemovals", "wrong deadline", { 9: { bookmarkId: "bookmark-b", folderId: "folder-b", due: "soon" } }],
     ["pendingRemovals", "non-finite deadline", { 9: { bookmarkId: "bookmark-b", folderId: "folder-b", due: Infinity } }],
     ["pendingRemovals", "mixed valid and invalid", { 9: populated().pendingRemovals[9], 42: null }],
+    ["removedIds", "array", []],
+    ["removedIds", "null", null],
+    ["removedIds", "wrong timestamp", { gone: "yesterday" }],
+    ["folderSnapshots", "array", []],
+    ["folderSnapshots", "null", null],
+    ["folderSnapshots", "missing URLs", { gone: { title: "Dev", color: "red" } }],
     ["failedCreates", "array", []],
     ["failedCreates", "null", null],
     ["failedCreates", "number", 42],
@@ -288,4 +296,14 @@ test("a failed storage save rejects its task but does not poison the queue", asy
   await queue.idle();
   assert.deepEqual(await loadState(ff.browser), populated());
   assert.equal(log.mock.callCount(), 1);
+});
+
+test("legacy state without removal evidence or folder snapshots preserves its identities on wake", async () => {
+  const ff = createFirefox(), legacy = populated();
+  delete legacy.removedIds; delete legacy.folderSnapshots;
+  await saveState(ff.browser, legacy);
+  const state = await loadState(ff.browser);
+  assert.deepEqual(state, { ...legacy, removedIds: {}, folderSnapshots: {} });
+  await saveState(ff.browser, state);
+  assert.deepEqual((await loadState(ff.browser)).tabs, legacy.tabs);
 });

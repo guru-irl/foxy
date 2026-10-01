@@ -1,5 +1,5 @@
 import { test, assert, fixture, nextFrame, dispatchDrag, withPseudoState } from "./harness.js";
-import { createFirefox } from "../fakes/firefox.js";
+import { createBoardFirefox as createFirefox } from "./controller.js";
 import { buildBoard } from "../../extension/src/board/model.js";
 import { renderBoard } from "../../extension/src/board/render.js";
 
@@ -40,6 +40,7 @@ async function controller(set = setup()) {
   const { createController } = await import("../../extension/src/main.js");
   const control = createController(node, ff.browser);
   await control.refresh();
+  await flush(ff); // Drain the one-time reconcile completion before interaction assertions.
   return { ff, node, control };
 }
 async function flush(ff) { await ff.settle(); await nextFrame(); await nextFrame(); }
@@ -448,7 +449,7 @@ test("row close removes only its tab without activation or closing the page", as
   const { ff, node } = await controller(); ff.calls.length = 0;
   node.querySelector('[data-tab-id="12"] .row-close').click(); await flush(ff);
   assert.equal(ff.layout(1), "P11 | [101: 13] [102: 14] 15 99");
-  assert.equal(ff.calls.some(call => call.api === "tabs.update" || call.api === "runtime.sendMessage"), false);
+  assert.equal(ff.calls.some(call => call.api === "tabs.update" || (call.api === "runtime.sendMessage" && call.args[0].type === "blank-and-close")), false);
   assert.equal((await ff.browser.tabs.get(99)).active, true);
 });
 test("header close removes group members but ungroups and preserves the page", async () => {
@@ -520,4 +521,13 @@ test("opening an actual editor invalidates an in-flight snapshot without losing 
     assert.equal((await ff.browser.tabGroups.get(101)).title, "In progress");
     assert.equal(node.querySelector('[data-tab-id="23"] .row-label').textContent, "https://example.com/inflight-edit");
   } finally { release?.(); ff.browser.tabs.query = query; key(node.querySelector(".name-editor") ?? node, "Escape"); await flush(ff); }
+});
+
+
+// Legacy tab-board tests should not exercise the absent saved-background error path.
+test("fix r1: legacy edit controller helper reads without background warnings", async () => {
+  const warn = console.warn, warnings = [];
+  console.warn = (...args) => warnings.push(args);
+  try { await controller(); assert.deepEqual(warnings, []); }
+  finally { console.warn = warn; }
 });
