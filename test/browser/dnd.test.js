@@ -47,6 +47,19 @@ function point(node, x = 0.5, y = 0.5) {
 function clean(root) {
   assert.equal(root.querySelectorAll(".dragging, .drop-target, .drop-line").length, 0);
 }
+function rgba(color) {
+  const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
+  canvas.width = canvas.height = 1;
+  ctx.fillStyle = color; ctx.fillRect(0, 0, 1, 1);
+  return [...ctx.getImageData(0, 0, 1, 1).data];
+}
+function composite([r, g, b, a], background) {
+  return [r, g, b].map((value, i) => value * a / 255 + background[i] * (1 - a / 255));
+}
+function luminance(rgb) {
+  const linear = rgb.map(value => value / 255 <= 0.04045 ? value / 255 / 12.92 : ((value / 255 + 0.055) / 1.055) ** 2.4);
+  return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+}
 async function flush(ff) { await ff.settle(); await nextFrame(); await nextFrame(); }
 async function controller(set = setup()) {
   const ff = createFirefox(set), root = await makeRoot();
@@ -54,6 +67,51 @@ async function controller(set = setup()) {
   const control = createController(root, ff.browser);
   await control.refresh();
   return { root, ff, control };
+}
+
+// Without controller board-membership guards, foreign MIME payloads can reach
+// executor reads/mutations, including the Foxy page and another Foxy page.
+for (const [id, label] of [[99, "self"], [55, "other Foxy-page"], [123456, "unknown"]]) {
+  test(`foreign ${label} tab payload is ignored in every drop zone without API calls`, async () => {
+    const set = setup();
+    set.tabs.push({ id: 55, windowId: 1, url: location.origin + location.pathname + "?foreign" });
+    const { root, ff } = await controller(set);
+    const messages = [], debug = console.debug;
+    console.debug = (...args) => messages.push(args);
+    try {
+      for (const selector of ['.rows[data-zone="pinned"]', '.rows[data-zone="tabs"]',
+        '.rows[data-group-id="101"]', '.new-group']) {
+        const target = root.querySelector(selector), dt = new DataTransfer();
+        dt.setData(TAB, String(id));
+        ff.calls.length = 0;
+        dispatchDrag("drop", target, { dataTransfer: dt, ...point(target, 0.5, 0) });
+        await flush(ff);
+        assert.deepEqual(ff.calls, [], "a non-board tab must not reach any API, including refresh");
+      }
+      assert.equal(messages.length, 4);
+      assert.ok(messages.every(args => args[0].startsWith("Foxy:")));
+    } finally { console.debug = debug; }
+  });
+}
+for (const [id, label] of [[301, "excluded"], [123456, "unknown"]]) {
+  test(`foreign ${label} group payload is ignored without API calls`, async () => {
+    const set = setup();
+    set.groups.push({ id: 301, windowId: 1, title: "Excluded" });
+    set.tabs.push({ id: 55, windowId: 1, groupId: 301, url: location.origin + location.pathname + "?foreign" });
+    const { root, ff } = await controller(set);
+    const target = root.querySelector('.column[data-group-id="101"]'), dt = new DataTransfer();
+    dt.setData(GROUP, String(id));
+    const messages = [], debug = console.debug;
+    console.debug = (...args) => messages.push(args);
+    try {
+      ff.calls.length = 0;
+      dispatchDrag("drop", target, { dataTransfer: dt, ...point(target, 0, 0.5) });
+      await flush(ff);
+      assert.deepEqual(ff.calls, [], "a non-board group must not reach any API, including refresh");
+      assert.equal(messages.length, 1);
+      assert.ok(messages[0][0].startsWith("Foxy:"));
+    } finally { console.debug = debug; }
+  });
 }
 
 // Wrong midpoint axis/slot, a layout-affecting marker, or an unreadable-data
@@ -84,13 +142,37 @@ test("tab drag uses types during dragover and places one neutral 2px line betwee
     assert.ok(Math.abs(bounds.top + 1 - first.getBoundingClientRect().bottom) <= 1);
     assert.ok(rows.closest(".column").classList.contains("drop-target"));
     const style = getComputedStyle(line);
-    assert.equal(style.backgroundColor, "rgb(255, 255, 255)");
+    const [r, g, b] = rgba(style.backgroundColor);
+    assert.equal(r, g); assert.equal(g, b, "the line must remain neutral");
     assert.equal(style.boxShadow, "none"); assert.equal(style.borderTopWidth, "0px"); assert.equal(style.outlineStyle, "none");
     dispatchDrag("drop", rows, options);
     assert.deepEqual(calls.tabs, [[15, { zone: "group", groupId: 101, slot: 1, tabId: 15 }]]);
   } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
   assert.deepEqual(calls.states, [true, false]); clean(root);
 });
+
+// A white-only marker or fill mixing toward white fails in the light scheme.
+for (const scheme of ["light", "dark"]) {
+  test(`${scheme} drag feedback has a contrasting neutral line and visible target fill`, async () => {
+    const { root } = await draw();
+    root.style.colorScheme = scheme;
+    const source = tab(root), dt = start(source), rows = root.querySelector('.rows[data-group-id="101"]');
+    const column = rows.closest(".column"), background = scheme === "light" ? [255, 255, 255] : [0, 0, 0];
+    const card = composite(rgba(getComputedStyle(column).backgroundColor), background);
+    try {
+      dispatchDrag("dragover", rows, { dataTransfer: dt, ...point(rows.querySelector(".row"), 0.5, 1) });
+      const fill = composite(rgba(getComputedStyle(column).backgroundColor), background);
+      const color = rgba(getComputedStyle(root.querySelector(".drop-line")).backgroundColor);
+      assert.equal(color[0], color[1]); assert.equal(color[1], color[2]);
+      const line = composite(color, fill), a = luminance(line), b = luminance(fill);
+      const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      assert.ok(ratio >= 3, `line contrast against the target must be at least 3:1, got ${ratio}`);
+      assert.ok(Math.abs(luminance(fill) - luminance(card)) >= 0.02, "target fill must visibly differ from the card");
+      assert.ok(scheme === "light" ? luminance(fill) < luminance(card) : luminance(fill) > luminance(card),
+        "feedback fill must mix toward the opposite neutral end of the scheme");
+    } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
+  });
+}
 
 for (const [zone, slot] of [["pinned", 0], ["pinned", 1], ["pinned", 2], ["tabs", 0], ["tabs", 1], ["tabs", 2]]) {
   test(`${zone} tab payload at top, remote boundary or end (slot ${slot})`, async () => {
@@ -105,6 +187,27 @@ for (const [zone, slot] of [["pinned", 0], ["pinned", 1], ["pinned", 2], ["tabs"
     } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
   });
 }
+for (const zone of ["pinned", "tabs"]) {
+  for (const slot of [1, 2]) {
+    test(`${zone} window-boundary marker at slot ${slot} sits at the preceding row bottom`, async () => {
+      const set = setup(); set.windows.push({ id: 3 });
+      set.tabs.push({ id: 31, windowId: 3 }, { id: 32, windowId: 3, pinned: true });
+      const { root, calls } = await draw(set);
+      const source = root.querySelector('[data-tab-id="12"]'), dt = start(source);
+      const rows = root.querySelector(`.rows[data-zone="${zone}"]`), list = [...rows.querySelectorAll(".row")];
+      const after = list[slot - 1].getBoundingClientRect(), before = list[slot].getBoundingClientRect();
+      const opts = { dataTransfer: dt, clientX: after.left + 10, clientY: (after.bottom + before.top) / 2 };
+      try {
+        dispatchDrag("dragover", rows, opts);
+        const line = root.querySelector(".drop-line").getBoundingClientRect();
+        assert.ok(Math.abs(line.top + 1 - after.bottom) <= 1, "marker must sit on after.bottom, outside the window heading/gap");
+        dispatchDrag("drop", rows, opts);
+        assert.deepEqual(calls.tabs, [[12, { zone, slot, tabId: 12 }]]);
+      } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
+    });
+  }
+}
+
 for (const zone of ["pinned", "tabs"]) {
   test(`empty ${zone} accepts a tab at slot zero`, async () => {
     const set = setup(); set.tabs = set.tabs.filter(t => t.id !== 11 && t.id !== 21 && t.id !== 15 && t.id !== 23);
@@ -131,6 +234,30 @@ test("new group is a fill-only tab target and emits its payload", async () => {
     assert.deepEqual(calls.tabs, [[15, { zone: "new-group", slot: 0, tabId: 15 }]]);
   } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
 });
+
+for (const [selector, drop] of [
+  ['.column[data-group-id="101"] .group-name', { zone: "group", groupId: 101, slot: 0, tabId: 15 }],
+  ['.column[data-group-id="201"] .other-window', { zone: "group", groupId: 201, slot: 0, tabId: 15 }],
+  ['.fixed[data-zone="pinned"] .column-title', { zone: "pinned", slot: 0, tabId: 15 }],
+  ['.fixed[data-zone="tabs"] .column-title', { zone: "tabs", slot: 0, tabId: 15 }],
+]) {
+  test(`tab drop on ${selector} targets the column's slot zero`, async () => {
+    const set = setup();
+    for (let i = 0; i < 30; i++) set.tabs.push({ id: 1000 + i, windowId: 1, groupId: 101 });
+    const { root, calls } = await draw(set);
+    const source = tab(root), dt = start(source), target = root.querySelector(selector);
+    root.querySelector('.rows[data-group-id="101"]').scrollTop = 160;
+    try {
+      const opts = { dataTransfer: dt, ...point(target) };
+      assert.ok(dispatchDrag("dragover", target, opts).defaultPrevented, "a column heading accepts tab drops");
+      assert.ok(target.closest(".column").classList.contains("drop-target"));
+      if (drop.zone === "tabs") assert.equal(root.querySelector(".drop-line"), null, "the TABS title is a no-op for its first row");
+      else assert.ok(root.querySelector(".drop-line"));
+      dispatchDrag("drop", target, opts);
+      assert.deepEqual(calls.tabs, [[15, drop]]);
+    } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
+  });
+}
 
 test("group header drag computes horizontal column slot and a vertical line", async () => {
   const { root, calls } = await draw();
@@ -176,6 +303,17 @@ test("leaving the board and cancelled dragend clear feedback without opening a r
   source.click(); assert.deepEqual(calls.opened, [], "post-drag click must not activate/close the page");
   source.click(); assert.deepEqual(calls.opened, [15], "a later ordinary click remains usable");
 });
+test("a keyboard-activated click after a drag works without a fresh pointerdown", async () => {
+  const { root, calls } = await draw();
+  const source = tab(root), dt = start(source);
+  dispatchDrag("dragend", source, { dataTransfer: dt });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  source.focus();
+  // Keyboard/assistive activation has detail zero and no preceding pointerdown.
+  source.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 0 }));
+  assert.deepEqual(calls.opened, [15], "drag suppression must expire before a later keyboard click");
+});
+
 test("delegation is attached once and uses the newest render handlers", async () => {
   const { root, board, renderBoard, calls } = await draw();
   const latest = [];
@@ -286,6 +424,44 @@ for (const [id, next] of [[101, 102], [201, 102]]) {
     const members = id === 101 ? [12, 13] : [22];
     await ff.browser.tabs.remove(members); await flush(ff);
     assert.equal(document.activeElement, root.querySelector(`.column[data-group-id="${next}"] .column-close`));
+  });
+}
+
+// A marker at either no-op slot promises a move the resolver will not make.
+for (const id of [11, 12, 15, 24]) {
+  for (const edge of [0, 1]) {
+    test(`tab ${id} has no insertion line at its adjacent no-op slot (edge ${edge})`, async () => {
+      const set = setup(); set.tabs.push({ id: 24, windowId: 2 });
+      const { root } = await draw(set);
+      const source = root.querySelector(`[data-tab-id="${id}"]`), dt = start(source);
+      try {
+        const event = dispatchDrag("dragover", source, { dataTransfer: dt, ...point(source, 0.5, edge) });
+        assert.ok(event.defaultPrevented);
+        assert.equal(root.querySelector(".drop-line"), null, "a no-op tab slot must not show an insertion line");
+      } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
+    });
+  }
+}
+for (const id of [101, 102]) {
+  for (const edge of [0, 1]) {
+    test(`group ${id} has no insertion line at its adjacent no-op slot (edge ${edge})`, async () => {
+      const { root } = await draw();
+      const column = root.querySelector(`.column[data-group-id="${id}"]`), source = column.querySelector(".column-header"), dt = start(source);
+      try {
+        assert.ok(dispatchDrag("dragover", column, { dataTransfer: dt, ...point(column, edge, 0.5) }).defaultPrevented);
+        assert.equal(root.querySelector(".drop-line"), null, "a no-op group slot must not show an insertion line");
+      } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
+    });
+  }
+}
+for (const id of [21, 23]) {
+  test(`remote tab ${id} keeps its line when the adjacent boundary actually moves it here`, async () => {
+    const { root } = await draw();
+    const source = root.querySelector(`[data-tab-id="${id}"]`), dt = start(source);
+    try {
+      dispatchDrag("dragover", source, { dataTransfer: dt, ...point(source, 0.5, 0) });
+      assert.ok(root.querySelector(".drop-line"), "a cross-window move is not an adjacent no-op");
+    } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
   });
 }
 

@@ -132,14 +132,26 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     onBringHere: groupId => action(() => bringGroupHere(api, groupId, self.windowId)),
     onRename: (groupId, title) => action(() => renameGroup(api, groupId, title)),
     onRecolor: (groupId, color) => action(() => recolorGroup(api, groupId, color)),
-    onTabDrop: (tabId, drop) => action(async () => {
-      const target = resolveTabTarget(board, { ...drop, tabId }, self.windowId);
-      const result = await dropTab(api, tabId, target);
-      if (result.ok && result.groupId != null) requestedEditGroupId = result.groupId;
-      return result;
-    }),
-    onGroupDrop: (groupId, slot) => action(() =>
-      dropGroup(api, groupId, resolveGroupTarget(board, groupId, slot, self.windowId))),
+    onTabDrop: (tabId, drop) => {
+      const lists = board ? [...board.pinned, ...board.tabs, ...board.columns] : [];
+      if (tabId === self?.id || !lists.some(list => list.rows.some(row => row.id === tabId))) {
+        console.debug("Foxy: ignored drop of a tab not on the board", tabId);
+        return;
+      }
+      return action(async () => {
+        const target = resolveTabTarget(board, { ...drop, tabId }, self.windowId);
+        const result = await dropTab(api, tabId, target);
+        if (result.ok && result.groupId != null) requestedEditGroupId = result.groupId;
+        return result;
+      });
+    },
+    onGroupDrop: (groupId, slot) => {
+      if (!board?.columns.some(column => column.id === groupId)) {
+        console.debug("Foxy: ignored drop of a group not on the board", groupId);
+        return;
+      }
+      return action(() => dropGroup(api, groupId, resolveGroupTarget(board, groupId, slot, self.windowId)));
+    },
     onDragState: dragging => interaction("dragging", dragging),
     onEditState: editing => interaction("editing", editing),
     onEditEnd: () => {

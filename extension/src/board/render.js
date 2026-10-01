@@ -19,7 +19,7 @@ export function renderBoard(root, board, ui, handlers) {
   strip.append(create);
   root.replaceChildren(fixedColumn("pinned", "PINNED", board.pinned, handlers), strip,
     fixedColumn("tabs", "TABS", board.tabs, handlers));
-  attachDnd(root, handlers);
+  attachDnd(root, handlers, board);
   alignColumns(root);
   if (!layouts.has(root)) {
     layouts.add(root);
