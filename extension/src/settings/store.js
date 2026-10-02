@@ -1,3 +1,5 @@
+import { CELL_PRESETS } from "../grid/layout.js";
+
 export const DEFAULT_SETTINGS = Object.freeze({
   railCells: 3, showClock: true, showPinned: true, showSaved: true, timeFormat: "24",
   showDate: true, transparency: "medium", otherWindows: true, pinsMoveHere: true,
@@ -72,12 +74,7 @@ export function cellPx(device) {
   if (device?.cellSize === "custom") {
     return Number.isInteger(device.customCell) ? Math.max(40, Math.min(240, device.customCell)) : 80;
   }
-  switch (device?.cellSize) {
-    case "S": return 48;
-    case "L": return 112;
-    case "XL": return 144;
-    default: return 80;
-  }
+  return Object.hasOwn(CELL_PRESETS, device?.cellSize) ? CELL_PRESETS[device.cellSize] : CELL_PRESETS.M;
 }
 
 export function cardAlpha(transparency, scheme) {
