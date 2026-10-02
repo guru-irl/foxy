@@ -146,7 +146,9 @@ test("first SAVED tree read recovers a silently deduped root with Firefox errors
   await server.syncDevice(a); await server.syncDevice(b);
   const errors = t.mock.method(console, "error", () => {});
   b.calls.length = 0;
-  assert.deepEqual(await b.sync.onMessage({ type: "foxy:saved" }), { saved: [], missing: [] });
+  assert.deepEqual(await b.sync.onMessage({ type: "foxy:saved" }), {
+    saved: [], missing: [], folders: { 11: expected.groups[11].folderId },
+  });
   await drain(b, b.sync);
   assert.equal((await loadState(b.browser)).rootId, expected.rootId);
   assert.deepEqual(tabMutations(b), []);

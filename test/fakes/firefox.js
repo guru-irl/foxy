@@ -19,7 +19,7 @@ export function createFirefox(setup = {}) {
   let nextWindow = Math.max(0, ...wins.map(w => w.id)) + 1;
   const currentWindowId = setup.currentWindowId ?? wins.find(w => w.focused)?.id ?? wins[0]?.id;
   let lastFocusedId = wins.find(w => w.focused)?.id ?? wins[0]?.id;
-  const browser = { tabs: {}, tabGroups: {}, windows: {}, bookmarks: {}, storage: { local: {}, session: {} }, runtime: {}, permissions: {}, scripting: {} };
+  const browser = { tabs: {}, tabGroups: {}, windows: {}, bookmarks: {}, storage: { local: {}, session: {}, sync: {} }, runtime: {}, permissions: {}, scripting: {} };
 
   function event(name) {
     const listeners = new Set();
@@ -667,8 +667,8 @@ export function createFirefox(setup = {}) {
     }
   }
 
-  const session = {};
-  for (const [area, storage] of [["local", localStore], ["session", session]]) {
+  const session = {}, syncStore = {};
+  for (const [area, storage] of [["local", localStore], ["session", session], ["sync", syncStore]]) {
     api(`storage.${area}`, "get", keys => {
       if (keys == null) return jsonCopy(storage);
       const result = {};

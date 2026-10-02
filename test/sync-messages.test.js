@@ -20,9 +20,45 @@ test("saved lists closed folders in folder order with counts and current cantReo
   assert.deepEqual(response, { saved: [
     { folderId: folders[0].id, title: "Work", color: "red", count: 3, cantReopen: ["file:///private"] },
     { folderId: folders[1].id, title: "Read", color: "blue", count: 1, cantReopen: [] },
-  ], missing: [] });
+  ], missing: [], folders: {} });
   await ff.browser.bookmarks.create({ parentId: folders[1].id, url: "about:config" });
   assert.deepEqual((await sync.onMessage({ type: "foxy:saved" })).saved[1].cantReopen, ["about:config"]);
+});
+
+test("saved includes folders for mapped open groups across windows, not unmapped or private groups", async () => {
+  const ff = createFirefox({
+    windows: [{ id: 1, focused: true }, { id: 2 }, { id: 3, incognito: true }],
+    groups: [{ id: 11, windowId: 1, title: "Work", color: "red" },
+      { id: 12, windowId: 2, title: "Read", color: "blue" },
+      { id: 13, windowId: 1, title: "Unmapped" }, { id: 14, windowId: 3, title: "Private" }],
+    tabs: [{ id: 1, windowId: 1, url: "about:home" },
+      { id: 4, windowId: 1, url: "https://work/", groupId: 11 },
+      { id: 5, windowId: 2, url: "https://read/", groupId: 12 },
+      { id: 6, windowId: 1, url: "about:blank", groupId: 13 },
+      { id: 7, windowId: 3, url: "https://private/", groupId: 14 }],
+  });
+  const sync = wire(ff);
+  await drain(ff, sync);
+  const [work] = await ff.browser.bookmarks.search({ title: "🔴 Work" });
+  const [read] = await ff.browser.bookmarks.search({ title: "🔵 Read" });
+  assert.deepEqual((await sync.onMessage({ type: "foxy:saved" })).folders, { 11: work.id, 12: read.id });
+});
+
+test("saved folders follows group close and reopen without including closed saved folders", async () => {
+  const { ff, sync, folders } = await savedSetup();
+  const opened = await sync.onMessage({ type: "foxy:open-saved", folderId: folders[0].id, windowId: 1 });
+  assert.equal(opened.ok, true);
+  assert.deepEqual((await sync.onMessage({ type: "foxy:saved" })).folders, { [opened.groupId]: folders[0].id });
+  await ff.browser.tabs.remove((await ff.browser.tabs.query({ groupId: opened.groupId })).map(tab => tab.id));
+  await drain(ff, sync);
+  const closed = await sync.onMessage({ type: "foxy:saved" });
+  assert.deepEqual(closed.folders, {});
+  assert.equal(closed.saved.some(folder => folder.folderId === folders[0].id), true);
+  const reopened = await sync.onMessage({ type: "foxy:open-saved", folderId: folders[0].id, windowId: 1 });
+  assert.equal(reopened.ok, true);
+  assert.notEqual(reopened.groupId, opened.groupId);
+  assert.deepEqual((await sync.onMessage({ type: "foxy:saved" })).folders, { [reopened.groupId]: folders[0].id });
+  await drain(ff, sync);
 });
 
 test("open-saved creates unloaded tabs in the requested window and maps before returning without echoes", async () => {
@@ -79,7 +115,10 @@ test("restore-all restores every missing folder in one queue job and clears the 
   assert.equal((await sync.onMessage({ type: "foxy:saved" })).missing.length, 2);
   assert.deepEqual(await sync.onMessage({ type: "foxy:restore-all", windowId: 1 }), { ok: true });
   await drain(ff, sync);
-  assert.deepEqual(await sync.onMessage({ type: "foxy:saved" }), { saved: [], missing: [] });
+  const response = await sync.onMessage({ type: "foxy:saved" });
+  assert.deepEqual(response.saved, []);
+  assert.deepEqual(response.missing, []);
+  assert.equal(Object.keys(response.folders).length, 2);
   assert.equal((await ff.browser.tabGroups.query({})).length, 2);
 });
 
