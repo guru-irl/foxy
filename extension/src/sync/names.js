@@ -74,9 +74,12 @@ export function createNames({ api, getState, save }) {
         world: "ISOLATED", func: keepPinTitle, args: [name] });
       const restored = results?.[0]?.result;
       const pageTitle = name === null && typeof restored === "string" && restored !== entry.appliedName ? restored : undefined;
-      const changed = (entry.appliedName ?? null) !== name;
+      const changed = (entry.appliedName ?? null) !== name || (name !== null && entry.shownName !== name);
       if (name === null) delete entry.appliedName;
-      else entry.appliedName = name;
+      else {
+        entry.appliedName = name;
+        entry.shownName = name;
+      }
       if (changed) await save();
       return pageTitle;
     } catch (error) { warn(error); }

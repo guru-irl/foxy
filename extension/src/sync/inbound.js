@@ -153,6 +153,7 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
   async function openBookmark(node, folderId, group) {
     if (!isOpenableUrl(node.url)) return;
     let tab;
+    const name = folderId === getState().pinnedId ? decodePinTitle(node.title) : null;
     if (folderId === getState().pinnedId) {
       const win = await normalWindow();
       if (!win) throw new Error("No non-private normal window");
@@ -164,7 +165,6 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
         const pin = await attempt(() => api.tabs.get(Number(pair[0])));
         if (pin?.pinned && pin.windowId === win.id) { index = pin.index + 1; break; }
       }
-      const name = decodePinTitle(node.title);
       if (name !== null) {
         // Firefox 157 allows title only on discarded, unpinned creation. Pinning
         // a lazy tab afterwards preserves its unloaded title and document.
@@ -197,8 +197,9 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     }
     const state = getState();
     // A lazy named pin has no page title yet; its label must not be the unname fallback.
-    const title = tab.pinned && decodePinTitle(node.title) !== null ? node.url : tab.title ?? "";
-    state.tabs[tab.id] = { bookmarkId: node.id, folderId, url: node.url, title };
+    const title = tab.pinned && name !== null ? node.url : tab.title ?? "";
+    state.tabs[tab.id] = { bookmarkId: node.id, folderId, url: node.url, title,
+      ...(name !== null ? { shownName: name } : {}) };
     state.quietUntil[tab.id] = now() + quietMs;
     if (tab.pinned && !tab.discarded) {
       // Firefox cannot create a discarded pin directly. Discard failure is non-fatal.

@@ -15,9 +15,10 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   const queue = createQueue();
   let state, starting, rebuilding;
   const earlyRemovals = [];
-  const returnTimers = new Map(), movedTabs = new Set();
+  const returnTimers = new Map(), movedTabs = new Set(), loadedTabs = new Set();
   let moveTimer;
   const save = () => saveState(api, state);
+  const saveLoads = () => api.storage.session.set({ foxyLoadedTabs: [...loadedTabs] });
   const names = createNames({ api, getState: () => state, save });
   const outbound = createOutbound({ api, getState: () => state, save, now, removeDelayMs, quietMs,
     extensionBaseUrl: api.runtime.getURL(""),
@@ -114,7 +115,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   });
 
   async function rebuildMaps(lostIdentity = false) {
-    await rebuild({ api, state, outbound, inbound, names, lostIdentity });
+    await rebuild({ api, state, outbound, inbound, names, lostIdentity, loadedTabs });
     await save();
     if (lostIdentity) for (const id of Object.keys(state.groups)) scheduleReturningGroup(Number(id));
   }
@@ -140,7 +141,8 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
         state = await loadState(api);
         for (const [id, info, at] of earlyRemovals.splice(0)) recordRemoved(state, id, info, at);
         if (pruneRemovedIds(state, now()) || Object.keys(state.removedIds).length) await save();
-        const session = await api.storage.session.get("foxySession");
+        const session = await api.storage.session.get(["foxySession", "foxyLoadedTabs"]);
+        for (const id of session.foxyLoadedTabs ?? []) loadedTabs.add(id);
         // Firefox 157 keys storage.session by Extension object (ExtensionStorage).
         // Updates/reloads get an empty bucket too: rebuild is their one reapply path.
         if (!session.foxySession) {
@@ -489,18 +491,18 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     "runtime.onInstalled": async () => {},
     "tabs.onCreated": tab => syncTab(tab.id),
     "tabs.onUpdated": async (id, change = {}) => {
-      if (change.pinned === false) {
-        if (state.tabs[id]?.shownName !== undefined) {
-          delete state.tabs[id].shownName;
-          await save();
-        }
-        await names.apply(id);
+      if (change.status === "loading") await saveLoads();
+      if ((change.status === "loading" || change.pinned === false) && state.tabs[id]?.shownName !== undefined) {
+        delete state.tabs[id].shownName;
+        await save();
       }
+      if (change.pinned === false) await names.apply(id);
       await syncTab(id);
       if (change.status === "complete" || change.pinned === true) await names.apply(id);
     },
     "permissions.onAdded": () => names.applyAll(),
     "tabs.onRemoved": async (id, info) => {
+      if (loadedTabs.delete(id)) await saveLoads();
       // A normal mapped group can subsequently move into a private window.
       // Its private close is not evidence for deleting a shared bookmark.
       let win;
@@ -564,6 +566,8 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     },
   };
   const handlers = Object.fromEntries(Object.entries(jobs).map(([name, fn]) => [name, (...args) => {
+    // Capture loads during startup settling before rebuild can infer a restored label.
+    if (name === "tabs.onUpdated" && args[1]?.status === "loading") loadedTabs.add(args[0]);
     if (name === "bookmarks.onRemoved") {
       if (state) recordRemoved(state, args[0], args[1], now());
       else earlyRemovals.push([args[0], args[1], now()]);
@@ -640,11 +644,6 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     if (node?.parentId !== state.pinnedId) return { ok: false };
     const restored = name === null ? await names.apply(tabId, true) : undefined;
     const title = name === null ? restored ?? entry.title : encodePinTitle(name);
-    if (name === null) {
-      const oldName = decodePinTitle(node.title);
-      if (restored === undefined && oldName !== null) entry.shownName = oldName;
-      else if (restored !== undefined) delete entry.shownName;
-    }
     const bookmarkTitle = name === null ? encodePageTitle(title) : title;
     if (node.title !== bookmarkTitle) await api.bookmarks.update(node.id, { title: bookmarkTitle });
     if (name === null) {

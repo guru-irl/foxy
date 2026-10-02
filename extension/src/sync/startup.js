@@ -1,4 +1,4 @@
-import { encodeFolderTitle, decodePinTitle, isSyncableUrl } from "./codec.js";
+import { encodeFolderTitle, decodePinTitle, normalizePinName, isSyncableUrl } from "./codec.js";
 import { mergeRoots, readTree } from "./tree.js";
 import { matchGroups, matchTabs } from "./match.js";
 import { probeMissingBookmark } from "./state.js";
@@ -30,7 +30,7 @@ export function settle(api, { settleMs = 3000, maxWaitMs = 20000, now = Date.now
 }
 
 /** Never infer bookmark deletion from absent tabs, even after failed restore. */
-export async function rebuild({ api, state, outbound, inbound, names, lostIdentity = false }) {
+export async function rebuild({ api, state, outbound, inbound, names, lostIdentity = false, loadedTabs = new Set() }) {
   const previous = lostIdentity ? structuredClone(state) : null;
   const pageTitles = new Map(Object.values(state.tabs).map(entry => [entry.bookmarkId, entry]));
   let knownRootId = state.rootId;
@@ -87,10 +87,13 @@ export async function rebuild({ api, state, outbound, inbound, names, lostIdenti
       const old = previous?.tabs[tab.id];
       const saved = pageTitles.get(pair.bookmarkId);
       const name = folder.id === state.pinnedId ? decodePinTitle(folder.bookmarks.find(node => node.id === pair.bookmarkId).title) : null;
-      // Updates/reloads can leave the name as the label while replacing the keeper.
-      // Retain only its page-title fallback by bookmark and URL, never a tab id.
-      const lingering = old?.shownName ?? (saved?.url === tab.url ? saved.shownName : undefined);
-      const shownName = tab.pinned && tab.title === lingering ? lingering : undefined;
+      // Session restore can retain a name as the label without a loaded document.
+      // An unname while closed retains the saved label by bookmark and URL.
+      const unloaded = tab.discarded || (tab.status === "complete" && !loadedTabs.has(tab.id));
+      const lingering = (old?.url === tab.url ? old.shownName : undefined)
+        ?? (saved?.url === tab.url ? saved.shownName : undefined);
+      const shownName = tab.pinned && unloaded
+        && ((name !== null && normalizePinName(tab.title) === name) || tab.title === lingering) ? tab.title : undefined;
       const pageTitle = shownName !== undefined ? old?.title ?? saved?.title ?? tab.url
         : name && tab.title === name
           ? (saved?.appliedName === name && saved.url === tab.url ? saved.title : tab.url)
