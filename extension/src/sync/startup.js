@@ -1,4 +1,4 @@
-import { encodeFolderTitle, isSyncableUrl } from "./codec.js";
+import { encodeFolderTitle, decodePinTitle, isSyncableUrl } from "./codec.js";
 import { mergeRoots, readTree } from "./tree.js";
 import { matchGroups, matchTabs } from "./match.js";
 import { probeMissingBookmark } from "./state.js";
@@ -32,6 +32,7 @@ export function settle(api, { settleMs = 3000, maxWaitMs = 20000, now = Date.now
 /** Never infer bookmark deletion from absent tabs, even after failed restore. */
 export async function rebuild({ api, state, outbound, inbound, names, lostIdentity = false }) {
   const previous = lostIdentity ? structuredClone(state) : null;
+  const pageTitles = new Map(Object.values(state.tabs).map(entry => [entry.bookmarkId, entry]));
   let knownRootId = state.rootId;
   const previousOpen = [...new Set([...state.openFolders, ...state.missing])];
   if (lostIdentity && knownRootId) {
@@ -84,8 +85,14 @@ export async function rebuild({ api, state, outbound, inbound, names, lostIdenti
     for (const pair of match.pairs) {
       const tab = local.find(tab => tab.id === pair.tabId);
       const old = previous?.tabs[tab.id];
+      const saved = pageTitles.get(pair.bookmarkId);
+      const name = folder.id === state.pinnedId ? decodePinTitle(folder.bookmarks.find(node => node.id === pair.bookmarkId).title) : null;
+      // Updates/reloads can leave the name as the label while replacing the keeper.
+      // Retain only its page-title fallback by bookmark and URL, never a tab id.
+      const pageTitle = name && tab.title === name && saved?.appliedName === name && saved.url === tab.url
+        ? saved.title : tab.title ?? "";
       state.tabs[tab.id] = { bookmarkId: pair.bookmarkId, folderId: folder.id,
-        url: old?.url ?? tab.url, title: old?.title ?? tab.title ?? "",
+        url: old?.url ?? tab.url, title: old?.title ?? pageTitle,
         ...(old?.appliedName ? { appliedName: old.appliedName } : {}) };
       if (old) {
         if (previous.quietUntil[tab.id] !== undefined) state.quietUntil[tab.id] = previous.quietUntil[tab.id];

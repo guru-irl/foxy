@@ -186,6 +186,19 @@ for (const lifecycle of ["update", "reload"]) {
   });
 }
 
+test("extension rebuild preserves a named pin page-title fallback when its keeper is unavailable", async () => {
+  const { ff } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
+  const query = ff.browser.tabs.query, get = ff.browser.tabs.get;
+  ff.browser.tabs.get = async id => ({ ...await get(id), ...(id === 2 ? { title: "Work" } : {}) });
+  ff.browser.tabs.query = async props => (await query(props)).map(tab => tab.id === 2 ? { ...tab, title: "Work" } : tab);
+  await ff.browser.storage.session.clear();
+  const sync = wire(ff);
+  await drain(ff, sync);
+  await ff.browser.permissions.remove({ origins: ["https://example.com/*"] });
+  assert.deepEqual(await sync.onMessage({ type: "foxy:rename-pin", tabId: 2, name: null }), { ok: true });
+  assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, "Page");
+});
+
 test("unname escapes a restored marker-like page title instead of naming it again", async () => {
   const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
   ff.browser.scripting.executeScript = async () => [{ frameId: 0, result: "  ✏️ Page title" }];
