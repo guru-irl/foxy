@@ -42,3 +42,14 @@ export function isOpenableUrl(url) {
     return false;
   }
 }
+
+/** Named pins use a bookmark marker, never a device-local preference. */
+export function encodePinTitle(name) {
+  const trimmed = name?.trim() ?? "";
+  return trimmed ? `✏️ ${trimmed}` : "";
+}
+
+export function decodePinTitle(title) {
+  const match = title.trim().match(/^✏\uFE0F?(.*)$/su);
+  return match?.[1].trim() || null;
+}

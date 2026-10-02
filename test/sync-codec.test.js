@@ -77,3 +77,15 @@ test("inbound URL policy allows only valid HTTP(S) URLs", () => {
   ];
   for (const [url, expected] of cases) assert.equal(isOpenableUrl(url), expected, String(url));
 });
+
+// A missing decoder or a broadened prefix must not turn ordinary titles into names.
+test("pin title codec trims names and accepts the pencil with either presentation", async () => {
+  const { encodePinTitle, decodePinTitle } = await import("../extension/src/sync/codec.js");
+  assert.equal(typeof encodePinTitle, "function");
+  for (const [title, name] of [["✏️ Work", "Work"], [" ✏ Work  ", "Work"],
+    ["✏️Work", "Work"], ["✏️  ", null], ["✏", null], ["Work", null],
+    ["A ✏️ Work", null], ["", null]]) assert.equal(decodePinTitle(title), name, title);
+  assert.equal(encodePinTitle("  Work  "), "✏️ Work");
+  assert.equal(encodePinTitle(""), "");
+  assert.equal(encodePinTitle(null), "");
+});

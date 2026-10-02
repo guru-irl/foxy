@@ -1,0 +1,87 @@
+import { decodePinTitle } from "./codec.js";
+
+/** Firefox match patterns grant a host, not a path or port. */
+export function pinOrigin(url) {
+  try {
+    const parsed = new URL(url);
+    return ["http:", "https:"].includes(parsed.protocol) ? `${parsed.protocol}//${parsed.hostname}/*` : null;
+  } catch { return null; }
+}
+
+/** Serialized by executeScript: everything this function uses must live here. */
+export function keepPinTitle(name) {
+  const key = "__foxyPinTitle";
+  let keeper = globalThis[key];
+  if (keeper) {
+    // Consume a page edit even if its observer callback has not run yet.
+    if (document.title !== keeper.name) keeper.pageTitle = document.title;
+    keeper.observer.disconnect();
+  }
+  if (name === null) {
+    if (keeper) document.title = keeper.pageTitle;
+    delete globalThis[key];
+    return;
+  }
+  if (!keeper) keeper = { pageTitle: document.title };
+  keeper.name = name;
+  const watch = () => keeper.observer.observe(document, { subtree: true, childList: true, characterData: true });
+  const write = () => {
+    keeper.observer.disconnect();
+    document.title = keeper.name;
+    watch();
+  };
+  keeper.observer ??= new MutationObserver(() => {
+    if (document.title === keeper.name) return;
+    keeper.pageTitle = document.title;
+    write();
+  });
+  globalThis[key] = keeper;
+  write();
+}
+
+/** Called only inside the sync queue. Bookmark titles remain the source of truth. */
+export function createNames({ api, getState, save }) {
+  const warn = error => console.warn("Foxy: could not apply pin name", error);
+  async function nameOf(entry) {
+    if (entry.folderId !== getState().pinnedId) return null;
+    const [node] = await api.bookmarks.get(entry.bookmarkId);
+    return node?.parentId === getState().pinnedId ? decodePinTitle(node.title) : null;
+  }
+  async function allowed(origin) {
+    return origin ? api.permissions.contains({ origins: [origin] }) : false;
+  }
+  async function apply(tabId) {
+    try {
+      const entry = getState().tabs[tabId];
+      if (!entry) return;
+      const tab = await api.tabs.get(Number(tabId));
+      if (tab.incognito || tab.discarded || tab.status !== "complete") return;
+      const name = tab.pinned ? await nameOf(entry) : null;
+      if (name === null && !entry.appliedName) return;
+      if (!await allowed(pinOrigin(tab.url))) return;
+      await api.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] },
+        world: "ISOLATED", func: keepPinTitle, args: [name] });
+      if (name === null) delete entry.appliedName;
+      else entry.appliedName = name;
+      await save();
+    } catch (error) { warn(error); }
+  }
+  async function applyAll() {
+    for (const id of Object.keys(getState().tabs)) await apply(Number(id));
+  }
+  async function pins() {
+    const pins = {};
+    for (const [id, entry] of Object.entries(getState().tabs)) {
+      try {
+        const tab = await api.tabs.get(Number(id));
+        if (!tab.pinned || tab.incognito) continue;
+        const name = await nameOf(entry);
+        if (name === null) continue;
+        const origin = pinOrigin(tab.url);
+        pins[id] = { name, origin, allowed: await allowed(origin) };
+      } catch (error) { warn(error); }
+    }
+    return { pins };
+  }
+  return { apply, applyAll, pins };
+}
