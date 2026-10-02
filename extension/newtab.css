@@ -546,6 +546,14 @@ button.group-name:focus-visible {
   background: color-mix(in srgb, var(--card) 85%, var(--text));
 }
 
+.cell-preview {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: 12px;
+  background: light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.12));
+}
+
 .drop-line {
   position: absolute;
   z-index: 1;

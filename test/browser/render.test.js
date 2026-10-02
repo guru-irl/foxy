@@ -540,7 +540,7 @@ test("controller routes drops through target resolvers and requests a new group'
   const { ff, node, control } = await controller();
   await control.handlers.onTabDrop(14, { zone: "group", groupId: 101, slot: 1 });
   assert.equal(node.querySelector('[data-group-id="101"] [data-tab-id="14"]').dataset.windowId, "1");
-  await control.handlers.onTabDrop(23, { zone: "new-group" });
+  await control.handlers.onTabDrop(23, { zone: "cell", rect: { x: 9, y: 0, w: 3, h: 4 } });
   assert.ok(control.ui.editGroupId != null);
   assert.ok(node.querySelector(`.column[data-group-id="${control.ui.editGroupId}"] [data-tab-id="23"]`));
   control.handlers.onEditEnd();
@@ -550,7 +550,7 @@ test("controller routes drops through target resolvers and requests a new group'
 
 test("review important 3: new-group edit ID holds refreshes until onEditEnd", async () => {
   const { ff, node, control } = await controller();
-  await control.handlers.onTabDrop(23, { zone: "new-group" });
+  await control.handlers.onTabDrop(23, { zone: "cell", rect: { x: 9, y: 0, w: 3, h: 4 } });
   await flush(ff);
   assert.ok(control.ui.editGroupId != null);
   assert.ok(node.querySelector(`.column[data-group-id="${control.ui.editGroupId}"]`), "introduce the new column before holding its editor");
@@ -583,7 +583,7 @@ test("review round 2: a group gone before the final drop read never holds an edi
     return vanishedId;
   };
   try {
-    const result = await control.handlers.onTabDrop(23, { zone: "new-group" });
+    const result = await control.handlers.onTabDrop(23, { zone: "cell", rect: { x: 9, y: 0, w: 3, h: 4 } });
     await flush(ff);
     assert.equal(result.ok, true);
     assert.equal(node.querySelector(`.column[data-group-id="${vanishedId}"]`), null);
@@ -601,7 +601,7 @@ test("review round 2: a group gone before the final drop read never holds an edi
 
 test("review round 2: removing the edited group clears both edit holds and refreshes once", async () => {
   const { ff, node, control } = await controller();
-  await control.handlers.onTabDrop(23, { zone: "new-group" });
+  await control.handlers.onTabDrop(23, { zone: "cell", rect: { x: 9, y: 0, w: 3, h: 4 } });
   await flush(ff);
   const editId = control.ui.editGroupId;
   assert.ok(node.querySelector(`.column[data-group-id="${editId}"]`));
@@ -638,7 +638,7 @@ for (const dragging of [false, true]) {
     const { createController } = await import("../../extension/src/main.js");
     const control = createController(node, ff.browser);
     await control.refresh();
-    await control.handlers.onTabDrop(23, { zone: "new-group" });
+    await control.handlers.onTabDrop(23, { zone: "cell", rect: { x: 9, y: 0, w: 3, h: 4 } });
     await flush(ff);
     const editId = control.ui.editGroupId;
     assert.ok(node.querySelector(`.column[data-group-id="${editId}"]`));
@@ -680,7 +680,7 @@ test("review round 2: failed group-removal registration is logged and tab events
     await flush(ff);
     assert.ok(warnings.some(args => args[0].startsWith("Foxy:")));
     assert.ok(node.querySelector('[data-tab-id="23"]'), "subscription failure must still schedule a read");
-    await control.handlers.onTabDrop(23, { zone: "new-group" });
+    await control.handlers.onTabDrop(23, { zone: "cell", rect: { x: 9, y: 0, w: 3, h: 4 } });
     await flush(ff);
     const editId = control.ui.editGroupId;
     assert.ok(node.querySelector(`.column[data-group-id="${editId}"]`));
@@ -699,7 +699,7 @@ test("review round 2: failed group-removal registration is logged and tab events
 for (const failures of [1, Infinity]) {
   test(`review round 2: ${failures === 1 ? "transient" : "persistent"} editor-existence failures are logged and retried once`, async () => {
     const { ff, node, control } = await controller();
-    await control.handlers.onTabDrop(23, { zone: "new-group" });
+    await control.handlers.onTabDrop(23, { zone: "cell", rect: { x: 9, y: 0, w: 3, h: 4 } });
     await flush(ff);
     const editId = control.ui.editGroupId;
     control.handlers.onEditState(true);

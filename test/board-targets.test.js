@@ -83,10 +83,13 @@ for (const [groupId, slot, windowId, beforeTabId] of [
   });
 }
 
-test("NEW GROUP always targets the supplied current window", async () => {
-  assert.deepEqual(resolveTabTarget(await fixture(), { zone: "new-group", tabId: 13 }, 7), {
-    kind: "new-group", windowId: 7,
+test("empty cell targets a new group in the current window with its rectangle", async () => {
+  const rect = { x: 4, y: 6, w: 3, h: 4 };
+  const drop = { zone: "cell", tabId: 13, rect };
+  assert.deepEqual(resolveTabTarget(await fixture(), drop, 7), {
+    kind: "new-group", windowId: 7, rect: { x: 4, y: 6, w: 3, h: 4 },
   });
+  assert.deepEqual(drop, { zone: "cell", tabId: 13, rect: { x: 4, y: 6, w: 3, h: 4 } });
 });
 
 test("a group missing from the board cannot be a tab drop target", async () => {

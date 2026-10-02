@@ -6,9 +6,16 @@ import { openTab, closeTabs, closeGroup, bringGroupHere, renameGroup, recolorGro
   dropTab } from "./board/moves.js";
 
 import { buildView } from "./grid/view.js";
+import { place, changedTiles } from "./grid/layout.js";
 import { tileKey, loadLayout, saveTiles, pruneTiles, watchStorage } from "./grid/store.js";
 import { loadSettings, cardAlpha } from "./settings/store.js";
 export { renderTime, updateClock } from "./board/render.js";
+
+function validFoldersReply(reply) {
+  return reply?.ok !== false && Array.isArray(reply?.saved) && Array.isArray(reply?.missing) &&
+    reply.folders !== null && typeof reply.folders === "object" && !Array.isArray(reply.folders) &&
+    Object.values(reply.folders).every(id => typeof id === "string" && id.length > 0);
+}
 
 const root = document.getElementById("board");
 if (root) createController(root, globalThis.browser).refresh();
@@ -137,7 +144,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
           if (mine === savedGeneration && !hasSavedReply && !held()) {
             if (Array.isArray(value?.saved) && Array.isArray(value?.missing)) {
               savedReply = { ...value, pins: savedReply.pins };
-              hasValidSavedReply = true;
+              hasValidSavedReply = validFoldersReply(value);
             }
             hasSavedReply = true;
             firstPaintReady = true;
@@ -156,7 +163,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       if (!Array.isArray(reply?.saved) || !Array.isArray(reply?.missing)) {
         throw new Error("Background did not return saved and missing arrays");
       }
-      valid = true;
+      valid = validFoldersReply(reply);
     } catch (error) {
       reply = savedReply;
       if (!warnedSaved) {
@@ -238,6 +245,8 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
         selfTabId: current.id, selfUrl: location.origin + location.pathname };
       const nextBoard = buildBoard({ ...nextSnapshot, ...savedReply, otherWindows: gridState.synced.otherWindows });
       snapshot = nextSnapshot;
+      const liveGroups = new Set(groups.map(group => group.id));
+      for (const id of pendingTiles.keys()) if (!liveGroups.has(id)) pendingTiles.delete(id);
       self = current;
       board = nextBoard;
       // Introduce a newly created tile/editor in the final action snapshot.
@@ -260,8 +269,45 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   function publish(save = true) {
     if (!board || !gridState || !firstPaintReady) return;
     board = buildBoard({ ...snapshot, ...savedReply, otherWindows: gridState.synced.otherWindows });
-    view = buildView(board, { ...gridState, contentWidth: root.clientWidth,
-      folders: savedReply.folders ?? {}, pending: pendingTiles });
+    const options = { ...gridState, contentWidth: root.clientWidth,
+      folders: savedReply.folders ?? {}, pending: pendingTiles };
+    view = buildView(board, options);
+    const knowsFolders = hasValidSavedReply && validFoldersReply(savedReply);
+    const writable = save && gridState.writable && knowsFolders;
+    let writes = [], prune = false;
+    if (writable) {
+      const mapped = board.columns.filter(group => pendingTiles.has(group.id) && savedReply.folders[group.id]);
+      // Start from the shown layout, not saved off-screen/hidden rectangles or
+      // pending display pushes. The new group takes priority over existing tiles.
+      const beforeView = mapped.length ? buildView(board, { ...options, pending: new Map() }) : view;
+      const mappedIds = new Set(mapped.map(group => `group:${savedReply.folders[group.id]}`));
+      const shownBefore = beforeView.tiles.filter(tile => !mappedIds.has(tile.id));
+      let shownAfter = shownBefore;
+      for (const group of mapped) {
+        shownAfter = place(shownAfter, `group:${savedReply.folders[group.id]}`, pendingTiles.get(group.id), view.cols);
+      }
+      const fresh = beforeView.newTiles.filter(tile => !mappedIds.has(tile.id));
+      const changed = mapped.length ? changedTiles(shownBefore, shownAfter).filter(tile => !tile.id.startsWith("local:")) : [];
+      writes = [...new Map([...fresh, ...changed].map(tile => [tile.id, tile])).values()]
+        .map(({ id, x, y, w, h }) => ({ id, x, y, w, h }));
+      // Hold placements in memory even on a storage failure, without retrying in
+      // a loop or writing twice before storage.onChanged is delivered.
+      if (writes.length) {
+        gridState.layout = [...new Map([...gridState.layout, ...writes].map(tile => [tile.id, tile])).values()];
+      }
+      for (const group of mapped) pendingTiles.delete(group.id);
+      if (mapped.length) view = buildView(board, { ...options, layout: gridState.layout });
+      prune = !pruned;
+      if (prune) pruned = true;
+    }
+    // Pending rectangles have placement priority for display too, but local ids
+    // and any tiles they push are never written until a valid mapping arrives.
+    const metadata = new Map(view.tiles.map(tile => [tile.id, tile]));
+    for (const group of board.columns) {
+      const rect = pendingTiles.get(group.id), id = options.folders[group.id] ? `group:${options.folders[group.id]}` : `local:${group.id}`;
+      if (rect && metadata.has(id)) view.tiles = place(view.tiles, id, rect, view.cols);
+    }
+    view.tiles = view.tiles.map(tile => ({ ...metadata.get(tile.id), ...tile }));
     pendingView = false;
     // JSON.stringify(Set) is {}, so serialize its folder IDs explicitly.
     const { saved: savedLayout, newTiles, ...shown } = view;
@@ -276,21 +322,11 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       restoreView(root, saved);
       lastRenderedKey = key;
     }
-    // New tiles need the open groups' saved places, so only a valid reply
-    // with the group-to-folder map allows writes ({ ok: false } does not).
-    const knowsFolders = hasValidSavedReply && savedReply.folders !== null && typeof savedReply.folders === "object";
-    if (!save || !gridState.writable || !knowsFolders) return;
-    const fresh = view.newTiles;
-    // Keep the current placement even if a write fails. No retry loop, and a
-    // second publish before storage.onChanged cannot write these tiles twice.
-    if (fresh.length) gridState.layout = [...gridState.layout, ...fresh];
-    const prune = hasValidSavedReply && !pruned;
-    if (prune) pruned = true;
-    if (fresh.length || prune) {
+    if (writes.length || prune) {
       const keep = new Set([...Object.values(savedReply.folders ?? {}),
         ...board.saved.map(group => group.folderId), ...board.missing.map(group => group.folderId)]);
       persistence = persistence.then(async () => {
-        await saveTiles(api, fresh);
+        await saveTiles(api, writes);
         if (prune) await pruneTiles(api, keep);
       }).catch(() => {}); // The stores log each failed write with the Foxy prefix.
     }
@@ -429,7 +465,10 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       return action(async () => {
         const target = resolveTabTarget(board, { ...drop, tabId }, self.windowId);
         const result = await dropTab(api, tabId, target);
-        if (result.ok && result.groupId != null) requestedEditGroupId = result.groupId;
+        if (result.ok && result.groupId != null) {
+          requestedEditGroupId = result.groupId;
+          if (result.rect) pendingTiles.set(result.groupId, result.rect);
+        }
         return result;
       });
     },
@@ -462,6 +501,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
 
   const onChange = () => schedule();
   const onGroupRemoved = group => {
+    pendingTiles.delete(group.id);
     if (group.id === ui.editGroupId) releaseMissingEdit();
     schedule();
   };

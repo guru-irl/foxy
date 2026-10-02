@@ -1,8 +1,9 @@
 /**
  * @typedef {Object} TabDrop
- * @property {"group"|"tabs"|"pinned"|"new-group"} zone
+ * @property {"group"|"tabs"|"pinned"|"cell"} zone
  * @property {number} tabId The dragged tab; required to suppress no-op drops.
- * @property {number} [slot] Insertion slot (not needed for new-group).
+ * @property {number} [slot] Insertion slot (not needed for cell).
+ * @property {{x:number,y:number,w:number,h:number}} [rect] New group's tile rectangle.
  * @property {number} [groupId] Group ID when zone is group.
  */
 
@@ -13,7 +14,7 @@
  * @param {number} currentWindowId
  */
 export function resolveTabTarget(board, drop, currentWindowId) {
-  if (drop.zone === "new-group") return { kind: "new-group", windowId: currentWindowId };
+  if (drop.zone === "cell") return { kind: "new-group", windowId: currentWindowId, rect: drop.rect };
 
   let rows, target;
   if (drop.zone === "group") {

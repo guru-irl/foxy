@@ -1,5 +1,6 @@
 import { slotFromPointer, resolveTabTarget } from "./targets.js";
 import { scrollAtEdge } from "../grid/scroll.js";
+import { GAP, clampRect, defaultSize } from "../grid/layout.js";
 
 const TAB = "application/x-foxy-tab";
 const bindings = new WeakMap();
@@ -13,7 +14,7 @@ export function attachDnd(root, handlers, board) {
   let clickTimer = 0, frame = 0, pointer = null;
 
   function clearFeedback() {
-    root.querySelectorAll(".drop-line").forEach(line => line.remove());
+    root.querySelectorAll(".drop-line, .cell-preview").forEach(line => line.remove());
     root.querySelectorAll(".drop-target").forEach(tile => tile.classList.remove("drop-target"));
   }
   function stopScroll() {
@@ -26,7 +27,7 @@ export function attachDnd(root, handlers, board) {
     if (!pointer || !root.isConnected) { stopScroll(); return; }
     const { element, x, y } = pointer, old = element.scrollTop;
     if (!element.isConnected || !scrollAtEdge(element, y)) { stopScroll(); return; }
-    if (element.scrollTop !== old) feedback(targetAt(document.elementFromPoint(x, y)), y);
+    if (element.scrollTop !== old) feedback(targetAt(document.elementFromPoint(x, y)), x, y);
     frame = requestAnimationFrame(scrollStep);
   }
   function edgeScroll(event) {
@@ -47,9 +48,20 @@ export function attachDnd(root, handlers, board) {
   }
   function targetAt(target) {
     if (!(target instanceof Element) || !root.contains(target)) return null;
-    const column = target.closest('.tile[data-kind="group"], .tile[data-kind="pinned"], .rail');
-    if (!column) return null;
+    const tile = target.closest(".tile");
+    if (tile && !tile.matches('[data-kind="group"], [data-kind="pinned"]')) return null;
+    const column = tile ?? target.closest(".rail");
+    if (!column) return target.closest(".grid");
     return target.closest(".rows, .column-header, .column-title, .other-window") ?? column;
+  }
+  function cellPlacement(grid, x, y) {
+    const style = getComputedStyle(grid), bounds = grid.getBoundingClientRect();
+    const cell = parseFloat(style.getPropertyValue("--cell")), cols = Number(style.getPropertyValue("--cols"));
+    const left = parseFloat(style.paddingLeft) || 0, top = parseFloat(style.paddingTop) || 0;
+    const col = Math.max(0, Math.min(cols - 1, Math.floor((x - bounds.left - left + grid.scrollLeft) / (cell + GAP))));
+    const row = Math.max(0, Math.floor((y - bounds.top - top + grid.scrollTop) / (cell + GAP)));
+    const { id, ...rect } = clampRect("group:new", { x: col, y: row, ...defaultSize("group", cell, cols) }, cols);
+    return { rect, cell, left, top };
   }
   function dropZone(target) {
     return target.matches(".rows") ? target : target.closest(".column").querySelector(".rows");
@@ -68,9 +80,20 @@ export function attachDnd(root, handlers, board) {
       : before ? before.top : after ? after.bottom : bounds.top;
     return { slot, offset: coordinate - bounds.top + target.scrollTop };
   }
-  function feedback(target, y) {
+  function feedback(target, x, y) {
     clearFeedback();
     if (!target) return;
+    if (target.matches(".grid")) {
+      const { rect, cell, left, top } = cellPlacement(target, x, y);
+      const preview = document.createElement("div");
+      preview.className = "cell-preview";
+      preview.setAttribute("aria-hidden", "true");
+      Object.assign(preview.style, { left: `${left + rect.x * (cell + GAP)}px`,
+        top: `${top + rect.y * (cell + GAP)}px`, width: `${rect.w * (cell + GAP) - GAP}px`,
+        height: `${rect.h * (cell + GAP) - GAP}px` });
+      target.append(preview);
+      return;
+    }
     const { slot, offset } = placement(target, y);
     target.closest(".column").classList.add("drop-target");
     const zone = dropZone(target);
@@ -104,7 +127,7 @@ export function attachDnd(root, handlers, board) {
   root.addEventListener("dragover", event => {
     edgeScroll(event);
     const target = accepts(event.dataTransfer) ? targetAt(event.target) : null;
-    feedback(target, event.clientY);
+    feedback(target, event.clientX, event.clientY);
     if (!target) { if (event.dataTransfer) event.dataTransfer.dropEffect = "none"; return; }
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
@@ -117,7 +140,13 @@ export function attachDnd(root, handlers, board) {
     event.preventDefault();
     const value = event.dataTransfer.getData(TAB);
     if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) return;
-    const id = Number(value), { slot } = placement(target, event.clientY), zone = dropZone(target);
+    const id = Number(value);
+    if (target.matches(".grid")) {
+      state.handlers.onTabDrop?.(id, { zone: "cell", tabId: id,
+        rect: cellPlacement(target, event.clientX, event.clientY).rect });
+      return;
+    }
+    const { slot } = placement(target, event.clientY), zone = dropZone(target);
     const drop = { zone: zone.dataset.zone, slot, tabId: id };
     if (zone.dataset.groupId !== undefined) drop.groupId = Number(zone.dataset.groupId);
     state.handlers.onTabDrop?.(id, drop);
