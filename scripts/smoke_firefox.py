@@ -214,10 +214,11 @@ def poll(label, read, ready, timeout=WAIT_SECONDS, minimum=0):
 
 
 BOARD_SCRIPT = """
-    const columns = [...document.querySelectorAll('#board .column')].map(column =>
-        (column.querySelector('.column-title, .group-name')?.textContent || '').trim());
-    return {board: !!document.querySelector('#board'), columns,
-            clock: !!document.querySelector('#time')?.textContent.trim(),
+    const tiles = [...document.querySelectorAll('#board .grid .tile')].map(tile =>
+        (tile.querySelector('.column-title, .group-name')?.textContent || '').trim());
+    return {board: !!document.querySelector('#board .grid'), tiles,
+            rail: document.querySelector('#board .rail .column-title')?.textContent.trim() === 'TABS',
+            clock: !!document.querySelector('#board .grid .tile .clock-time')?.textContent.trim(),
             fontsReady: document.fonts.status === 'loaded', url: location.href};
 """
 
@@ -521,9 +522,9 @@ def run_checks(client, root, scratch, results, base):
 
     def board():
         state = poll("board and fonts", lambda: client.script(BOARD_SCRIPT),
-                     lambda s: s["board"] and s["fontsReady"] and s["clock"] and
-                     {"PINNED", "TABS"}.issubset({title.upper() for title in s["columns"]}), minimum=3)
-        return ", ".join(state["columns"]) + "; clock rendered; fonts ready"
+                     lambda s: s["board"] and s["fontsReady"] and s["clock"] and s["rail"] and
+                     "PINNED" in {title.upper() for title in s["tiles"]}, minimum=3)
+        return ", ".join(filter(None, state["tiles"])) + "; TABS rail; clock tile; fonts ready"
     results.check("board", board)
 
     def fonts():
@@ -583,11 +584,11 @@ def run_checks(client, root, scratch, results, base):
         return "Smoke folder contains " + SMOKE_URL + "; " + json.dumps(state)
     results.check("sync round-trip", round_trip)
 
-    def smoke_column():
-        state = poll("SMOKE board column", lambda: client.script(BOARD_SCRIPT),
-                     lambda s: any(title.upper() == "SMOKE" for title in s["columns"]))
-        return ", ".join(state["columns"])
-    results.check("SMOKE column", smoke_column)
+    def smoke_tile():
+        state = poll("SMOKE grid tile", lambda: client.script(BOARD_SCRIPT),
+                     lambda s: any(title.upper() == "SMOKE" for title in s["tiles"]))
+        return ", ".join(filter(None, state["tiles"]))
+    results.check("SMOKE tile", smoke_tile)
     results.check("pin names", lambda: check_pin_names(client))
     results.check("pin history", lambda: check_pin_history(client))
     results.check("named inbound pins", lambda: check_named_inbound(client))

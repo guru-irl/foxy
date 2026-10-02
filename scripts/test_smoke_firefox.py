@@ -127,7 +127,7 @@ class SmokeSequenceTests(unittest.TestCase):
         def script(source, args=None, *, chrome=False):
             if source == smoke.BOARD_SCRIPT:
                 return {"board": True, "fontsReady": True, "clock": True,
-                        "columns": ["PINNED", "TABS", "SMOKE"], "url": base + "newtab.html"}
+                        "tiles": ["PINNED", "SMOKE"], "rail": True, "url": base + "newtab.html"}
             if source == smoke.PLACES_SCRIPT:
                 if clock[0] < 6:
                     return []
@@ -169,7 +169,7 @@ class SmokeSequenceTests(unittest.TestCase):
         def script(source, args=None, *, chrome=False):
             if source == smoke.BOARD_SCRIPT:
                 return {"board": True, "fontsReady": True, "clock": True,
-                        "columns": ["PINNED", "TABS"], "url": base + "newtab.html"}
+                        "tiles": ["PINNED"], "rail": True, "url": base + "newtab.html"}
             if "document.fonts.load" in source:
                 return {"sans": True, "mono": True, "loaded": ["Foxy Sans", "Foxy Mono"]}
             if "AboutNewTab" in source:
