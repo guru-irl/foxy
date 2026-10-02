@@ -40,16 +40,32 @@ export async function loadSettings(api) {
   return { synced, device };
 }
 
-export async function saveSetting(api, scope, key, value) {
+// Saves run one at a time, so two quick changes in one page both persist.
+let saving = Promise.resolve();
+
+export function saveSetting(api, scope, key, value) {
+  const run = saving.then(() => writeSetting(api, scope, key, value));
+  saving = run.catch(() => {});
+  return run;
+}
+
+// Merges one key into the stored object as it is (unknown keys from newer
+// versions are kept). If the read fails nothing is written, so a passing
+// storage error can never sync defaults over every device's settings.
+async function writeSetting(api, scope, key, value) {
   const rules = scope === "synced" ? syncedRules : scope === "device" ? deviceRules : null;
   if (!rules || !Object.hasOwn(rules, key)) throw new TypeError("Unknown setting");
   if (!rules[key](value)) throw new TypeError("Invalid setting value");
-  const settings = await loadSettings(api);
-  settings[scope][key] = value;
   const area = scope === "synced" ? "sync" : "local", storageKey = scope === "synced" ? "settings" : "deviceSettings";
-  try { await api.storage[area].set({ [storageKey]: settings[scope] }); }
-  catch (error) { console.warn(`Foxy: could not save ${storageKey}`, error); throw error; }
-  return settings;
+  try {
+    const stored = (await api.storage[area].get(storageKey))[storageKey];
+    const base = stored !== null && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
+    await api.storage[area].set({ [storageKey]: { ...base, [key]: value } });
+  } catch (error) {
+    console.warn(`Foxy: could not save ${storageKey}`, error);
+    throw error;
+  }
+  return loadSettings(api);
 }
 
 export function cellPx(device) {

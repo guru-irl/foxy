@@ -112,14 +112,18 @@ async function missingSetup() {
 
 test("restore-all restores every missing folder in one queue job and clears the banner", async () => {
   const { ff, sync } = await missingSetup();
-  assert.equal((await sync.onMessage({ type: "foxy:saved" })).missing.length, 2);
+  const before = await sync.onMessage({ type: "foxy:saved" });
+  assert.equal(before.missing.length, 2);
   assert.deepEqual(await sync.onMessage({ type: "foxy:restore-all", windowId: 1 }), { ok: true });
   await drain(ff, sync);
   const response = await sync.onMessage({ type: "foxy:saved" });
   assert.deepEqual(response.saved, []);
   assert.deepEqual(response.missing, []);
-  assert.equal(Object.keys(response.folders).length, 2);
-  assert.equal((await ff.browser.tabGroups.query({})).length, 2);
+  const groups = await ff.browser.tabGroups.query({});
+  assert.equal(groups.length, 2);
+  const folderByTitle = Object.fromEntries(before.missing.map(entry => [entry.title, entry.folderId]));
+  assert.deepEqual(response.folders,
+    Object.fromEntries(groups.map(group => [String(group.id), folderByTitle[group.title]])));
 });
 
 test("open-saved removes just its missing folder and dismiss-missing keeps saved folders/bookmarks", async () => {

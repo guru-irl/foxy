@@ -90,7 +90,7 @@ for (const [scope, key, value] of valid) {
     assert.deepEqual(await saveSetting(ff.browser, scope, key, value), want);
     const area = scope === "synced" ? "sync" : "local", storageKey = scope === "synced" ? "settings" : "deviceSettings";
     assert.deepEqual(ff.calls.filter(c => c.api.endsWith(".set")), [
-      { api: `storage.${area}.set`, args: [{ [storageKey]: want[scope] }] },
+      { api: `storage.${area}.set`, args: [{ [storageKey]: { [key]: value } }] },
     ]);
     assert.deepEqual(await loadSettings(ff.browser), want);
   });
@@ -109,7 +109,8 @@ test("saveSetting preserves other valid settings and writes only the selected sc
     device: { cellSize: "S", customCell: 120, density: "compact" },
   });
   assert.deepEqual(ff.calls.filter(c => c.api.endsWith(".set")), [
-    { api: "storage.sync.set", args: [{ settings: loaded.synced }] },
+    { api: "storage.sync.set", args: [{ settings: { showClock: false, railCells: 4, transparency: "high", extra: 1,
+      showPinned: false } }] },
   ]);
   assert.deepEqual(await ff.browser.storage.sync.get("tile:clock"), { "tile:clock": { x: 0, y: 0, w: 5, h: 2 } });
   assert.deepEqual(await ff.browser.storage.local.get(), {
@@ -160,3 +161,29 @@ for (const area of ["sync", "local"]) {
     assert.deepEqual(await ff.browser.storage[area].get(), {});
   });
 }
+
+test("saveSetting rejects and writes nothing when the stored settings cannot be read", async t => {
+  const ff = createFirefox();
+  const stored = { showClock: false, railCells: 5, transparency: "high" };
+  await ff.browser.storage.sync.set({ settings: stored });
+  const realGet = ff.browser.storage.sync.get;
+  t.mock.method(ff.browser.storage.sync, "get", async () => { throw new Error("transient"); });
+  t.mock.method(console, "warn", () => {});
+  ff.calls.length = 0;
+  await assert.rejects(saveSetting(ff.browser, "synced", "showDate", false), /transient/);
+  assert.deepEqual(ff.calls.filter(c => c.api.endsWith(".set")), []);
+  assert.deepEqual((await realGet("settings")).settings, stored);
+});
+
+test("concurrent saveSetting calls in one page both persist", async () => {
+  const ff = createFirefox();
+  await Promise.all([
+    saveSetting(ff.browser, "synced", "showClock", false),
+    saveSetting(ff.browser, "synced", "showDate", false),
+    saveSetting(ff.browser, "device", "density", "compact"),
+  ]);
+  const { synced, device } = await loadSettings(ff.browser);
+  assert.equal(synced.showClock, false);
+  assert.equal(synced.showDate, false);
+  assert.equal(device.density, "compact");
+});
