@@ -1,10 +1,10 @@
-import { GAP, place, clampRect, changedTiles, railLimits } from "./layout.js";
+import { GAP, place, fit, clampRect, changedTiles, railLimits } from "./layout.js";
 import { scrollAtEdge } from "./scroll.js";
 
 /** Previews keep the captured DOM node alive. onRail's second argument marks
  * release; onState holds board updates from pointer down through completion. */
-export function attachGridDrag(root, { view, onPreview, onCommit, onCancel, onRail, onState }) {
-  let drag = null, frame = 0, suppressClick = false;
+export function attachGridDrag(root, { view, canCommit, onPreview, onCommit, onCancel, onRail, onState }) {
+  let drag = null, ending = false, frame = 0, suppressClick = false, clickTimer = 0;
 
   function contentPoint(grid, { clientX, clientY }) {
     const bounds = grid.getBoundingClientRect(), style = getComputedStyle(grid);
@@ -26,8 +26,14 @@ export function attachGridDrag(root, { view, onPreview, onCommit, onCancel, onRa
       x: Math.round((point.x - drag.offset.x) / step), y: Math.round((point.y - drag.offset.y) / step) }
       : { ...tile, w: Math.round((point.x + drag.offset.x + GAP) / step) - tile.x,
         h: Math.round((point.y + drag.offset.y + GAP) / step) - tile.y };
-    drag.after = place(before.tiles, tile.id, clampRect(tile.id, rect, before.cols), before.cols);
-    onPreview(drag.after);
+    const placed = place(before.tiles, tile.id, clampRect(tile.id, rect, before.cols), before.cols);
+    drag.changed = changedTiles(before.tiles, placed);
+    // Fit-only moves are for display, never part of the committed change set.
+    // Keep shown rectangles as fallbacks for tiles without a saved place.
+    const saved = new Map(before.tiles.map(tile => [tile.id, tile]));
+    for (const tile of before.saved) if (saved.has(tile.id)) saved.set(tile.id, tile);
+    for (const tile of drag.changed) saved.set(tile.id, tile);
+    onPreview(fit([...saved.values()], before.cols));
   }
 
   function scrollStep() {
@@ -39,10 +45,11 @@ export function attachGridDrag(root, { view, onPreview, onCommit, onCancel, onRa
     frame = requestAnimationFrame(scrollStep);
   }
 
-  function finish(commit) {
+  async function finish(commit) {
     if (!drag) return;
     const ended = drag;
     drag = null;
+    ending = true;
     cancelAnimationFrame(frame); frame = 0;
     root.removeAttribute("data-grid-dragging");
     ended.node?.classList.remove("tile-lifted");
@@ -50,23 +57,27 @@ export function attachGridDrag(root, { view, onPreview, onCommit, onCancel, onRa
     // the gesture first so it cannot cancel an already committed placement.
     if (ended.source.hasPointerCapture(ended.pointerId)) ended.source.releasePointerCapture(ended.pointerId);
     suppressClick = ended.active || !commit;
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => { suppressClick = false; }, 0);
     try {
       if (ended.active) {
+        if (commit && ended.tile?.group) commit = await canCommit(ended.tile);
         if (commit) {
           if (ended.kind === "rail") {
             if (ended.cells !== ended.before.railCells) onRail(ended.cells, true);
-          } else onCommit(changedTiles(ended.before.tiles, ended.after));
+          } else onCommit(ended.changed);
         } else {
           if (ended.kind === "rail") onRail(ended.before.railCells, false);
           else onPreview(ended.before.tiles);
           onCancel();
         }
       }
-    } finally { onState?.(false, ended.tile?.id); }
+    } finally { ending = false; onState?.(false, ended.tile?.id); }
   }
 
   function down(event) {
-    if (drag || event.button !== 0 || event.isPrimary === false || root.querySelector(".name-editor, .color-picker") || root.hasAttribute("data-dragging")) return;
+    if (drag || ending || event.button !== 0 || event.isPrimary === false || root.querySelector(".name-editor, .color-picker") || root.hasAttribute("data-dragging")) return;
+    clearTimeout(clickTimer);
     suppressClick = false;
     const target = event.target;
     if (!(target instanceof Element)) return;
@@ -81,7 +92,7 @@ export function attachGridDrag(root, { view, onPreview, onCommit, onCancel, onRa
     const grid = root.querySelector(".grid"), step = current.cell + GAP, point = contentPoint(grid, event);
     const kind = rail ? "rail" : handle ? "resize" : "move";
     drag = { kind, node, source: target, grid, tile, pointerId: event.pointerId,
-      before: { ...current, tiles: current.tiles.map(tile => ({ ...tile })) }, after: current.tiles,
+      before: { ...current, tiles: current.tiles.map(tile => ({ ...tile })) }, changed: [],
       pointer: { clientX: event.clientX, clientY: event.clientY }, start: { x: event.clientX, y: event.clientY },
       offset: tile && (kind === "move" ? { x: point.x - tile.x * step, y: point.y - tile.y * step }
         : { x: (tile.x + tile.w) * step - GAP - point.x, y: (tile.y + tile.h) * step - GAP - point.y }),
@@ -99,6 +110,9 @@ export function attachGridDrag(root, { view, onPreview, onCommit, onCancel, onRa
 
   function move(event) {
     if (!drag || event.pointerId !== drag.pointerId) return;
+    if (event.type === "pointermove" && event.pointerType === "mouse" && !(event.buttons & 1)) {
+      finish(false); return;
+    }
     drag.pointer = { clientX: event.clientX, clientY: event.clientY };
     if (!drag.active) {
       if (Math.hypot(event.clientX - drag.start.x, event.clientY - drag.start.y) <= 4) return;
@@ -116,6 +130,8 @@ export function attachGridDrag(root, { view, onPreview, onCommit, onCancel, onRa
     finish(true);
   }
   function cancel(event) { if (drag && event.pointerId === drag.pointerId) finish(false); }
+  function blur() { finish(false); }
+  function visibility() { if (document.hidden) finish(false); }
   function key(event) {
     if (!drag || event.key !== "Escape") return;
     event.preventDefault(); event.stopPropagation(); finish(false);
@@ -132,8 +148,11 @@ export function attachGridDrag(root, { view, onPreview, onCommit, onCancel, onRa
   document.addEventListener("pointercancel", cancel);
   document.addEventListener("lostpointercapture", cancel);
   document.addEventListener("keydown", key, true);
+  window.addEventListener("blur", blur);
+  document.addEventListener("visibilitychange", visibility);
   return () => {
     finish(false);
+    clearTimeout(clickTimer);
     root.removeEventListener("pointerdown", down);
     root.removeEventListener("click", click, true);
     document.removeEventListener("pointermove", move);
@@ -141,5 +160,7 @@ export function attachGridDrag(root, { view, onPreview, onCommit, onCancel, onRa
     document.removeEventListener("pointercancel", cancel);
     document.removeEventListener("lostpointercapture", cancel);
     document.removeEventListener("keydown", key, true);
+    window.removeEventListener("blur", blur);
+    document.removeEventListener("visibilitychange", visibility);
   };
 }

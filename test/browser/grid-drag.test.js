@@ -103,6 +103,61 @@ for (const kind of ["move", "resize", "rail"]) {
   }
 }
 
+// Missing cancellation on lost mouse release/focus must not leave updates held.
+for (const kind of ["move", "resize", "rail", "before threshold"]) {
+  for (const end of ["buttonless move", "blur", "hidden"]) {
+    test(`${end} cancels ${kind}, resumes held renders and ignores a later click`, async () => {
+      const { ff, root, control } = await setup();
+      const source = kind === "rail" ? root.querySelector(".rail-resize") : kind === "resize"
+        ? tile(root).querySelector(".tile-resize") : header(root);
+      const start = down(source), target = shifted(start, kind === "rail" ? -192 : 0, 192);
+      try {
+        if (kind !== "before threshold") pointer("pointermove", document, target);
+        const original = tile(root, "pinned");
+        await ff.browser.storage.sync.set({ "tile:pinned": { x: 0, y: 20, w: 3, h: 4 } });
+        await flush(ff);
+        assert.equal(tile(root, "pinned"), original, "remote render stays held until cancellation");
+        assert.equal(rect(original).y, 0);
+        ff.calls.length = 0;
+        if (end === "buttonless move") pointer("pointermove", document, target, { buttons: 0 });
+        else if (end === "blur") window.dispatchEvent(new Event("blur"));
+        else {
+          Object.defineProperty(document, "hidden", { configurable: true, value: true });
+          try { document.dispatchEvent(new Event("visibilitychange")); }
+          finally { delete document.hidden; }
+        }
+        assert.equal(control.ui.gridDragging, false, "cancellation releases the render hold");
+        assert.equal(root.hasAttribute("data-grid-dragging"), false);
+        assert.deepEqual(rect(tile(root)), initial["tile:group:a"], "cancel restores the tile preview");
+        assert.deepEqual(rect(tile(root, "group:b")), initial["tile:group:b"]);
+        assert.equal(root.querySelector(".rail").getBoundingClientRect().width, 272);
+        await flush(ff);
+        assert.equal(rect(tile(root, "pinned")).y, 20, "held remote update applies after cancel");
+        const elsewhere = root.querySelector(".rail");
+        pointer("pointerdown", elsewhere, point(elsewhere)); pointer("pointerup", document, target);
+        elsewhere.click(); await flush(ff);
+        assert.deepEqual(writes(ff), [], "a later click cannot commit the cancelled gesture");
+      } finally { escape(); await flush(ff); }
+    });
+  }
+}
+
+for (const end of ["pointercancel", "lostpointercapture"]) {
+  test(`keyboard rename works on the next task after ${end}`, async () => {
+    const { ff, root } = await setup();
+    const source = header(root).querySelector(".group-name"), start = down(source);
+    pointer("pointermove", document, shifted(start, 0, 192));
+    pointer(end, source, start);
+    await flush(ff);
+    const name = header(root).querySelector(".group-name");
+    name.focus();
+    // Enter activates a button with a click and no preceding pointerdown.
+    name.click();
+    assert.ok(root.querySelector(".name-editor"), "keyboard activation must open rename after cancel");
+    escape(); await flush(ff); assert.deepEqual(writes(ff), []);
+  });
+}
+
 test("resize corner snaps its bottom right, pushes live and respects minima and columns", async () => {
   const { ff, root } = await setup();
   let source = tile(root).querySelector(".tile-resize"); assert.ok(source);
@@ -130,8 +185,9 @@ test("every tile has a subtle 16px hover and focus resize corner, clock has a mo
     assert.equal(style.cursor, "nwse-resize"); assert.equal(style.opacity, "0");
     assert.ok(bounds.right <= card.right && bounds.bottom <= card.bottom);
     withPseudoState([node], "hover", () => assert.equal(getComputedStyle(handle).opacity, "1"));
-    handle.focus(); assert.equal(document.activeElement, handle);
-    withPseudoState([node], "focus-within", () => assert.equal(getComputedStyle(handle).opacity, "1")); handle.blur();
+    assert.equal(handle.tabIndex, -1, "pointer-only handles must not be tab stops");
+    assert.equal(handle.getAttribute("aria-hidden"), "true");
+    withPseudoState([node], "focus-within", () => assert.equal(getComputedStyle(handle).opacity, "1"));
     assert.equal(style.boxShadow, "none"); assert.equal(style.borderTopWidth, "0px"); assert.equal(style.outlineStyle, "none");
   }
   const clock = tile(root, "clock"), source = clock.querySelector(".tile-header"); assert.ok(source);
@@ -156,6 +212,18 @@ test("rail edge previews whole cells and grid fit, clamps and saves only changed
   pointer("pointermove", document, start); pointer("pointerup", document, start); await flush(ff);
   assert.deepEqual(writes(ff), [], "returning to the starting width must not save");
 });
+
+for (const { offset, cells } of [{ offset: 4000, cells: 2 }, { offset: -4000, cells: 6 }]) {
+  test(`rail release beyond the ${cells === 2 ? "minimum" : "maximum"} saves the clamped limit`, async () => {
+    const { ff, root } = await setup();
+    const start = down(root.querySelector(".rail-resize")), target = shifted(start, offset, 0);
+    pointer("pointermove", document, target);
+    assert.equal(root.querySelector(".rail").style.getPropertyValue("--rail-cells"), String(cells));
+    pointer("pointerup", document, target); await flush(ff);
+    assert.deepEqual(writes(ff), [{ settings: { railCells: cells } }]);
+    assert.deepEqual((await ff.browser.storage.sync.get("settings")).settings, { railCells: cells });
+  });
+}
 
 for (const kind of ["move", "resize", "rail"]) {
   for (const end of ["release", "cancel"]) {
@@ -195,6 +263,57 @@ test("narrow fit writes nothing, move uses shown tiles and saves only moved or p
   root.style.width = "1232px"; window.dispatchEvent(new Event("resize")); await flush(ff);
   assert.deepEqual(rect(tile(root)), { x: 0, y: 2, w: 3, h: 4 });
 });
+
+test("four-column preview equals release without writing tiles moved only by fit", async () => {
+  const { ff, root } = await setup({ width: 656 });
+  const ids = ["group:a", "group:b", "pinned", "clock"];
+  const shown = () => Object.fromEntries(ids.map(id => [id, rect(tile(root, id))]));
+  assert.equal(root.querySelector(".grid").style.getPropertyValue("--cols"), "4");
+  assert.deepEqual(shown(), {
+    "group:a": { x: 0, y: 0, w: 3, h: 4 }, "group:b": { x: 0, y: 4, w: 3, h: 4 },
+    pinned: { x: 0, y: 8, w: 3, h: 4 }, clock: { x: 0, y: 12, w: 4, h: 2 },
+  });
+  const start = down(header(root)), target = shifted(start, 0, 96 * 14);
+  try {
+    pointer("pointermove", document, target);
+    const preview = shown();
+    assert.deepEqual(preview, {
+      "group:a": { x: 0, y: 14, w: 3, h: 4 }, "group:b": { x: 0, y: 4, w: 3, h: 4 },
+      pinned: { x: 0, y: 0, w: 3, h: 4 }, clock: { x: 0, y: 8, w: 4, h: 2 },
+    }, "preview must fit the saved layout with just the changed tiles applied");
+    assert.deepEqual(writes(ff), []);
+    pointer("pointerup", document, target); await flush(ff);
+    assert.deepEqual(shown(), preview, "release must preserve every previewed rectangle");
+    assert.deepEqual(writes(ff), [{ "tile:group:a": { x: 0, y: 14, w: 3, h: 4 } }]);
+    const stored = await ff.browser.storage.sync.get(null);
+    for (const id of ["group:b", "pinned", "clock"]) assert.deepEqual(stored[`tile:${id}`], initial[`tile:${id}`]);
+  } finally { escape(); await flush(ff); }
+});
+
+for (const mapped of [true, false]) {
+  for (const kind of ["move", "resize"]) {
+    test(`closing the ${mapped ? "mapped" : "unmapped"} dragged group cancels ${kind} and leaves neighbours unchanged`, async () => {
+      const { ff, root, control } = await setup({ folders: mapped ? { 1: "a", 2: "b" } : { 2: "b" },
+        settings: { showClock: false, showPinned: false } });
+      const id = mapped ? "group:a" : "local:1", node = tile(root, id);
+      const source = kind === "move" ? node.querySelector(".column-header") : node.querySelector(".tile-resize");
+      const start = down(source), target = shifted(start, 0, 192);
+      pointer("pointermove", document, target);
+      assert.equal(rect(tile(root, "group:b")).y, 6, "the closing tile must have pushed a neighbour in preview");
+      await ff.browser.tabs.remove(10); await flush(ff);
+      assert.equal(control.ui.gridDragging, true);
+      assert.equal(tile(root, id), node, "the removal render stays held during the gesture");
+      ff.calls.length = 0;
+      pointer("pointerup", document, target); await flush(ff);
+      assert.equal(control.ui.gridDragging, false);
+      assert.equal(root.hasAttribute("data-grid-dragging"), false);
+      assert.equal(tile(root, id), undefined, "closed tile disappears after cancellation");
+      assert.deepEqual(rect(tile(root, "group:b")), initial["tile:group:b"]);
+      assert.deepEqual(writes(ff), [], "neither the vanished tile nor its preview pushes may be written");
+      assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:b"], initial["tile:group:b"]);
+    });
+  }
+}
 
 for (const kind of ["move", "resize"]) {
   test(`${kind} uses grid padding and scroll content coordinates`, async () => {

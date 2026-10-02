@@ -72,7 +72,10 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
     node.dataset.kind = tile.kind;
     node.style.gridColumn = `${tile.x + 1} / span ${tile.w}`;
     node.style.gridRow = `${tile.y + 1} / span ${tile.h}`;
-    node.append(button("tile-resize", `Resize ${tile.kind === "group" ? tile.group.title.trim() || "Unnamed" : tile.kind}`));
+    const handle = button("tile-resize", `Resize ${tile.kind === "group" ? tile.group.title.trim() || "Unnamed" : tile.kind}`);
+    handle.tabIndex = -1;
+    handle.setAttribute("aria-hidden", "true");
+    node.append(handle);
     grid.append(node);
   }
   const rail = fixedColumn(root, "tabs", "TABS", board.tabs, handlers);

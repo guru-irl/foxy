@@ -605,6 +605,10 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
 
   const detachGridDrag = attachGridDrag(root, {
     view: () => view,
+    canCommit: async tile => {
+      try { await api.tabGroups.get(tile.group.id); return !unloaded; }
+      catch { return false; }
+    },
     onState: (active, id) => {
       if (active) draggedTileId = id;
       interaction("gridDragging", active);
