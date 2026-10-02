@@ -27,7 +27,7 @@ export function attachDnd(root, handlers, board) {
     if (!pointer || !root.isConnected) { stopScroll(); return; }
     const { element, x, y } = pointer, old = element.scrollTop;
     if (!element.isConnected || !scrollAtEdge(element, y)) { stopScroll(); return; }
-    if (element.scrollTop !== old) feedback(targetAt(document.elementFromPoint(x, y)), x, y);
+    if (element.scrollTop !== old) feedback(targetAt(document.elementFromPoint(x, y), x, y), x, y);
     frame = requestAnimationFrame(scrollStep);
   }
   function edgeScroll(event) {
@@ -46,12 +46,24 @@ export function attachDnd(root, handlers, board) {
     // Payloads are protected until drop in Firefox. Never getData on dragover.
     return Array.from(transfer?.types ?? []).includes(TAB);
   }
-  function targetAt(target) {
+  function targetAt(target, x, y) {
     if (!(target instanceof Element) || !root.contains(target)) return null;
-    const tile = target.closest(".tile");
+    let tile = target.closest(".tile");
+    if (!tile && !target.closest(".rail")) {
+      const grid = target.closest(".grid");
+      if (!grid) return null;
+      const { col, row } = cellPlacement(grid, x, y);
+      tile = [...grid.querySelectorAll(":scope > .tile")].find(tile => {
+        const left = Number(tile.style.gridColumnStart) - 1, top = Number(tile.style.gridRowStart) - 1;
+        const width = Number(tile.style.gridColumnEnd.replace("span ", ""));
+        const height = Number(tile.style.gridRowEnd.replace("span ", ""));
+        return col >= left && col < left + width && row >= top && row < top + height;
+      });
+      if (!tile) return grid;
+      target = tile.querySelector(".rows") ?? tile;
+    }
     if (tile && !tile.matches('[data-kind="group"], [data-kind="pinned"]')) return null;
     const column = tile ?? target.closest(".rail");
-    if (!column) return target.closest(".grid");
     return target.closest(".rows, .column-header, .column-title, .other-window") ?? column;
   }
   function cellPlacement(grid, x, y) {
@@ -61,7 +73,7 @@ export function attachDnd(root, handlers, board) {
     const col = Math.max(0, Math.min(cols - 1, Math.floor((x - bounds.left - left + grid.scrollLeft) / (cell + GAP))));
     const row = Math.max(0, Math.floor((y - bounds.top - top + grid.scrollTop) / (cell + GAP)));
     const { id, ...rect } = clampRect("group:new", { x: col, y: row, ...defaultSize("group", cell, cols) }, cols);
-    return { rect, cell, left, top };
+    return { rect, cell, left, top, col, row };
   }
   function dropZone(target) {
     return target.matches(".rows") ? target : target.closest(".column").querySelector(".rows");
@@ -126,7 +138,7 @@ export function attachDnd(root, handlers, board) {
   });
   root.addEventListener("dragover", event => {
     edgeScroll(event);
-    const target = accepts(event.dataTransfer) ? targetAt(event.target) : null;
+    const target = accepts(event.dataTransfer) ? targetAt(event.target, event.clientX, event.clientY) : null;
     feedback(target, event.clientX, event.clientY);
     if (!target) { if (event.dataTransfer) event.dataTransfer.dropEffect = "none"; return; }
     event.preventDefault();
@@ -134,7 +146,7 @@ export function attachDnd(root, handlers, board) {
   });
   root.addEventListener("drop", event => {
     stopScroll();
-    const target = accepts(event.dataTransfer) ? targetAt(event.target) : null;
+    const target = accepts(event.dataTransfer) ? targetAt(event.target, event.clientX, event.clientY) : null;
     clearFeedback();
     if (!target) return;
     event.preventDefault();
@@ -153,7 +165,7 @@ export function attachDnd(root, handlers, board) {
   });
   root.addEventListener("dragleave", event => {
     if (pointer && !pointer.element.contains(event.relatedTarget)) stopScroll();
-    const target = accepts(event.dataTransfer) ? targetAt(event.target) : null;
+    const target = accepts(event.dataTransfer) ? targetAt(event.target, event.clientX, event.clientY) : null;
     if (!target?.contains(event.relatedTarget)) clearFeedback();
   });
   root.addEventListener("dragend", () => {

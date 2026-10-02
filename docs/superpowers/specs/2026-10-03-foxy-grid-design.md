@@ -130,9 +130,10 @@ preset: S 2, M 3, L 4, XL 5.
 - First paint: the grid waits for the first `foxy:saved` reply (up to
   500 ms) so groups appear at their saved places. New tiles are written
   only after a valid `foxy:saved` reply with the `folders` map has arrived
-  (a failed or malformed reply does not count). A new tile is saved at its
-  full default size, even when the window is too narrow to show it; the
-  display caps it.
+  (a failed or malformed reply does not count). A tile placed
+  automatically is saved at its full default size, even when the window is
+  too narrow to show it; the display caps it. A tile created by dropping a
+  tab on empty cells is saved where and at the size it was shown.
 - Invalid stored values (wrong types, negative or non-integer cells) are
   ignored and the tile is placed as new.
 

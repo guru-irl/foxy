@@ -301,8 +301,8 @@ test("tab drops on the clock tile still do nothing", async () => {
 // Wrong cell pitch, gap ownership, right-edge clamp or scroll coordinates
 // changes the emitted rectangle; a layout-affecting preview moves real tiles.
 for (const [label, col, row, offset, scrollTop, expected] of [
-  ["empty cell", 9, 0, 20, 0, { x: 9, y: 0, w: 3, h: 4 }],
-  ["gap", 9, 0, 88, 0, { x: 9, y: 0, w: 3, h: 4 }],
+  ["empty cell", 11, 0, 20, 0, { x: 10, y: 0, w: 3, h: 4 }],
+  ["gap", 11, 0, 88, 0, { x: 10, y: 0, w: 3, h: 4 }],
   ["last column", 12, 0, 20, 0, { x: 10, y: 0, w: 3, h: 4 }],
   ["scrolled cell", 9, 4, 20, 288, { x: 9, y: 4, w: 3, h: 4 }],
 ]) {
@@ -351,13 +351,62 @@ test("a group tile covering cells keeps row insertion, never a cell preview", as
   const { root, calls } = await draw();
   const source = tab(root), dataTransfer = start(source), target = root.querySelector('.tile[data-group-id="101"]');
   try {
-    dispatchDrag("dragover", root.querySelector(".grid"), { dataTransfer, ...point(root.querySelector(".grid"), 0.75, 0.05) });
+    dispatchDrag("dragover", root.querySelector(".grid"), { dataTransfer, ...point(root.querySelector(".grid"), 0.95, 0.05) });
     assert.ok(root.querySelector(".cell-preview"));
     dispatchDrag("dragover", target, { dataTransfer, ...point(target) });
     assert.equal(root.querySelector(".cell-preview"), null); assert.ok(root.querySelector(".drop-line"));
     dispatchDrag("drop", target, { dataTransfer, ...point(target) });
     assert.deepEqual(calls.tabs, [[15, { zone: "group", groupId: 101, slot: 0, tabId: 15 }]]);
   } finally { dispatchDrag("dragend", source, { dataTransfer }); }
+});
+
+// Falling back to the grid for a tile's trailing gap must not create a group.
+for (const [kind, side, slot] of [["group", "right", 1], ["group", "below", 2], ["pinned", "below", 2]]) {
+  test(`the gap ${side} of a ${kind} tile keeps its row insertion target`, async () => {
+    const { root, calls } = await draw();
+    const tile = root.querySelector(kind === "group" ? '.tile[data-group-id="101"]' : '.tile[data-kind="pinned"]');
+    const rows = tile.querySelector(".rows"), bounds = tile.getBoundingClientRect();
+    const coords = side === "right"
+      ? { clientX: bounds.right + 8, clientY: rows.querySelector(".row").getBoundingClientRect().bottom }
+      : { clientX: bounds.left + 20, clientY: bounds.bottom + 8 };
+    const hit = document.elementFromPoint(coords.clientX, coords.clientY);
+    assert.equal(hit, root.querySelector(".grid"), "the pointer hits the gap, not the tile");
+    const source = tab(root), dataTransfer = start(source);
+    try {
+      assert.ok(dispatchDrag("dragover", hit, { dataTransfer, ...coords }).defaultPrevented);
+      assert.equal(dataTransfer.dropEffect, "move");
+      assert.equal(root.querySelector(".cell-preview"), null);
+      assert.ok(rows.querySelector(".drop-line"), "gap feedback belongs to the tile's rows");
+      dispatchDrag("drop", hit, { dataTransfer, ...coords });
+      assert.deepEqual(calls.tabs, [[15, { zone: kind, ...(kind === "group" ? { groupId: 101 } : {}), slot, tabId: 15 }]]);
+    } finally { dispatchDrag("dragend", source, { dataTransfer }); }
+    clean(root);
+  });
+}
+
+test("the gap below the clock rejects tab drops without moving tiles or writing storage", async () => {
+  const reply = { saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote" } };
+  const { root, ff } = await controller(setup(), message => message.type === "foxy:reconcile" ? { ok: true }
+    : message.type === "foxy:saved" ? reply : undefined, dropLayout);
+  const beforeTiles = [...root.querySelectorAll(".tile")].map(tile => [tile.dataset.tileId, rectOf(tile)]);
+  const beforeStorage = await ff.browser.storage.sync.get(null);
+  const clock = root.querySelector('[data-kind="clock"]').getBoundingClientRect();
+  const coords = { clientX: clock.left + 20, clientY: clock.bottom + 8 };
+  const hit = document.elementFromPoint(coords.clientX, coords.clientY);
+  assert.equal(hit, root.querySelector(".grid"));
+  const source = tab(root), dataTransfer = start(source);
+  ff.calls.length = 0;
+  try {
+    const over = dispatchDrag("dragover", hit, { dataTransfer, ...coords });
+    assert.equal(over.defaultPrevented, false);
+    assert.equal(dataTransfer.dropEffect, "none");
+    assert.equal(root.querySelector(".cell-preview, .drop-line, .drop-target"), null);
+    assert.equal(dispatchDrag("drop", hit, { dataTransfer, ...coords }).defaultPrevented, false);
+  } finally { dispatchDrag("dragend", source, { dataTransfer }); }
+  await flush(ff); await flush(ff);
+  assert.deepEqual(ff.calls, [], "a rejected gap drop reaches no API");
+  assert.deepEqual([...root.querySelectorAll(".tile")].map(tile => [tile.dataset.tileId, rectOf(tile)]), beforeTiles);
+  assert.deepEqual(await ff.browser.storage.sync.get(null), beforeStorage);
 });
 
 test("scrolled grid drop lands the group tile in the content cell under the pointer", async () => {
