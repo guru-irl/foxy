@@ -199,6 +199,14 @@ Firefox preferences. These files are separate from the add-on and are not in its
 package. Fonts are shared from `extension/fonts/`; `theme/fonts` links there too,
 so relative font URLs work from either location.
 
+Pinned tabs in the vertical sidebar show short names when their page titles
+match the theme's case-sensitive site patterns: YOUTUBE, GMAIL, DISCORD, AZURE,
+DEVOPS, COPILOT (Microsoft 365), GITHUB, SLACK, TEAMS, OUTLOOK, CALENDAR, DRIVE,
+DOCS, SHEETS, SLIDES, MEET, WHATSAPP, TELEGRAM, X, REDDIT, LINKEDIN, CHATGPT,
+CLAUDE, FIGMA, JIRA, CONFLUENCE, NOTION, SPOTIFY, NETFLIX, TWITCH, INSTAGRAM,
+FACEBOOK and AMAZON. Unmatched pins keep their titles. Renaming pins from the
+board is coming in Foxy 2.2.0.
+
 Quit Firefox with Cmd+Q, then run from the repo:
 
     python3 scripts/install_theme.py
