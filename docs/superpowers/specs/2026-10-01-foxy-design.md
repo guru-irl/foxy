@@ -509,8 +509,9 @@ isolated world). The script:
 
 The background applies a pin's name (or its removal) when: the pin is
 renamed from the board; its bookmark title changes (another device, or the
-Bookmarks UI); its tab finishes loading (`status: complete`); the session
-is rebuilt at startup; host permission is granted (`permissions.onAdded`).
+Bookmarks UI); its tab is re-pinned before delayed bookmark removal; its
+tab finishes loading (`status: complete`); the session is rebuilt at startup;
+host permission is granted (`permissions.onAdded`).
 It skips tabs that are discarded or still loading (they get it on
 `complete`), and tabs on origins without permission. Injection failures
 (restricted pages such as addons.mozilla.org, about: pages, closed tabs) are
@@ -518,7 +519,11 @@ logged with the "Foxy:" prefix and never retried in a loop.
 
 **Sync rules.**
 - Outbound never writes the title of a named pin's bookmark; URL changes
-  still update its URL. Unnamed pins are unchanged from §8.3.
+  still update its URL. Unnamed pins otherwise follow §8.3.
+- Removing a pin's name writes the restored page title, else the last known
+  page title, else the URL, never the bare name. While the tab still shows
+  the old name, later tab events and moves leave that fallback alone; a real
+  page title replaces it once available.
 - Inbound pins opened from a named bookmark use the name, not the raw
   bookmark title, as the unloaded tab's title.
 - Unpinning a tab removes its bookmark as today, so the name goes with it.
