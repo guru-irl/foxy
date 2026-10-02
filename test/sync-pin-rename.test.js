@@ -128,6 +128,20 @@ test("a named pin URL update preserves the page-title fallback when access is re
   assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, "Page");
 });
 
+test("repinning before delayed removal reapplies the retained bookmark name", async () => {
+  const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
+  await ff.browser.tabs.update(2, { pinned: false });
+  await drain(ff, sync);
+  assert.deepEqual(scripts(ff).at(-1).args[0].args, [null]);
+  ff.calls.length = 0;
+  await ff.browser.tabs.update(2, { pinned: true });
+  await drain(ff, sync);
+  assert.deepEqual(scripts(ff).at(-1)?.args[0].args, ["Work"]);
+  assert.equal((await loadState(ff.browser)).pendingRemovals[2], undefined);
+  assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, "✏️ Work");
+  assert.equal(ff.calls.some(c => ["bookmarks.remove", "bookmarks.create"].includes(c.api)), false);
+});
+
 test("removing a board name restores the keeper and resumes ordinary outbound title sync", async () => {
   const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
   assert.deepEqual(await sync.onMessage({ type: "foxy:rename-pin", tabId: 2, name: null }), { ok: true });

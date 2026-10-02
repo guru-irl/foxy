@@ -490,7 +490,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     "tabs.onUpdated": async (id, change = {}) => {
       if (change.pinned === false) await names.apply(id);
       await syncTab(id);
-      if (change.status === "complete") await names.apply(id);
+      if (change.status === "complete" || change.pinned === true) await names.apply(id);
     },
     "permissions.onAdded": () => names.applyAll(),
     "tabs.onRemoved": async (id, info) => {
