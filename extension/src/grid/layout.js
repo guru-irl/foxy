@@ -121,10 +121,6 @@ export function addMissing(tiles, ids, cols, cell) {
   return result;
 }
 
-export function arrange(ids, cols, cell) {
-  return addMissing([], ids, cols, cell);
-}
-
 export function changedTiles(before, after) {
   const previous = new Map(before.map(tile => [tile.id, tile]));
   return after.filter(tile => {

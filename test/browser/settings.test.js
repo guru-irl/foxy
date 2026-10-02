@@ -1,4 +1,4 @@
-import { test, assert, fixture, nextFrame } from "./harness.js";
+import { test, assert, fixture, nextFrame, withPseudoState } from "./harness.js";
 import { createBoardFirefox } from "./controller.js";
 import { createController } from "../../extension/src/main.js";
 
@@ -29,6 +29,7 @@ async function setup({ folders = { 1: "one", 2: "two" } } = {}) {
 function choice(pane, key, value) { return pane.querySelector(`[data-key="${key}"] [data-value="${value}"]`); }
 function toggle(pane, key) { return pane.querySelector(`button[data-key="${key}"]`); }
 function writes(ff) { return ff.calls.filter(c => ["storage.sync.set", "storage.local.set"].includes(c.api)); }
+async function waitForConfirm() { await new Promise(resolve => setTimeout(resolve, 410)); }
 
 // Catches a missing delegated gear handler, focus loss after board replacement,
 // or pane content rebuilt on live storage updates.
@@ -51,6 +52,32 @@ test("the gear opens a sibling pane and Escape or gear closes it with focus rest
   pane.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   assert.equal(pane.hidden, true); assert.equal(document.activeElement, gear());
   gear().click(); gear().click(); assert.equal(pane.hidden, true); assert.equal(document.activeElement, gear());
+});
+
+// Based on the reviewer's SAVED-row Escape probe, with the confirmation armed.
+test("Escape handled by SAVED confirmation leaves the settings pane open", async () => {
+  const { ff, node, pane } = await setup(); node.querySelector(".settings-button").click();
+  node.querySelector(".saved-delete").click(); await flush(ff);
+  const row = node.querySelector(".saved-row"); assert.ok(row.classList.contains("confirming"));
+  row.querySelector(".saved-delete").focus();
+  const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+  row.dispatchEvent(escape);
+  assert.equal(escape.defaultPrevented, true); assert.equal(pane.hidden, false);
+  await flush(ff); assert.equal(node.querySelector(".saved-row").classList.contains("confirming"), false);
+  assert.ok(document.activeElement !== node.querySelector(".settings-button"));
+  pane.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  assert.equal(pane.hidden, true);
+});
+
+test("device-only controls describe their captions without describing synced controls", async () => {
+  const { node, pane } = await setup(); node.querySelector(".settings-button").click();
+  for (const key of ["cellSize", "density"]) {
+    const group = pane.querySelector(`[data-key="${key}"]`), caption = group.parentElement.querySelector(".setting-caption");
+    assert.ok(caption.id); assert.equal(group.getAttribute("aria-describedby"), caption.id);
+    assert.equal(document.getElementById(group.getAttribute("aria-describedby")), caption);
+    assert.equal(caption.textContent, "This device only");
+  }
+  for (const key of ["timeFormat", "transparency"]) assert.equal(pane.querySelector(`[data-key="${key}"]`).getAttribute("aria-describedby"), null);
 });
 
 test("open pane hides only the rail content and uses its own capped alpha in both schemes", async () => {
@@ -79,6 +106,40 @@ test("open pane hides only the rail content and uses its own capped alpha in bot
   assert.equal(getComputedStyle(node.querySelector(".rail .column-title")).visibility, "visible");
   assert.equal(getComputedStyle(node.querySelector(".rail .rows")).visibility, "visible");
   assert.equal(node.querySelector(".rail .rows").scrollTop, 100);
+});
+
+// Catches focus fills that are identical to a toggle or selected segment's
+// resting fill. Check every enabled pill, including unselected segments.
+test("settings buttons have distinct neutral focus fills in both schemes without outlines or shadows", async () => {
+  const { node, pane } = await setup(); node.querySelector(".settings-button").click();
+  document.activeElement?.blur();
+  const scheme = document.documentElement.style.colorScheme;
+  // Other test modules each load this sheet. The pseudo-state helper rewrites
+  // one copy, so disable duplicates for this probe as on the real page.
+  const sheets = [...document.styleSheets].filter(sheet => sheet.href?.endsWith("/extension/newtab.css"));
+  const disabled = sheets.map(sheet => sheet.disabled);
+  try {
+    sheets.slice(1).forEach(sheet => { sheet.disabled = true; });
+    for (const value of ["dark", "light"]) {
+      document.documentElement.style.colorScheme = value;
+      const buttons = [...pane.querySelectorAll("button:not(:disabled)")];
+      const resting = buttons.map(button => getComputedStyle(button).backgroundColor);
+      const selected = getComputedStyle(choice(pane, "timeFormat", "24")).backgroundColor;
+      withPseudoState(buttons, "focus-visible", () => {
+        buttons.forEach((button, i) => {
+          const css = getComputedStyle(button);
+          assert.ok(css.backgroundColor !== resting[i], `${button.dataset.key || button.textContent}: focus must differ from rest (${resting[i]}, ${css.backgroundColor}; ${document.styleSheets.length} sheets)`);
+          assert.ok(css.backgroundColor !== selected, "focus must differ from selected fill");
+          const [r, g, b] = css.backgroundColor.match(/[\d.]+/g).map(Number);
+          assert.equal(r, g); assert.equal(g, b);
+          assert.equal(css.outlineStyle, "none"); assert.equal(css.borderTopWidth, "0px"); assert.equal(css.boxShadow, "none");
+        });
+      });
+    }
+  } finally {
+    document.documentElement.style.colorScheme = scheme;
+    sheets.forEach((sheet, i) => { sheet.disabled = disabled[i]; });
+  }
 });
 
 // Each row catches a wrong storage scope/key/value or missing live board apply.
@@ -117,6 +178,22 @@ for (const key of ["showClock", "showPinned", "showSaved", "showDate", "otherWin
       assert.equal((await ff.browser.windows.getLastFocused()).id, 2);
       assert.ok(await ff.browser.tabs.get(99));
     }
+  });
+}
+// Based on the reviewer's rapid-toggle probe. Pin immediate visible state
+// as well as the serialised values persisted by the real settings store.
+for (const key of ["showClock", "showPinned", "showSaved", "showDate", "otherWindows", "pinsMoveHere"]) {
+  test(`two quick ${key} clicks flip from the shown value and save off then on`, async () => {
+    const { ff, node, pane } = await setup(); node.querySelector(".settings-button").click();
+    const button = toggle(pane, key), start = ff.calls.length;
+    button.click(); assert.equal(button.getAttribute("aria-checked"), "false");
+    button.click(); assert.equal(button.getAttribute("aria-checked"), "true");
+    await flush(ff);
+    const values = ff.calls.slice(start).filter(c => c.api === "storage.sync.set" && c.args[0].settings)
+      .map(c => c.args[0].settings[key]);
+    assert.deepEqual(values, [false, true]);
+    assert.equal((await ff.browser.storage.sync.get("settings")).settings[key], true);
+    assert.equal(button.getAttribute("aria-checked"), "true");
   });
 }
 test("custom cell validates integer bounds and rail stepper stays within whole-cell limits", async () => {
@@ -162,12 +239,48 @@ test("a failed device save restores its selected segment and keeps row density",
     assert.ok(warnings.some(args => String(args[0]).startsWith("Foxy:")));
   } finally { ff.browser.storage.local.set = set; console.warn = warn; }
 });
+// A failed write must not re-read storage: a second unavailable read would
+// substitute defaults for the non-default value the user was looking at.
+for (const [scope, key, before, after] of [["sync", "showDate", false, true], ["local", "density", "compact", "normal"]]) {
+  test(`failed ${key} save restores the shown value without a rollback read`, async () => {
+    const { ff, node, pane } = await setup();
+    const storageKey = scope === "sync" ? "settings" : "deviceSettings";
+    await ff.browser.storage[scope].set({ [storageKey]: { [key]: before } }); await flush(ff);
+    node.querySelector(".settings-button").click();
+    const area = ff.browser.storage[scope], get = area.get, set = area.set, warn = console.warn, warnings = [];
+    let reads = 0;
+    area.get = async (...args) => { if (++reads > 1) throw new Error("read unavailable"); return get(...args); };
+    area.set = async () => { throw new Error("write unavailable"); }; console.warn = (...args) => warnings.push(args);
+    try {
+      if (scope === "sync") toggle(pane, key).click(); else choice(pane, key, after).click();
+      await flush(ff);
+      assert.equal(reads, 1);
+      if (scope === "sync") assert.equal(toggle(pane, key).getAttribute("aria-checked"), String(before));
+      else assert.equal(choice(pane, key, before).getAttribute("aria-pressed"), "true");
+      assert.ok(warnings.some(args => String(args[0]).startsWith("Foxy:")));
+    } finally { area.get = get; area.set = set; console.warn = warn; }
+  });
+}
+test("a failed queued toggle restores the value shown before that click", async () => {
+  const { ff, node, pane } = await setup(); node.querySelector(".settings-button").click();
+  const set = ff.browser.storage.sync.set, warn = console.warn, warnings = [];
+  ff.browser.storage.sync.set = async () => { throw new Error("write unavailable"); }; console.warn = (...args) => warnings.push(args);
+  try {
+    const button = toggle(pane, "showDate");
+    button.click(); assert.equal(button.getAttribute("aria-checked"), "false");
+    button.click(); assert.equal(button.getAttribute("aria-checked"), "true");
+    await flush(ff);
+    assert.equal(button.getAttribute("aria-checked"), "false");
+    assert.equal(node.querySelector(".clock-date").hidden, false, "rollback changes no board state");
+    assert.ok(warnings.some(args => String(args[0]).startsWith("Foxy:")));
+  } finally { ff.browser.storage.sync.set = set; console.warn = warn; }
+});
 test("a failed reset logs and keeps tile keys, with the reset button usable again", async () => {
   const { ff, node, pane } = await setup(); node.querySelector(".settings-button").click();
   const before = await ff.browser.storage.sync.get(null), remove = ff.browser.storage.sync.remove, warn = console.warn, warnings = [];
   ff.browser.storage.sync.remove = async () => { throw new Error("unavailable"); }; console.warn = (...args) => warnings.push(args);
   try {
-    const reset = pane.querySelector(".settings-reset"); reset.click(); reset.click(); await flush(ff);
+    const reset = pane.querySelector(".settings-reset"); reset.click(); await waitForConfirm(); reset.click(); await flush(ff);
     assert.deepEqual(await ff.browser.storage.sync.get(null), before); assert.equal(reset.disabled, false);
     assert.ok(warnings.some(args => String(args[0]).startsWith("Foxy:")));
   } finally { ff.browser.storage.sync.remove = remove; console.warn = warn; }
@@ -179,7 +292,7 @@ test("reset removes only tile keys once, and an open board places visible tiles 
   node.querySelector(".settings-button").click(); const reset = pane.querySelector(".settings-reset");
   const before = ff.calls.length; reset.click(); assert.equal(reset.textContent, "Confirm reset");
   assert.equal(ff.calls.slice(before).filter(c => c.api === "storage.sync.remove").length, 0);
-  reset.click(); await flush(ff);
+  await waitForConfirm(); reset.click(); await flush(ff);
   const removals = ff.calls.slice(before).filter(c => c.api === "storage.sync.remove"); assert.equal(removals.length, 1);
   assert.ok(removals[0].args[0].includes("tile:hidden")); assert.ok(removals[0].args[0].every(key => key.startsWith("tile:")));
   const stored = await ff.browser.storage.sync.get(null);
@@ -193,11 +306,46 @@ test("reset removes only tile keys once, and an open board places visible tiles 
 test("reset clears this page's unmapped pending placements", async () => {
   const folders = { 2: "two" }, { ff, pane, node, control } = await setup({ folders });
   await control.handlers.onTabDrop(11, { zone: "cell", rect: { x: 0, y: 30, w: 3, h: 4 } }); await flush(ff);
-  node.querySelector(".settings-button").click(); pane.querySelector(".settings-reset").click(); pane.querySelector(".settings-reset").click(); await flush(ff);
+  node.querySelector(".settings-button").click(); pane.querySelector(".settings-reset").click(); await waitForConfirm(); pane.querySelector(".settings-reset").click(); await flush(ff);
   const local = control.view.tiles.find(t => t.id.startsWith("local:") && t.group.id !== 1);
   assert.ok(local);
   control.handlers.onEditEnd(local.group.id); await flush(ff);
   assert.ok(control.view.tiles.find(t => t.id === local.id).y < 30, "reset must discard the pending drop rectangle");
+});
+// Based on the reviewer's detail-1/detail-2 probe. A later detail-2 click
+// also checks the event guard independently of the 400 ms delay.
+test("a double click cannot confirm Reset layout even after the arming delay", async () => {
+  const { ff, node, pane } = await setup(); node.querySelector(".settings-button").click();
+  const reset = pane.querySelector(".settings-reset"), before = await ff.browser.storage.sync.get(null), start = ff.calls.length;
+  reset.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+  reset.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 2 })); await flush(ff);
+  assert.equal(ff.calls.slice(start).filter(c => c.api === "storage.sync.remove").length, 0);
+  assert.deepEqual(await ff.browser.storage.sync.get(null), before);
+  assert.equal(reset.textContent, "Confirm reset");
+  await waitForConfirm(); reset.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 2 })); await flush(ff);
+  assert.equal(ff.calls.slice(start).filter(c => c.api === "storage.sync.remove").length, 0);
+  assert.deepEqual(await ff.browser.storage.sync.get(null), before);
+});
+test("a second activation inside 400 ms leaves Reset layout armed without removing tiles", async () => {
+  const { ff, node, pane } = await setup(); node.querySelector(".settings-button").click();
+  const reset = pane.querySelector(".settings-reset"), before = await ff.browser.storage.sync.get(null), start = ff.calls.length;
+  reset.click(); reset.click(); await flush(ff);
+  assert.equal(ff.calls.slice(start).filter(c => c.api === "storage.sync.remove").length, 0);
+  assert.deepEqual(await ff.browser.storage.sync.get(null), before);
+  assert.equal(reset.textContent, "Confirm reset");
+});
+// Native repeat clicks are a browser default action. Check that keydown
+// cancels that action, including repeats later than the arming delay.
+test("held Enter or Space cannot confirm Reset layout after 400 ms", async () => {
+  const { ff, node, pane } = await setup(); node.querySelector(".settings-button").click();
+  const reset = pane.querySelector(".settings-reset"), before = await ff.browser.storage.sync.get(null);
+  reset.focus(); reset.click(); await waitForConfirm();
+  for (const key of ["Enter", " "]) {
+    const repeat = new KeyboardEvent("keydown", { key, repeat: true, bubbles: true, cancelable: true });
+    reset.dispatchEvent(repeat); assert.equal(repeat.defaultPrevented, true);
+  }
+  await flush(ff); assert.deepEqual(await ff.browser.storage.sync.get(null), before);
+  assert.equal(reset.textContent, "Confirm reset");
 });
 test("reset confirmation expires after three seconds", async () => {
   const { node, pane } = await setup(); node.querySelector(".settings-button").click();
@@ -205,10 +353,10 @@ test("reset confirmation expires after three seconds", async () => {
   await new Promise(resolve => setTimeout(resolve, 3050)); assert.equal(reset.textContent, "Reset layout");
 });
 
-async function options(ff) {
+async function options(ff, height = 720) {
   // Load the actual HTML and module in a separate document with the fake API at
   // the WebExtension boundary, before its module executes.
-  const frame = document.createElement("iframe"); frame.width = "500"; frame.height = "720"; fixture().append(frame);
+  const frame = document.createElement("iframe"); frame.width = "500"; frame.height = String(height); fixture().append(frame);
   const html = await (await fetch("/extension/options.html")).text();
   frame.contentWindow.browser = ff.browser;
   Object.defineProperty(frame.contentWindow.screen, "availWidth", { value: 640, configurable: true });
@@ -218,6 +366,19 @@ async function options(ff) {
   await flush(ff); await frame.contentDocument.fonts.ready;
   return frame;
 }
+// Catches viewport-sized content that prevents about:addons growing its frame.
+test("options content sets the document height in a 250 px frame without an inner scroller", async () => {
+  const { ff } = await setup(), frame = await options(ff, 250);
+  const doc = frame.contentDocument, scroll = doc.querySelector(".settings-scroll");
+  const contentHeight = scroll.scrollHeight;
+  assert.ok(contentHeight > 250);
+  assert.equal(doc.body.scrollHeight, contentHeight);
+  assert.equal(scroll.clientHeight, contentHeight);
+  assert.equal(frame.contentWindow.getComputedStyle(scroll).overflowY, "visible");
+  frame.height = "1200"; await nextFrame(); await nextFrame();
+  assert.equal(doc.body.scrollHeight, contentHeight);
+  assert.equal(scroll.clientHeight, contentHeight);
+});
 test("options.html renders the shared pane, saves and resets only tile keys", async () => {
   const { ff, node } = await setup();
   await ff.browser.storage.sync.set({ "tile:orphan": { x: 0, y: 20, w: 3, h: 4 }, keep: 7, settings: { transparency: "high" } }); await flush(ff);
@@ -230,7 +391,7 @@ test("options.html renders the shared pane, saves and resets only tile keys", as
   assert.deepEqual([...pane.querySelectorAll("h2")].map(n => n.textContent), ["Grid", "Tiles", "Clock", "Cards", "Windows", "Pins"]);
   const before = writes(ff).length; choice(pane, "density", "compact").click(); await flush(ff);
   assert.equal(writes(ff).length - before, 1); assert.equal(node.style.getPropertyValue("--row"), "24px");
-  const reset = pane.querySelector(".settings-reset"), start = ff.calls.length; reset.click(); reset.click(); await flush(ff);
+  const reset = pane.querySelector(".settings-reset"), start = ff.calls.length; reset.click(); await waitForConfirm(); reset.click(); await flush(ff);
   const removals = ff.calls.slice(start).filter(c => c.api === "storage.sync.remove"); assert.equal(removals.length, 1);
   assert.ok(removals[0].args[0].every(key => key.startsWith("tile:")));
   const stored = await ff.browser.storage.sync.get(null); assert.equal(stored.keep, 7);

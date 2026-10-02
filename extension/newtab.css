@@ -180,14 +180,16 @@ body {
 }
 .settings-number:focus-visible { background: var(--pressed); }
 .settings-reset { background: var(--hover); }
+.settings-pane button:focus-visible { background: var(--thumb); }
 .options-page .settings-pane {
   position: static;
   width: 360px;
   max-width: 100%;
-  height: 100vh;
+  height: auto;
   margin-inline: auto;
   transition: none;
 }
+.options-page .settings-scroll { height: auto; overflow: visible; }
 @media (prefers-reduced-motion: reduce) { .settings-pane { transition: none; } }
 
 /* --- Clock ------------------------------------------------------------- */

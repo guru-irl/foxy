@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   GAP, CELL_PRESETS, kindOf, totalColumns, railLimits, minSize, defaultSize,
-  overlaps, clampRect, place, fit, firstFree, addMissing, arrange, changedTiles,
+  overlaps, clampRect, place, fit, firstFree, addMissing, changedTiles,
 } from "../extension/src/grid/layout.js";
 
 function assertNoOverlaps(tiles) {
@@ -212,26 +212,6 @@ test("addMissing places only new ids without moving existing tiles or duplicatin
     tiles[0],
     { id: "group:a", x: 0, y: 0, w: 3, h: 4 },
     { id: "saved", x: 3, y: 0, w: 3, h: 4 },
-  ]);
-});
-
-test("arrange places clock, pinned, groups and saved left to right in the supplied order", () => {
-  const after = arrange(["clock", "pinned", "group:a", "group:b", "saved"], 25, 80);
-  assert.deepEqual(after, [
-    { id: "clock", x: 0, y: 0, w: 5, h: 2 },
-    { id: "pinned", x: 5, y: 0, w: 3, h: 4 },
-    { id: "group:a", x: 8, y: 0, w: 3, h: 4 },
-    { id: "group:b", x: 11, y: 0, w: 3, h: 4 },
-    { id: "saved", x: 14, y: 0, w: 3, h: 4 },
-  ]);
-  assertNoOverlaps(after);
-});
-
-test("arrange wraps below occupied rows on a one-column screen", () => {
-  assert.deepEqual(arrange(["clock", "pinned", "group:a"], 1, 80), [
-    { id: "clock", x: 0, y: 0, w: 1, h: 2 },
-    { id: "pinned", x: 0, y: 2, w: 1, h: 4 },
-    { id: "group:a", x: 0, y: 6, w: 1, h: 4 },
   ]);
 });
 

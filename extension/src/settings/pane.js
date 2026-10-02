@@ -1,4 +1,4 @@
-import { saveSetting, loadSettings, cardAlpha } from "./store.js";
+import { saveSetting, cardAlpha } from "./store.js";
 
 const panes = new WeakMap();
 let sequence = 0;
@@ -17,10 +17,7 @@ function button(text) {
 // save is applied to the board only by its existing storage-change listener.
 export function settingActions(api, onReset) {
   return {
-    async onChange(scope, key, value) {
-      try { return await saveSetting(api, scope, key, value); }
-      catch { return loadSettings(api); } // The store already logs with Foxy:.
-    },
+    onChange(scope, key, value) { return saveSetting(api, scope, key, value); },
     onReset,
   };
 }
@@ -38,12 +35,13 @@ export function renderSettings(container, state, handlers) {
     panes.set(container, pane);
     const scroll = el("div", "settings-scroll"); scroll.tabIndex = -1;
     container.replaceChildren(scroll);
-    const change = async (scope, key, value) => {
+    const change = async (scope, key, value, before = pane.state[scope][key]) => {
       try {
         const stored = await pane.handlers.onChange(scope, key, value);
         if (stored) renderSettings(container, { ...pane.state, ...stored }, pane.handlers);
       } catch (error) {
         console.warn("Foxy: could not change setting", error);
+        pane.state = { ...pane.state, [scope]: { ...pane.state[scope], [key]: before } };
         update();
       }
     };
@@ -54,11 +52,16 @@ export function renderSettings(container, state, handlers) {
     function label(section, text, device = false) {
       const row = el("div", "setting"), title = el("div", "setting-label", text);
       title.id = `setting-${++sequence}`; row.append(title);
-      if (device) row.append(el("small", "setting-caption", "This device only"));
-      section.append(row); return { row, title };
+      let caption;
+      if (device) {
+        caption = el("small", "setting-caption", "This device only");
+        caption.id = `setting-${++sequence}`; row.append(caption);
+      }
+      section.append(row); return { row, title, caption };
     }
     function segmented(section, text, scope, key, choices, device = false) {
-      const { row, title } = label(section, text, device), group = el("div", "settings-segmented");
+      const { row, title, caption } = label(section, text, device), group = el("div", "settings-segmented");
+      if (caption) group.setAttribute("aria-describedby", caption.id);
       group.dataset.key = key; group.setAttribute("role", "group"); group.setAttribute("aria-labelledby", title.id);
       for (const [value, text] of choices) {
         const node = button(text); node.dataset.value = value;
@@ -76,7 +79,11 @@ export function renderSettings(container, state, handlers) {
       const { row, title } = label(section, text), node = button("");
       row.classList.add("setting-toggle"); node.className = "settings-toggle"; node.dataset.key = key;
       node.setAttribute("role", "switch"); node.setAttribute("aria-labelledby", title.id);
-      node.addEventListener("click", () => change("synced", key, !pane.state.synced[key])); row.append(node);
+      node.addEventListener("click", () => {
+        const before = node.getAttribute("aria-checked") === "true";
+        node.setAttribute("aria-checked", String(!before));
+        change("synced", key, !before, before);
+      }); row.append(node);
       pane.controls.push(() => node.setAttribute("aria-checked", String(pane.state.synced[key])));
     }
     const grid = section("Grid");
@@ -110,10 +117,16 @@ export function renderSettings(container, state, handlers) {
     toggle(tiles, "Show clock", "showClock"); toggle(tiles, "Show pinned", "showPinned"); toggle(tiles, "Show saved", "showSaved");
     const reset = button("Reset layout"); reset.className = "settings-reset settings-pill"; tiles.append(reset);
     const clearConfirm = () => { clearTimeout(pane.timer); pane.confirmed = false; reset.textContent = "Reset layout"; };
-    reset.addEventListener("click", async () => {
+    reset.addEventListener("keydown", event => {
+      if (event.repeat && ["Enter", " "].includes(event.key)) event.preventDefault();
+    });
+    reset.addEventListener("click", async event => {
+      if (event.detail > 1) return;
       if (!pane.confirmed) {
-        pane.confirmed = true; reset.textContent = "Confirm reset"; pane.timer = setTimeout(clearConfirm, 3000); return;
+        pane.confirmed = true; pane.armedAt = performance.now();
+        reset.textContent = "Confirm reset"; pane.timer = setTimeout(clearConfirm, 3000); return;
       }
+      if (performance.now() - pane.armedAt < 400) return;
       clearConfirm(); reset.disabled = true;
       try { await pane.handlers.onReset(); }
       catch (error) { console.warn("Foxy: could not reset layout", error); }

@@ -78,7 +78,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     if (event.target.closest(".settings-button")) setPaneOpen(settingsPane?.hidden);
   });
   window.addEventListener("keydown", event => {
-    if (event.key === "Escape" && root.isConnected && settingsPane && !settingsPane.hidden) {
+    if (!event.defaultPrevented && event.key === "Escape" && root.isConnected && settingsPane && !settingsPane.hidden) {
       event.preventDefault(); setPaneOpen(false);
     }
   });
