@@ -623,6 +623,8 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   }
   async function renamePin(tabId, value) {
     if (!Number.isInteger(tabId) || (value !== null && typeof value !== "string")) return { ok: false };
+    const name = normalizePinName(value) || null;
+    if (name?.length > 200) return { ok: false };
     const tab = await api.tabs.get(tabId);
     if (!tab.pinned || tab.incognito) return { ok: false };
     if (!state.tabs[tabId]) await syncTab(tabId);
@@ -630,7 +632,6 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     if (entry?.folderId !== state.pinnedId) return { ok: false };
     const node = await getNode(entry.bookmarkId);
     if (node?.parentId !== state.pinnedId) return { ok: false };
-    const name = normalizePinName(value) || null;
     const title = name === null ? (await names.apply(tabId, true)) ?? entry.title : encodePinTitle(name);
     if (node.title !== title) await api.bookmarks.update(node.id, { title });
     if (name === null) {

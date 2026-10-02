@@ -148,6 +148,20 @@ test("ALLOW requests the remote pin origin in its click handler, updates access,
   assert.equal(ff.calls.some(c => c.args[0]?.type === "foxy:rename-pin" || c.api === "tabs.update"), false);
 });
 
+test("pin editor bounds input at 200 characters without bounding group names", async () => {
+  const { ff, node } = await controller();
+  row(node, 11).querySelector(".row-rename").click();
+  const input = row(node, 11).querySelector(".name-editor");
+  assert.equal(input.maxLength, 200);
+  input.value = "A".repeat(200);
+  ff.withUserInput(() => key(input, "Enter"));
+  await flush(ff);
+  assert.equal(row(node, 11).querySelector(".row-label").textContent, "A".repeat(200));
+  node.querySelector(".group-name").click();
+  assert.equal(node.querySelector(".name-editor").maxLength, -1);
+  key(node.querySelector(".name-editor"), "Escape");
+});
+
 test("pin editor normalizes whitespace before requesting and sending a rename", async () => {
   const { ff, node } = await controller();
   row(node, 11).querySelector(".row-rename").click();

@@ -3,10 +3,11 @@ import { colorKey } from "../model.js";
 const COLORS = ["blue", "cyan", "green", "grey", "orange", "pink", "purple", "red", "yellow"];
 
 /** Replace a title in place; both explicit completion and blur are single-shot. */
-export function openNameEditor(nameEl, { initial, onSave, onCancel, className = "group-name name-editor", updateLabel = true }) {
+export function openNameEditor(nameEl, { initial, onSave, onCancel, className = "group-name name-editor", updateLabel = true, maxLength }) {
   const input = document.createElement("input");
   input.className = className;
   input.type = "text";
+  if (maxLength !== undefined) input.maxLength = maxLength;
   input.value = initial;
   input.setAttribute("aria-label", `Rename ${initial.trim() || "Unnamed"}`);
   const header = nameEl.closest(".column-header, .row");

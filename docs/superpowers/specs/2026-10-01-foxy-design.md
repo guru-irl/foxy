@@ -489,7 +489,9 @@ label either; only the page's `document.title` changes it.
 syncs to every device and survives restarts and failed restores. A named
 pin's bookmark title is `✏️ <name>`; any other title is an unnamed pin
 (its title follows the page as today). Decoding accepts `✏` with or without
-U+FE0F, trims, and treats an empty name as unnamed. Renaming the bookmark in
+U+FE0F, trims, collapses whitespace runs to one space, and treats an empty
+name as unnamed. Board renames reject names over 200 characters after this
+normalisation; the editor input is limited to 200 characters. Renaming the bookmark in
 the Bookmarks UI to or from that form names or unnames the pin too.
 
 **How it shows.** The tab's page title is set to the name and kept there by a

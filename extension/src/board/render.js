@@ -399,7 +399,7 @@ function tabRow(root, tab, handlers) {
         handlers.onEditEnd?.(null, tab.id);
       };
       const editor = openNameEditor(open, {
-        initial: tab.name ?? tab.title, className: "name-editor pin-name-editor", updateLabel: false,
+        initial: tab.name ?? tab.title, className: "name-editor pin-name-editor", updateLabel: false, maxLength: 200,
         onSave: name => {
           try {
             name = normalizePinName(name);

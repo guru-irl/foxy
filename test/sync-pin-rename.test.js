@@ -36,6 +36,16 @@ test("rename saves a trimmed marker without access and rejects nonpins and malfo
   assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, "✏️ Work");
 });
 
+test("rename rejects more than 200 normalized characters before any mutation", async () => {
+  const { ff, sync } = await fixture();
+  assert.deepEqual(await sync.onMessage({ type: "foxy:rename-pin", tabId: 2, name: `  ${"A".repeat(201)}  ` }), { ok: false });
+  assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, "Page");
+  assert.equal(ff.calls.some(c => ["bookmarks.update", "scripting.executeScript"].includes(c.api)), false);
+  const value = `${"A".repeat(198)}   B`;
+  assert.deepEqual(await sync.onMessage({ type: "foxy:rename-pin", tabId: 2, name: value }), { ok: true });
+  assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, `✏️ ${"A".repeat(198)} B`);
+});
+
 test("outbound never writes a named pin title even on URL changes or tab moves", async () => {
   const { ff, sync } = await fixture({ title: "✏️ Work" });
   const get = ff.browser.tabs.get;
