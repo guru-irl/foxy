@@ -489,8 +489,13 @@ label either; only the page's `document.title` changes it.
 syncs to every device and survives restarts and failed restores. A named
 pin's bookmark title is `✏️ <name>`; any other title is an unnamed pin
 (its title follows the page as today). Decoding accepts `✏` with or without
-U+FE0F, trims, and treats an empty name as unnamed. Renaming the bookmark in
+U+FE0F, trims, collapses whitespace runs to one space, and treats an empty
+name as unnamed. Board renames reject names over 200 characters after this
+normalisation; the editor input is limited to 200 characters. Renaming the bookmark in
 the Bookmarks UI to or from that form names or unnames the pin too.
+Outbound prefixes U+200B (zero width space) to page titles in groups and pins
+whose trimmed form starts with `✏`, so only an explicit rename or a Bookmarks
+UI edit names a pin.
 
 **How it shows.** The tab's page title is set to the name and kept there by a
 script Foxy injects into that tab (`scripting.executeScript`, top frame,
@@ -500,12 +505,16 @@ isolated world). The script:
   edited), putting the name back each time, before Firefox reads the title
   for the tab label where possible;
 - is idempotent: injecting it again updates the name and keeps one watcher;
-- given no name, stops watching and restores the page's latest own title.
+- given no name, stops watching and restores the page's latest own title;
+- before entering the back/forward cache, stops watching, restores the page's
+  latest own title and forgets its name; a still-named pin gets a fresh keeper
+  when the restored tab finishes loading.
 
 The background applies a pin's name (or its removal) when: the pin is
 renamed from the board; its bookmark title changes (another device, or the
-Bookmarks UI); its tab finishes loading (`status: complete`); the session
-is rebuilt at startup; host permission is granted (`permissions.onAdded`).
+Bookmarks UI); its tab is re-pinned before delayed bookmark removal; its
+tab finishes loading (`status: complete`); the session is rebuilt at startup;
+host permission is granted (`permissions.onAdded`).
 It skips tabs that are discarded or still loading (they get it on
 `complete`), and tabs on origins without permission. Injection failures
 (restricted pages such as addons.mozilla.org, about: pages, closed tabs) are
@@ -513,7 +522,18 @@ logged with the "Foxy:" prefix and never retried in a loop.
 
 **Sync rules.**
 - Outbound never writes the title of a named pin's bookmark; URL changes
-  still update its URL. Unnamed pins are unchanged from §8.3.
+  still update its URL. Unnamed pins otherwise follow §8.3.
+- Removing a pin's name writes the restored page title, else the last known
+  page title, else the URL, never the bare name. Each device remembers the
+  name it last displayed, so later events and moves leave the unnamed title
+  alone while that name is still shown. A top-level document commit
+  (`status: loading` together with a URL, including same-URL reloads in Firefox
+  157) clears this guard, unlike a same-document URL change after the page has
+  loaded or an unfinished load, so even a real page title equal to the old name
+  can replace the fallback.
+  Rebuilds recover a still-unloaded pin's raw tab title as its guard when its
+  normalised label matches the name, or retain its previous shown name by
+  bookmark and URL if it was unnamed while this device was closed.
 - Inbound pins opened from a named bookmark use the name, not the raw
   bookmark title, as the unloaded tab's title.
 - Unpinning a tab removes its bookmark as today, so the name goes with it.
@@ -536,7 +556,8 @@ access, and the name then applies through `permissions.onAdded`.
 - The editor replaces the row's label in place, with the same behaviour as
   the group name editor (Enter saves, Escape cancels, blur saves; the row is
   not draggable while editing). It starts with the pin's name, or its title
-  when unnamed, selected. Saving an empty name removes the name.
+  when unnamed, selected. Saving unchanged text cancels without requesting
+  access or renaming. Saving an empty name removes the name.
 - A named pin's row shows its name even where the title is not applied yet
   (no permission, unloaded tab).
 - The page asks the background for pin names with `foxy:pins` →

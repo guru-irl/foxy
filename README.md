@@ -2,7 +2,7 @@
 
 A private Firefox add-on and browser theme. The add-on replaces the new tab page and
 the home page with a clock, the date and a kanban board of tabs and tab groups from
-every normal, non-private window (Foxy 2.1.2). Groups and pins are saved in
+every normal, non-private window (Foxy 2.2.0). Groups and pins are saved in
 bookmarks, with Firefox Sync carrying them to your other devices.
 The clock uses EB Garamond SemiBold with upright lining tabular digits and an
 ink-centred colon. Its size is calibrated to the previous Google Sans Flex clock.
@@ -48,6 +48,12 @@ Empty group names show a faint `UNNAMED`; long names are cut with an ellipsis.
   focus their original window. Only tab activation can trigger the page-close rule
   described above. Editing and dragging defer live board updates until they end.
 
+Rename a pin with its pencil button or F2, then Enter or click elsewhere to save
+(Escape cancels; an empty name removes it): the name syncs through bookmarks,
+with a per-site access prompt and ALLOW on devices that have not granted access.
+The name replaces the page title in Firefox's tab, window title, history and
+bookmark, so unread counts and Firefox's title-changed indicator are no longer visible.
+
 ## Saved groups and Sync
 
 SAVED lists groups that are not open on this device, with a colour dot and bookmark
@@ -86,13 +92,14 @@ Private windows never sync and are not shown on the board.
 
 ### Permissions
 
-Updating to this release asks once for the new bookmarks permission. Foxy uses:
+Updating to 2.2.0 adds the scripting permission; site access is optional and requested per site. Foxy uses:
 
 - `tabs`: read tab titles and URLs, activate, move, pin, open and close tabs.
 - `tabGroups`: read, create, move, rename and recolour groups.
 - `bookmarks`: save groups and pins in Foxy's folder and apply bookmark changes.
 - `storage`: remember bookmark mappings, which groups are open here, and deferred
   sync changes across restarts.
+- `scripting`: keep a renamed pin's page title at its name, with optional HTTP(S) site access.
 
 ### Known limitations
 
@@ -148,7 +155,7 @@ checks rather than stopping at the first failure. Use `--firefox PATH` to select
 another Firefox executable. Any failure exits 1. This is separate from `npm test`.
 
 The check covers the real newtab override, board and clock, bundled fonts,
-bookmark-backed sync startup and a grouped-tab round-trip. It prints extension
+bookmark-backed sync startup, a grouped-tab round-trip and pin renaming on a local page. It prints extension
 console errors and warnings, and saves a board screenshot, console JSON and
 Firefox log under `.spider/scratch/smoke-<timestamp>/`. Its throwaway profile and
 artifacts are kept there. It never uses your real Firefox profile, signs the

@@ -1,4 +1,4 @@
-import { encodeFolderTitle, isSyncableUrl } from "./codec.js";
+import { encodeFolderTitle, decodePinTitle, normalizePinName, isSyncableUrl } from "./codec.js";
 import { mergeRoots, readTree } from "./tree.js";
 import { matchGroups, matchTabs } from "./match.js";
 import { probeMissingBookmark } from "./state.js";
@@ -30,8 +30,9 @@ export function settle(api, { settleMs = 3000, maxWaitMs = 20000, now = Date.now
 }
 
 /** Never infer bookmark deletion from absent tabs, even after failed restore. */
-export async function rebuild({ api, state, outbound, inbound, lostIdentity = false }) {
+export async function rebuild({ api, state, outbound, inbound, names, lostIdentity = false, loadedTabs = new Set() }) {
   const previous = lostIdentity ? structuredClone(state) : null;
+  const pageTitles = new Map(Object.values(state.tabs).map(entry => [entry.bookmarkId, entry]));
   let knownRootId = state.rootId;
   const previousOpen = [...new Set([...state.openFolders, ...state.missing])];
   if (lostIdentity && knownRootId) {
@@ -84,8 +85,23 @@ export async function rebuild({ api, state, outbound, inbound, lostIdentity = fa
     for (const pair of match.pairs) {
       const tab = local.find(tab => tab.id === pair.tabId);
       const old = previous?.tabs[tab.id];
+      const saved = pageTitles.get(pair.bookmarkId);
+      const name = folder.id === state.pinnedId ? decodePinTitle(folder.bookmarks.find(node => node.id === pair.bookmarkId).title) : null;
+      // Session restore can retain a name as the label without a loaded document.
+      // An unname while closed retains the saved label by bookmark and URL.
+      const unloaded = tab.discarded || (tab.status === "complete" && !loadedTabs.has(tab.id));
+      const lingering = (old?.url === tab.url ? old.shownName : undefined)
+        ?? (saved?.url === tab.url ? saved.shownName : undefined);
+      const shownName = tab.pinned && unloaded
+        && ((name !== null && normalizePinName(tab.title) === name) || tab.title === lingering) ? tab.title : undefined;
+      const pageTitle = shownName !== undefined ? old?.title ?? saved?.title ?? tab.url
+        : name && tab.title === name
+          ? (saved?.appliedName === name && saved.url === tab.url ? saved.title : tab.url)
+          : tab.title ?? "";
       state.tabs[tab.id] = { bookmarkId: pair.bookmarkId, folderId: folder.id,
-        url: old?.url ?? tab.url, title: old?.title ?? tab.title ?? "" };
+        url: old?.url ?? tab.url, title: old?.title ?? pageTitle,
+        ...(old?.appliedName ? { appliedName: old.appliedName } : {}),
+        ...(shownName !== undefined ? { shownName } : {}) };
       if (old) {
         if (previous.quietUntil[tab.id] !== undefined) state.quietUntil[tab.id] = previous.quietUntil[tab.id];
         const removal = previous.pendingRemovals[tab.id];
@@ -145,4 +161,5 @@ export async function rebuild({ api, state, outbound, inbound, lostIdentity = fa
   for (const tabId of pins.unmatchedTabs) await outbound.syncTab(tabId);
   // Inbound implements folder-relative pin order and Firefox's create-then-discard rule.
   await inbound.reconcileFolder(state.pinnedId);
+  await names?.applyAll();
 }

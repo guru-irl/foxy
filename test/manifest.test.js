@@ -6,12 +6,12 @@ const root = new URL("../extension/", import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), "utf8");
 const manifest = JSON.parse(read("manifest.json"));
 
-test("manifest and package name the add-on Foxy 2.1.2", () => {
+test("manifest and package name the add-on Foxy 2.2.0", () => {
   assert.equal(manifest.name, "Foxy");
-  assert.equal(manifest.version, "2.1.2");
+  assert.equal(manifest.version, "2.2.0");
   assert.equal(manifest.description, "A kanban board of your tabs and tab groups, shared across devices through bookmarks.");
   const pkg = JSON.parse(readFileSync(new URL("../package.json", root), "utf8"));
-  assert.equal(pkg.version, "2.1.2");
+  assert.equal(pkg.version, "2.2.0");
 });
 
 test("manifest replaces the new tab page and the home page with newtab.html", () => {
@@ -20,9 +20,10 @@ test("manifest replaces the new tab page and the home page with newtab.html", ()
   assert.deepEqual(manifest.chrome_settings_overrides, { homepage: "newtab.html" });
 });
 
-test("manifest asks for tabs, tabGroups, bookmarks and storage and uses a module event page", () => {
-  assert.deepEqual(manifest.permissions, ["tabs", "tabGroups", "bookmarks", "storage"]);
+test("manifest asks for tabs, tabGroups, bookmarks, storage and scripting and uses a module event page", () => {
+  assert.deepEqual(manifest.permissions, ["tabs", "tabGroups", "bookmarks", "storage", "scripting"]);
   assert.equal(manifest.host_permissions, undefined);
+  assert.deepEqual(manifest.optional_host_permissions, ["*://*/*"]);
   assert.deepEqual(manifest.background, { scripts: ["background.js"], type: "module" });
 });
 

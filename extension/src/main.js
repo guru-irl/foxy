@@ -60,7 +60,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let savedDirty = false;
   let savedDirtyRetry = false;
   let savedGeneration = 0;
-  let savedReply = { saved: [], missing: [] };
+  let savedReply = { saved: [], missing: [], pins: {} };
   let snapshot;
   let warnedSaved = false;
   let retryQueued = true;
@@ -69,9 +69,10 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let requestedEditGroupId = null;
   const held = () => actionsInFlight > 0 || ui.dragging || ui.editing || ui.editGroupId != null;
   // An editor holds board reads/renders, but must not hide its own removal.
-  const canCheckEdit = () => actionsInFlight === 0 && !ui.dragging && ui.editGroupId != null;
+  const canCheckEdit = () => actionsInFlight === 0 && !ui.dragging && (ui.editGroupId != null || ui.editTabId != null);
   function releaseMissingEdit() {
     ui.editGroupId = null;
+    ui.editTabId = null;
     ui.editing = false;
     ++generation;
   }
@@ -84,12 +85,14 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     ++savedReadsInFlight;
     let reply, timer;
     try {
-      reply = await Promise.race([
-        api.runtime.sendMessage({ type: "foxy:saved" }),
+      const responses = await Promise.race([
+        Promise.all([api.runtime.sendMessage({ type: "foxy:saved" }),
+          api.runtime.sendMessage({ type: "foxy:pins" })]),
         new Promise((resolve, reject) => {
           timer = setTimeout(() => reject(new Error("foxy:saved timed out")), maxWait);
         }),
       ]);
+      reply = { ...responses[0], pins: responses[1]?.pins ?? {} };
       if (!Array.isArray(reply?.saved) || !Array.isArray(reply?.missing)) {
         throw new Error("Background did not return saved and missing arrays");
       }
@@ -138,11 +141,14 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       if (held()) {
         pending = true;
         if (!canCheckEdit()) return;
-        const editId = ui.editGroupId, editGeneration = generation;
-        const groups = await api.tabGroups.query({});
+        const editId = ui.editGroupId, editTabId = ui.editTabId, editGeneration = generation;
+        let exists;
+        if (editTabId != null) {
+          try { exists = (await api.tabs.get(editTabId)).pinned; } catch { exists = false; }
+        } else exists = (await api.tabGroups.query({})).some(group => group.id === editId);
         // Do not let an older existence check end a newer interaction.
-        if (generation !== editGeneration || ui.editGroupId !== editId || !canCheckEdit() ||
-            groups.some(group => group.id === editId)) return;
+        if (generation !== editGeneration || ui.editGroupId !== editId || ui.editTabId !== editTabId ||
+            !canCheckEdit() || exists) return;
         releaseMissingEdit();
       }
       const mine = ++generation;
@@ -263,6 +269,13 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     });
   }
 
+  // This call must happen in the event handler, before action() or any await.
+  function requestSite(origin) {
+    try {
+      return origin ? Promise.resolve(api.permissions.request({ origins: [origin] }))
+        .catch(error => { console.warn("Foxy: could not request site access", error); return false; }) : Promise.resolve(false);
+    } catch (error) { console.warn("Foxy: could not request site access", error); return Promise.resolve(false); }
+  }
   const handlers = {
     onConfirmDelete: folderId => {
       if (ui.confirmFolderId === folderId) return;
@@ -283,6 +296,24 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     onCloseTab: tabId => action(() => closeTabs(api, [tabId], self?.id)),
     onCloseGroup: groupId => action(() => closeGroup(api, groupId, self?.id)),
     onBringHere: groupId => action(() => bringGroupHere(api, groupId, self.windowId)),
+    onRenamePin: (tabId, name, origin) => {
+      const permission = requestSite(origin);
+      permission.then(granted => {
+        console.debug("Foxy: pin site access", granted);
+        scheduleSaved();
+      });
+      return action(async () => {
+        const reply = await api.runtime.sendMessage({ type: "foxy:rename-pin", tabId, name });
+        if (reply?.ok !== true) throw new Error("foxy:rename-pin was not accepted");
+      });
+    },
+    onAllowPin: origin => {
+      const permission = requestSite(origin);
+      permission.then(granted => {
+        console.debug("Foxy: pin site access", granted);
+        scheduleSaved();
+      });
+    },
     onRename: (groupId, title) => action(() => renameGroup(api, groupId, title)),
     onRecolor: (groupId, color) => action(() => recolorGroup(api, groupId, color)),
     onTabDrop: (tabId, drop) => {
@@ -306,13 +337,16 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       return action(() => dropGroup(api, groupId, resolveGroupTarget(board, groupId, slot, self.windowId)));
     },
     onDragState: dragging => interaction("dragging", dragging),
-    onEditState: (editing, groupId) => {
+    onEditState: (editing, groupId, tabId) => {
+      if (editing && tabId != null) ui.editTabId = tabId;
       if (editing && groupId != null) ui.editGroupId = groupId;
       interaction("editing", editing);
     },
-    onEditEnd: groupId => {
+    onEditEnd: (groupId, tabId) => {
+      if (tabId != null && ui.editTabId !== tabId) return;
       if (groupId != null && ui.editGroupId !== groupId) return;
       ui.editGroupId = null;
+      ui.editTabId = null;
       interaction("editing", false);
     },
   };
@@ -343,7 +377,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     }
   }
   for (const event of [api.bookmarks?.onCreated, api.bookmarks?.onChanged,
-    api.bookmarks?.onMoved, api.bookmarks?.onRemoved]) {
+    api.bookmarks?.onMoved, api.bookmarks?.onRemoved, api.permissions?.onAdded, api.permissions?.onRemoved]) {
     try { event?.addListener(scheduleSaved); }
     catch (error) {
       console.warn("Foxy: could not listen to bookmark changes", error);

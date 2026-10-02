@@ -1037,3 +1037,55 @@ test("future-stamped expected moves are pruned outbound after clock rollback", a
   assert.deepEqual(f.state.expectedMoves, { [bid]: [{ parentId: f.folder(), index: 0, at: 100 }] });
   assert.deepEqual(await f.pages(), [abc[2], abc[0], abc[1]]);
 });
+
+for (const pinned of [false, true]) {
+  test(`outbound ${pinned ? "pins" : "groups"} escape marker-like page titles on create, title and URL deltas`, async () => {
+    const ff = createFirefox({ groups: [{ id: 10, windowId: 1, title: "Group", color: "blue" }],
+      tabs: [{ id: 2, windowId: 1, pinned, groupId: pinned ? -1 : 10,
+        url: "https://example.com/a", title: "  ✏️ Drafts" }], bookmarks: [
+        { id: "root", title: "Foxy", children: [{ id: "pins", title: "📌 Pinned" }, { id: "group", title: "🔵 Group" }] },
+      ] });
+    const state = emptyState();
+    Object.assign(state, { rootId: "root", pinnedId: "pins", groups: { 10: { folderId: "group", title: "🔵 Group" } } });
+    const outbound = createOutbound({ api: ff.browser, getState: () => state, save: async () => {} });
+    await outbound.syncTab(2);
+    const id = state.tabs[2].bookmarkId;
+    assert.equal((await ff.browser.bookmarks.get(id))[0].title, "\u200B  ✏️ Drafts");
+    const get = ff.browser.tabs.get;
+    ff.browser.tabs.get = async id => ({ ...await get(id), title: "✏ Next" });
+    await outbound.syncTab(2);
+    assert.equal((await ff.browser.bookmarks.get(id))[0].title, "\u200B✏ Next");
+    await ff.browser.tabs.update(2, { url: "https://example.com/b" });
+    ff.browser.tabs.get = async id => ({ ...await get(id), title: "✏️ Navigation" });
+    await outbound.syncTab(2);
+    assert.equal((await ff.browser.bookmarks.get(id))[0].title, "\u200B✏️ Navigation");
+    if (!pinned) {
+      await ff.browser.tabs.update(2, { pinned: true });
+      await outbound.syncTab(2);
+      assert.equal((await ff.browser.bookmarks.get(id))[0].parentId, "pins");
+      assert.equal((await ff.browser.bookmarks.get(id))[0].title, "\u200B✏️ Navigation");
+    }
+  });
+}
+
+test("a named pin moved outbound into Pinned preserves its existing marker despite a raw marker-like page title", async () => {
+  const ff = createFirefox({ tabs: [{ id: 2, windowId: 1, pinned: true,
+    url: "https://example.com/a", title: "✏️ Raw page" }], bookmarks: [
+    { id: "root", title: "Foxy", children: [
+      { id: "pins", title: "📌 Pinned" },
+      { id: "group", title: "🔵 Group", children: [
+        { id: "bookmark", url: "https://example.com/a", title: "✏️ Work" },
+      ] },
+    ] },
+  ] });
+  const state = emptyState();
+  Object.assign(state, { rootId: "root", pinnedId: "pins", tabs: {
+    2: { bookmarkId: "bookmark", folderId: "pins", url: "https://example.com/a", title: "Before" },
+  } });
+  const outbound = createOutbound({ api: ff.browser, getState: () => state, save: async () => {} });
+  await outbound.syncTab(2);
+  const [bookmark] = await ff.browser.bookmarks.get("bookmark");
+  assert.equal(bookmark.parentId, "pins");
+  assert.equal(bookmark.title, "✏️ Work");
+  assert.equal(ff.calls.filter(c => c.api === "bookmarks.update").length, 0);
+});

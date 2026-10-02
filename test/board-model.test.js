@@ -298,3 +298,19 @@ test("no eligible windows gives an empty board, without inventing a current wind
     windowOrder: [], pinned: [], columns: [], tabs: [], saved: [], missing: [],
   });
 });
+
+test("board uses synced pin names before injection, across windows, without renaming ordinary tabs", async () => {
+  const input = await snapshot({ windows: [{ id: 1 }, { id: 2 }], tabs: [
+    { id: 11, windowId: 1, pinned: true, title: "Page", url: "https://example.com/" },
+    { id: 21, windowId: 2, pinned: true, title: "Remote page", url: "https://other.com/" },
+    { id: 12, windowId: 1, title: "Loose", url: "https://loose.com/" },
+  ] });
+  input.pins = { 11: { name: "Work", origin: "https://example.com/*", allowed: false },
+    21: { name: "Home", origin: "https://other.com/*", allowed: true },
+    12: { name: "Wrong", origin: "https://loose.com/*", allowed: false } };
+  const board = buildBoard(input);
+  assert.deepEqual(board.pinned.map(section => section.rows[0].title), ["Work", "Home"]);
+  assert.equal(board.pinned[0].rows[0].allowed, false);
+  assert.equal(board.tabs[0].rows[0].title, "Loose");
+  assert.equal(input.tabs[0].title, "Page");
+});

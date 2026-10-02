@@ -19,7 +19,7 @@ export function createFirefox(setup = {}) {
   let nextWindow = Math.max(0, ...wins.map(w => w.id)) + 1;
   const currentWindowId = setup.currentWindowId ?? wins.find(w => w.focused)?.id ?? wins[0]?.id;
   let lastFocusedId = wins.find(w => w.focused)?.id ?? wins[0]?.id;
-  const browser = { tabs: {}, tabGroups: {}, windows: {}, bookmarks: {}, storage: { local: {}, session: {} }, runtime: {} };
+  const browser = { tabs: {}, tabGroups: {}, windows: {}, bookmarks: {}, storage: { local: {}, session: {} }, runtime: {}, permissions: {}, scripting: {} };
 
   function event(name) {
     const listeners = new Set();
@@ -36,6 +36,7 @@ export function createFirefox(setup = {}) {
     tabGroups: ["onCreated", "onUpdated", "onMoved", "onRemoved"],
     windows: ["onRemoved", "onFocusChanged"],
     bookmarks: ["onCreated", "onRemoved", "onChanged", "onMoved"],
+    permissions: ["onAdded", "onRemoved"],
     storage: ["onChanged"], runtime: ["onMessage", "onStartup", "onInstalled"],
   })) {
     for (const name of names) browser[namespace][name] = event(`${namespace}.${name}`);
@@ -74,7 +75,8 @@ export function createFirefox(setup = {}) {
   }
   function api(namespace, name, fn, sync = false) {
     const wrapped = (...args) => {
-      calls.push({ api: `${namespace}.${name}`, args: copy(args) });
+      calls.push({ api: `${namespace}.${name}`, args: namespace === "scripting"
+        ? args.map(details => ({ ...copy({ ...details, func: undefined }), func: details.func })) : copy(args) });
       return fn(...args);
     };
     const target = namespace.startsWith("storage.") ? browser.storage[namespace.split(".")[1]] : browser[namespace];
@@ -105,7 +107,7 @@ export function createFirefox(setup = {}) {
   function tabObject(t) {
     return { id: t.id, windowId: t.windowId, index: t.index, pinned: t.pinned, groupId: t.groupId,
       url: t.url, title: t.title, favIconUrl: t.favIconUrl, active: t.active, discarded: t.discarded,
-      hidden: false, status: "complete", lastAccessed: t.lastAccessed, incognito: windowById(t.windowId).incognito };
+      hidden: false, status: t.status, lastAccessed: t.lastAccessed, incognito: t.incognito || windowById(t.windowId).incognito };
   }
   function windowObject(w, populate = false) {
     const result = { id: w.id, focused: w.focused, type: w.type, incognito: w.incognito };
@@ -114,7 +116,7 @@ export function createFirefox(setup = {}) {
   }
   function updated(t, before) {
     const changes = {};
-    for (const key of ["url", "title", "pinned", "groupId", "discarded"]) {
+    for (const key of ["url", "title", "pinned", "groupId", "discarded", "status"]) {
       if (before[key] !== t[key]) changes[key] = t[key];
     }
     if (Object.keys(changes).length) queue("tabs.onUpdated", t.id, changes, tabObject(t));
@@ -161,6 +163,7 @@ export function createFirefox(setup = {}) {
     clock = Math.max(clock, t.lastAccessed ?? stamp);
     return { id: t.id, windowId: t.windowId, url, title: t.title ?? url, pinned: t.pinned ?? false,
       groupId: t.pinned ? -1 : t.groupId ?? -1, active: t.active ?? false, discarded: t.discarded ?? false,
+      status: t.status ?? "complete", incognito: t.incognito ?? false,
       favIconUrl: t.favIconUrl, lastAccessed: t.lastAccessed ?? stamp };
   }
   for (const tab of setup.tabs ?? []) windowTabs(tab.windowId).push(makeTab(tab));
@@ -693,6 +696,49 @@ export function createFirefox(setup = {}) {
     api(`storage.${area}`, "clear", () => removeStorage(Object.keys(storage)));
   }
 
+  const origins = new Set(setup.origins ?? []);
+  let userInput = false;
+  function withUserInput(fn) {
+    const before = userInput;
+    userInput = true;
+    try { return fn(); } finally { userInput = before; }
+  }
+  function covers(grant, origin) {
+    if (grant === "<all_urls>" || grant === origin) return true;
+    const match = grant.match(/^(\*|https?):\/\/([^/]+)\/\*$/);
+    if (!match) return false;
+    try {
+      const url = new URL(origin.replace(/\*$/, ""));
+      return (match[1] === "*" || `${match[1]}:` === url.protocol)
+        && (match[2] === "*" || match[2] === url.hostname ||
+          (match[2].startsWith("*.") && (url.hostname === match[2].slice(2) || url.hostname.endsWith(match[2].slice(1)))));
+    } catch { return false; }
+  }
+  api("permissions", "contains", props => (props.origins ?? []).every(origin => [...origins].some(grant => covers(grant, origin))));
+  api("permissions", "getAll", () => ({ permissions: [], origins: [...origins] }));
+  api("permissions", "request", props => {
+    if (!userInput) throw new Error("permissions.request requires handling user input");
+    if (setup.requestPending) return new Promise(() => {});
+    if (setup.requestGranted === false) return false;
+    const added = (props.origins ?? []).filter(origin => !origins.has(origin));
+    for (const origin of added) origins.add(origin);
+    if (added.length) queue("permissions.onAdded", { permissions: [], origins: added });
+    return true;
+  });
+  api("permissions", "remove", props => {
+    const removed = (props.origins ?? []).filter(origin => origins.delete(origin));
+    if (removed.length) queue("permissions.onRemoved", { permissions: [], origins: removed });
+    return true;
+  });
+  api("scripting", "executeScript", details => {
+    const tab = tabById(details.target.tabId);
+    // Firefox 157's lazy browser cannot answer queryContent; the API exposes
+    // this generic error. Loaded frames without access use ext-tabs-base's error.
+    if (tab.discarded) throw new Error("An unexpected error occurred");
+    if (![...origins].some(grant => covers(grant, tab.url))) throw new Error("Missing host permission for the tab");
+    return [{ frameId: 0, result: undefined }];
+  });
+
   browser.runtime.id = setup.extensionId ?? "foxy-test";
   api("runtime", "getURL", path => `moz-extension://${browser.runtime.id}/${path}`, true);
   api("runtime", "sendMessage", msg => {
@@ -745,5 +791,5 @@ export function createFirefox(setup = {}) {
     }
     return `${pinned ? `${pinned} ` : ""}| ${items.join(" ")}`;
   }
-  return { browser, settle, layout, closeWindow, restart, bookmarkChanges, markUploaded, applyRemoteBookmarks, fire: queue, errors, calls };
+  return { browser, withUserInput, settle, layout, closeWindow, restart, bookmarkChanges, markUploaded, applyRemoteBookmarks, fire: queue, errors, calls };
 }

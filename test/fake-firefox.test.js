@@ -2,6 +2,23 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createFirefox } from "./fakes/firefox.js";
 
+for (const [discarded, origins, error] of [
+  [false, [], "Missing host permission for the tab"],
+  [true, [], "An unexpected error occurred"],
+  [true, ["https://example.com/*"], "An unexpected error occurred"],
+]) {
+  test(`executeScript rejects inaccessible pages: discarded=${discarded}, granted=${origins.length > 0}`, async () => {
+    const ff = createFirefox({ origins, tabs: [{ id: 1, windowId: 1, url: "https://example.com/a", discarded }] });
+    await assert.rejects(ff.browser.scripting.executeScript({ target: { tabId: 1, frameIds: [0] }, func: () => 1 }), { message: error });
+  });
+}
+
+test("executeScript permits a loaded page with a host grant covering its port", async () => {
+  const ff = createFirefox({ origins: ["http://127.0.0.1/*"], tabs: [{ id: 1, windowId: 1, url: "http://127.0.0.1:2345/a" }] });
+  assert.deepEqual(await ff.browser.scripting.executeScript({ target: { tabId: 1, frameIds: [0] }, func: () => 1 }),
+    [{ frameId: 0, result: undefined }]);
+});
+
 for (const method of ["get", "getCurrent", "getLastFocused"]) {
   test(`windows.${method} ignores deprecated windowTypes and records a warning`, async () => {
     const ff = createFirefox({ windows: [{ id: 1 }, { id: 2, type: "popup", focused: true }],

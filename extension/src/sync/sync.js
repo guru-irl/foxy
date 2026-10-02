@@ -1,22 +1,25 @@
 import { handleMessage } from "../close.js";
-import { isOpenableUrl, isSyncableUrl, encodeFolderTitle, ROOT_TITLE, isPinnedFolderTitle } from "./codec.js";
+import { isOpenableUrl, isSyncableUrl, encodeFolderTitle, encodePinTitle, decodePinTitle, normalizePinName, encodePageTitle, ROOT_TITLE, isPinnedFolderTitle } from "./codec.js";
 import { createQueue, loadState, saveState, groupOfFolder, probeMissingBookmark,
   recordRemoved, pruneRemovedIds, wasRemoved } from "./state.js";
 import { ensurePinnedFolder, readTree, mergeRoots, OTHER_BOOKMARKS } from "./tree.js";
 import { createOutbound } from "./outbound.js";
 import { createInbound } from "./inbound.js";
 import { matchGroups, matchTabs } from "./match.js";
+import { createNames } from "./names.js";
 import { settle, rebuild } from "./startup.js";
 
-/** One controller per event-page lifetime. Only storage.session marks a browser session. */
+/** One controller per event-page lifetime; storage.session survives idle wakes. */
 export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   settleMs = 3000, maxWaitMs = 20000 }) {
   const queue = createQueue();
   let state, starting, rebuilding;
   const earlyRemovals = [];
-  const returnTimers = new Map(), movedTabs = new Set();
+  const returnTimers = new Map(), movedTabs = new Set(), loadedTabs = new Set();
   let moveTimer;
   const save = () => saveState(api, state);
+  const saveLoads = () => api.storage.session.set({ foxyLoadedTabs: [...loadedTabs] });
+  const names = createNames({ api, getState: () => state, save });
   const outbound = createOutbound({ api, getState: () => state, save, now, removeDelayMs, quietMs,
     extensionBaseUrl: api.runtime.getURL(""),
     schedule: ms => setTimeout(() => queue.run(flush).catch(() => {}), ms),
@@ -112,7 +115,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   });
 
   async function rebuildMaps(lostIdentity = false) {
-    await rebuild({ api, state, outbound, inbound, lostIdentity });
+    await rebuild({ api, state, outbound, inbound, names, lostIdentity, loadedTabs });
     await save();
     if (lostIdentity) for (const id of Object.keys(state.groups)) scheduleReturningGroup(Number(id));
   }
@@ -138,7 +141,10 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
         state = await loadState(api);
         for (const [id, info, at] of earlyRemovals.splice(0)) recordRemoved(state, id, info, at);
         if (pruneRemovedIds(state, now()) || Object.keys(state.removedIds).length) await save();
-        const session = await api.storage.session.get("foxySession");
+        const session = await api.storage.session.get(["foxySession", "foxyLoadedTabs"]);
+        for (const id of session.foxyLoadedTabs ?? []) loadedTabs.add(id);
+        // Firefox 157 keys storage.session by Extension object (ExtensionStorage).
+        // Updates/reloads get an empty bucket too: rebuild is their one reapply path.
         if (!session.foxySession) {
           await settle(api, { settleMs, maxWaitMs, now });
           await rebuildMaps();
@@ -484,8 +490,19 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     "runtime.onStartup": async () => {},
     "runtime.onInstalled": async () => {},
     "tabs.onCreated": tab => syncTab(tab.id),
-    "tabs.onUpdated": syncTab,
+    "tabs.onUpdated": async (id, change = {}) => {
+      if (change.status === "loading") await saveLoads();
+      if (((change.status === "loading" && change.url !== undefined) || change.pinned === false) && state.tabs[id]?.shownName !== undefined) {
+        delete state.tabs[id].shownName;
+        await save();
+      }
+      if (change.pinned === false) await names.apply(id);
+      await syncTab(id);
+      if (change.status === "complete" || change.pinned === true) await names.apply(id);
+    },
+    "permissions.onAdded": () => names.applyAll(),
     "tabs.onRemoved": async (id, info) => {
+      if (loadedTabs.delete(id)) await saveLoads();
       // A normal mapped group can subsequently move into a private window.
       // Its private close is not evidence for deleting a shared bookmark.
       let win;
@@ -510,7 +527,12 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       }
       await changed(id, node);
     },
-    "bookmarks.onChanged": async id => changed(id, await managedNode(id)),
+    "bookmarks.onChanged": async id => {
+      await changed(id, await managedNode(id));
+      for (const [tabId, entry] of Object.entries(state.tabs)) {
+        if (entry.bookmarkId === id) await names.apply(Number(tabId));
+      }
+    },
     "bookmarks.onRemoved": async (id, info) => {
       recordRemoved(state, id, info, now());
       await save();
@@ -527,7 +549,12 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       if (!await relevant(id, info.parentId) && !await relevant(id, info.oldParentId)) return;
       const node = await managedNode(id);
       if (node?.type === "folder") await changed(id, node);
-      else await inbound.bookmarkMoved(id, info);
+      else {
+        await inbound.bookmarkMoved(id, info);
+        for (const [tabId, entry] of Object.entries(state.tabs)) {
+          if (entry.bookmarkId === id) await names.apply(Number(tabId));
+        }
+      }
     },
     "windows.onFocusChanged": async id => {
       if (id === api.windows.WINDOW_ID_NONE) return;
@@ -539,6 +566,8 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     },
   };
   const handlers = Object.fromEntries(Object.entries(jobs).map(([name, fn]) => [name, (...args) => {
+    // Capture loads during startup settling before rebuild can infer a restored label.
+    if (name === "tabs.onUpdated" && args[1]?.status === "loading") loadedTabs.add(args[0]);
     if (name === "bookmarks.onRemoved") {
       if (state) recordRemoved(state, args[0], args[1], now());
       else earlyRemovals.push([args[0], args[1], now()]);
@@ -602,8 +631,31 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     await save();
     return { ok: true, groupId };
   }
+  async function renamePin(tabId, value) {
+    if (!Number.isInteger(tabId) || (value !== null && typeof value !== "string")) return { ok: false };
+    const name = normalizePinName(value) || null;
+    if (name?.length > 200) return { ok: false };
+    const tab = await api.tabs.get(tabId);
+    if (!tab.pinned || tab.incognito) return { ok: false };
+    if (!state.tabs[tabId]) await syncTab(tabId);
+    const entry = state.tabs[tabId];
+    if (entry?.folderId !== state.pinnedId) return { ok: false };
+    const node = await getNode(entry.bookmarkId);
+    if (node?.parentId !== state.pinnedId) return { ok: false };
+    const restored = name === null ? await names.apply(tabId, true) : undefined;
+    const title = name === null ? restored ?? entry.title : encodePinTitle(name);
+    const bookmarkTitle = name === null ? encodePageTitle(title) : title;
+    if (node.title !== bookmarkTitle) await api.bookmarks.update(node.id, { title: bookmarkTitle });
+    if (name === null) {
+      entry.title = title;
+      await save();
+    } else await names.apply(tabId);
+    return { ok: true };
+  }
   /**
    * Page protocol (foxy:* replies can wait up to maxWaitMs at session start):
+   * - foxy:pins -> { pins: { [tabId]: { name, origin, allowed } } } (named pins only)
+   * - foxy:rename-pin { tabId, name: string | null } -> { ok }
    * - foxy:saved -> { saved: [{ folderId, title, color, count, cantReopen }],
    *                   missing: [{ folderId, title, color }] }
    * - foxy:open-saved { folderId, windowId } -> { ok: true, groupId } on success
@@ -620,6 +672,8 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     }
     return run(async () => {
       switch (message?.type) {
+        case "foxy:pins": return names.pins();
+        case "foxy:rename-pin": return renamePin(message.tabId, message.name);
         case "foxy:saved": return saved();
         case "foxy:open-saved": return openSaved(message.folderId, message.windowId);
         case "foxy:delete-saved": {

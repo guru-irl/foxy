@@ -20,6 +20,11 @@ export async function loadState(api) {
     if (!entries(state.removedIds, Number.isFinite)) state.removedIds = {};
     if (!entries(state.folderSnapshots, entry => record(entry) && string(entry.title)
       && string(entry.color) && strings(entry.urls))) state.folderSnapshots = {};
+    for (const entry of Object.values(state.tabs)) {
+      for (const key of ["appliedName", "shownName"]) {
+        if (typeof entry[key] !== "string" || !entry[key].trim()) delete entry[key];
+      }
+    }
     return state;
   } catch (error) {
     console.warn("Foxy: could not load sync state", error);
