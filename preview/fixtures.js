@@ -43,7 +43,26 @@ const saved = [
   { folderId: "saved-local", title: "LOCAL PAGES", color: "grey", count: 2, cantReopen: ["about:config"] },
   { folderId: "saved-unnamed", title: "", color: "orange", count: 3, cantReopen: [] },
 ];
+// The same wide saved layout is fitted, without writes, by the narrow preview.
+function grid(cellSize = "M") {
+  return { ...scenario(one), saved, missing: [],
+    folders: { 101: "preview-101", 102: "preview-102", 103: "preview-103" },
+    deviceSettings: { cellSize },
+    layout: {
+      clock: { x: 0, y: 0, w: 5, h: 2 },
+      pinned: { x: 0, y: 2, w: 3, h: 4 },
+      "group:preview-101": { x: 5, y: 0, w: 3, h: 4 },
+      "group:preview-102": { x: 3, y: 4, w: 3, h: 4 },
+      "group:preview-103": { x: 6, y: 4, w: 3, h: 4 },
+      saved: { x: 0, y: 6, w: 3, h: 4 },
+    },
+  };
+}
 export const SCENARIOS = {
+  "grid-m": grid(),
+  "grid-xl": grid("XL"),
+  "grid-narrow": grid(),
+  "settings-open": grid(),
   empty: scenario([], { pinned: 0 }),
   "one-window": scenario(one),
   saved: { ...scenario(one), saved, missing: [] },

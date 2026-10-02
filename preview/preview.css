@@ -7,3 +7,8 @@ html {
 html[data-scheme="light"] {
   background: #e9e9ea;
 }
+
+/* Screenshots capture the final pane position, not its opening animation. */
+.settings-pane {
+  transition: none;
+}

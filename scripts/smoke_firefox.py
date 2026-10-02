@@ -222,6 +222,26 @@ BOARD_SCRIPT = """
             fontsReady: document.fonts.status === 'loaded', url: location.href};
 """
 
+SETTINGS_SCRIPT = """
+    const gear = document.querySelector('#board .rail .settings-button');
+    if (!gear) throw new Error('settings gear missing');
+    gear.click();
+    const pane = document.querySelector('.settings-pane');
+    const visible = () => !!pane && !pane.hidden && pane.getBoundingClientRect().width > 0
+        && getComputedStyle(pane).visibility === 'visible' && getComputedStyle(pane).display !== 'none';
+    const opened = visible();
+    document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+    return {opened, closed: !visible()};
+"""
+
+
+def check_settings(client):
+    state = client.script(SETTINGS_SCRIPT)
+    if state.get('opened') is not True or state.get('closed') is not True:
+        raise RuntimeError(f"settings pane failed open/Escape check: {state!r}")
+    return "gear opens pane; Escape closes it"
+
+
 PLACES_SCRIPT = """
     const {PlacesUtils} = ChromeUtils.importESModule('resource://gre/modules/PlacesUtils.sys.mjs');
     const roots = [];
@@ -525,7 +545,8 @@ def run_checks(client, root, scratch, results, base):
                      lambda s: s["board"] and s["fontsReady"] and s["clock"] and s["rail"] and
                      "PINNED" in {title.upper() for title in s["tiles"]}, minimum=3)
         return ", ".join(filter(None, state["tiles"])) + "; TABS rail; clock tile; fonts ready"
-    results.check("board", board)
+    results.check("grid: tiles and rail rendered", board)
+    results.check("settings: pane opens", lambda: check_settings(client))
 
     def fonts():
         state = client.script("""

@@ -128,6 +128,8 @@ class SmokeSequenceTests(unittest.TestCase):
             if source == smoke.BOARD_SCRIPT:
                 return {"board": True, "fontsReady": True, "clock": True,
                         "tiles": ["PINNED", "SMOKE"], "rail": True, "url": base + "newtab.html"}
+            if source == getattr(smoke, "SETTINGS_SCRIPT", None):
+                return {"opened": True, "closed": True}
             if source == smoke.PLACES_SCRIPT:
                 if clock[0] < 6:
                     return []
@@ -159,6 +161,8 @@ class SmokeSequenceTests(unittest.TestCase):
             smoke.run_checks(client, smoke.ROOT, Path(directory), results, base)
         self.assertEqual(results.exit_code, 0)
         self.assertIn("PASS named inbound pins", output.getvalue())
+        self.assertIn("PASS grid: tiles and rail rendered", output.getvalue())
+        self.assertIn("PASS settings: pane opens", output.getvalue())
         self.assertEqual(len(navigations), 2)
         self.assertGreaterEqual(navigations[1], root_seen[0] + 1)
 
@@ -174,6 +178,8 @@ class SmokeSequenceTests(unittest.TestCase):
                 return {"sans": True, "mono": True, "loaded": ["Foxy Sans", "Foxy Mono"]}
             if "AboutNewTab" in source:
                 raise RuntimeError("override unavailable")
+            if source == getattr(smoke, "SETTINGS_SCRIPT", None):
+                return {"opened": True, "closed": True}
             if source == smoke.PLACES_SCRIPT:
                 return [{"guid": "root", "children": [{"title": "📌 Pinned", "type": 2}]}]
             self.fail(f"unexpected script: {source}")
@@ -185,7 +191,7 @@ class SmokeSequenceTests(unittest.TestCase):
             results = smoke.Results()
             with self.assertRaisesRegex(smoke.CheckFailed, "newtab override"):
                 smoke.run_checks(Mock(script=script), smoke.ROOT, SCRATCH, results, base)
-        self.assertEqual(results.outcomes, [True, True, False])
+        self.assertEqual(results.outcomes, [True, True, True, False])
         self.assertEqual(output.getvalue().splitlines()[-1], "FAIL newtab override: override unavailable")
 
     def test_extension_console_errors_still_fail_the_smoke(self):
@@ -199,6 +205,14 @@ class SmokeSequenceTests(unittest.TestCase):
             with self.assertRaises(smoke.CheckFailed):
                 smoke.check_console(client, "moz-extension://smoke-test/", Path(directory), results)
         self.assertEqual(results.exit_code, 1)
+
+
+class SettingsTests(unittest.TestCase):
+    def test_pane_must_open_and_escape_must_close_it(self):
+        for state in ({"opened": False, "closed": True}, {"opened": True, "closed": False}):
+            with self.subTest(state=state), self.assertRaises(RuntimeError):
+                smoke.check_settings(Mock(script=Mock(return_value=state)))
+        self.assertIn("Escape", smoke.check_settings(Mock(script=Mock(return_value={"opened": True, "closed": True}))))
 
 
 class PinNameTests(unittest.TestCase):
