@@ -22,7 +22,9 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   const names = createNames({ api, getState: () => state, save });
   const outbound = createOutbound({ api, getState: () => state, save, now, removeDelayMs, quietMs,
     extensionBaseUrl: api.runtime.getURL(""),
-    schedule: ms => setTimeout(() => queue.run(flush).catch(() => {}), ms),
+    // unref exists only on Node timers: a test with a frozen clock must not be
+    // kept alive by a removal that never comes due. Firefox returns a number.
+    schedule: ms => setTimeout(() => queue.run(flush).catch(() => {}), ms).unref?.(),
     lostIdentity: scheduleRebuild,
   });
   // Losing OS focus doesn't stop showing the last Firefox window's active tab.

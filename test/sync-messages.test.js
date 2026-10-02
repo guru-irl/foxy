@@ -357,6 +357,31 @@ test("a removal timer drains through the queue without another background event"
   await drain(ff, sync);
 });
 
+test("a removal timer that fires before its due time reschedules itself", async () => {
+  // Node timers use a cached loop clock, so after long synchronous work a timer
+  // can fire while Date.now() says the removal is not due yet. That flush must
+  // not drop the removal until some unrelated event drains the queue.
+  let clock = Date.now();
+  const ff = createFirefox(localSetup), sync = wire(ff, { removeDelayMs: 5, now: () => clock });
+  await drain(ff, sync);
+  const state = await loadState(ff.browser);
+  await ff.browser.tabs.remove(2);
+  await ff.settle();
+  await sync.idle();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  await sync.idle();
+  await ff.browser.bookmarks.get(state.tabs[2].bookmarkId); // Not due: still saved.
+  clock += 10;
+  const removed = () => ff.browser.bookmarks.get(state.tabs[2].bookmarkId).then(() => false, () => true);
+  for (const deadline = Date.now() + 2000; !(await removed()) && Date.now() < deadline;) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+    await sync.idle();
+  }
+  await assert.rejects(ff.browser.bookmarks.get(state.tabs[2].bookmarkId));
+  assert.equal((await loadState(ff.browser)).pendingRemovals[2], undefined);
+  await drain(ff, sync);
+});
+
 test("focusing another Firefox window releases a shown tab's deferred navigation", async () => {
   const ff = createFirefox({ ...localSetup, windows: [{ id: 1, focused: true }, { id: 2 }],
     tabs: [...localSetup.tabs, { id: 8, windowId: 2, url: "about:home", active: true }] });

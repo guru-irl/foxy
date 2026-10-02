@@ -1,10 +1,12 @@
 # Foxy
 
-A private Firefox add-on and browser theme for macOS.
+A private Firefox add-on and browser theme.
 
 - Replaces the new tab and home pages with a clock and a board of your tabs and tab groups from every window.
 - Saves groups and pinned tabs as bookmarks, so they survive a failed session restore and sync to your other devices through Firefox Sync.
 - Ships a glass, neutral, borderless Firefox theme with bundled fonts.
+
+**Platforms:** the add-on works in desktop Firefox 140 or later on macOS, Windows and Linux (not Android). The theme is built for macOS; elsewhere the layout and fonts apply, but the glass blur does not.
 
 Version 2.2.0. Unlisted and signed by Mozilla. Design: `docs/superpowers/specs/2026-10-01-foxy-design.md`.
 
@@ -67,7 +69,7 @@ To remove: uninstall in about:addons. The `Foxy` bookmark folders stay; delete t
 ## Theme
 
 - `theme/userChrome.css` styles the Firefox window, `theme/userContent.css` styles content pages, `theme/user.js` sets the preferences.
-- **Install:** quit Firefox (Cmd+Q), then run `python3 scripts/install_theme.py`. Add `--profile PATH` or `--firefox-dir PATH` to pick another profile.
+- **Install:** quit Firefox (Cmd+Q), then run `python3 scripts/install_theme.py`. It looks for the macOS profile folder by default; use `--profile PATH` or `--firefox-dir PATH` on other systems or to pick another profile.
 - **What it does:** backs up existing files to `<profile>/chrome/backup-<time>/`, then links the profile to the repo. Keep the repo where it is.
 - **Changes:** Firefox reads the theme only at startup, so quit and reopen after any change.
 - **Undo:** quit Firefox, delete the four links, and move the backed-up files back (`user.js` goes in the profile folder, the rest in `chrome/`).

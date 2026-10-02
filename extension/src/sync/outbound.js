@@ -260,6 +260,14 @@ export function createOutbound({
         await save();
       })();
     }
+    // A timer can fire before Date.now() reaches its removal's due time (Node and
+    // Firefox both use a cached loop clock). Wait for the earliest one again
+    // rather than leaving it until some unrelated event drains the queue.
+    const waiting = Object.values(getState().pendingRemovals).map(removal => removal.due)
+      .filter(due => due > now());
+    if (waiting.length) {
+      try { schedule(Math.max(1, Math.min(...waiting) - now())); } catch (error) { warn(error); }
+    }
   });
 
   return { syncTab, syncGroup, tabRemoved, groupRemoved, flush };
