@@ -1,4 +1,4 @@
-import { encodeFolderTitle, decodeFolderTitle, decodePinTitle, isSyncableUrl } from "./codec.js";
+import { encodeFolderTitle, decodeFolderTitle, decodePinTitle, encodePageTitle, isSyncableUrl } from "./codec.js";
 import { folderOfGroup, groupOfFolder, probeMissingBookmark, wasRemoved } from "./state.js";
 
 /**
@@ -122,10 +122,11 @@ export function createOutbound({
     if (!entry && state.failedCreates[tabId] === tab.url) return;
     const index = await position(tab, folderId, bookmark);
     const title = tab.title ?? "";
+    const bookmarkTitle = encodePageTitle(title);
     if (!entry) {
       if (!(await readBookmark(folderId))?.[0]) return;
       let created;
-      try { created = await bookmarkCall([folderId], () => api.bookmarks.create({ parentId: folderId, index, url: tab.url, title })); }
+      try { created = await bookmarkCall([folderId], () => api.bookmarks.create({ parentId: folderId, index, url: tab.url, title: bookmarkTitle })); }
       catch (error) {
         if (error?.foxyMissingId) throw error;
         state.failedCreates[tabId] = tab.url;
@@ -168,15 +169,15 @@ export function createOutbound({
     // Compare direction against lastSynced, not against the live bookmark.
     // If the actual bookmark already matches, advance bookkeeping without an echo.
     if (tab.status === "complete" && tab.url !== entry.url && !(state.quietUntil[tabId] > now())) {
-      if (bookmark.url !== tab.url || (!named && bookmark.title !== title)) {
+      if (bookmark.url !== tab.url || (!named && bookmark.title !== bookmarkTitle)) {
         await bookmarkCall([entry.bookmarkId], () => api.bookmarks.update(entry.bookmarkId,
-          named ? { url: tab.url } : { url: tab.url, title }));
+          named ? { url: tab.url } : { url: tab.url, title: bookmarkTitle }));
       }
       entry.url = tab.url;
       if (!named) entry.title = title;
       await save();
     } else if (!named && tab.status === "complete" && tab.url === entry.url && title !== entry.title) {
-      if (bookmark.title !== title) await bookmarkCall([entry.bookmarkId], () => api.bookmarks.update(entry.bookmarkId, { title }));
+      if (bookmark.title !== bookmarkTitle) await bookmarkCall([entry.bookmarkId], () => api.bookmarks.update(entry.bookmarkId, { title: bookmarkTitle }));
       entry.title = title;
       await save();
     }

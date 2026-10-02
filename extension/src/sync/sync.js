@@ -1,5 +1,5 @@
 import { handleMessage } from "../close.js";
-import { isOpenableUrl, isSyncableUrl, encodeFolderTitle, encodePinTitle, normalizePinName, ROOT_TITLE, isPinnedFolderTitle } from "./codec.js";
+import { isOpenableUrl, isSyncableUrl, encodeFolderTitle, encodePinTitle, normalizePinName, encodePageTitle, ROOT_TITLE, isPinnedFolderTitle } from "./codec.js";
 import { createQueue, loadState, saveState, groupOfFolder, probeMissingBookmark,
   recordRemoved, pruneRemovedIds, wasRemoved } from "./state.js";
 import { ensurePinnedFolder, readTree, mergeRoots, OTHER_BOOKMARKS } from "./tree.js";
@@ -633,7 +633,8 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     const node = await getNode(entry.bookmarkId);
     if (node?.parentId !== state.pinnedId) return { ok: false };
     const title = name === null ? (await names.apply(tabId, true)) ?? entry.title : encodePinTitle(name);
-    if (node.title !== title) await api.bookmarks.update(node.id, { title });
+    const bookmarkTitle = name === null ? encodePageTitle(title) : title;
+    if (node.title !== bookmarkTitle) await api.bookmarks.update(node.id, { title: bookmarkTitle });
     if (name === null) {
       entry.title = title;
       await save();

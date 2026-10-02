@@ -493,6 +493,9 @@ U+FE0F, trims, collapses whitespace runs to one space, and treats an empty
 name as unnamed. Board renames reject names over 200 characters after this
 normalisation; the editor input is limited to 200 characters. Renaming the bookmark in
 the Bookmarks UI to or from that form names or unnames the pin too.
+Outbound prefixes U+200B (zero width space) to page titles in groups and pins
+whose trimmed form starts with `✏`, so only an explicit rename or a Bookmarks
+UI edit names a pin.
 
 **How it shows.** The tab's page title is set to the name and kept there by a
 script Foxy injects into that tab (`scripting.executeScript`, top frame,

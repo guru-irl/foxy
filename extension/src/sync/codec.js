@@ -43,6 +43,11 @@ export function isOpenableUrl(url) {
   }
 }
 
+/** Only explicit renames and Bookmarks UI edits may introduce the pin marker. */
+export function encodePageTitle(title) {
+  return title.trim().startsWith("✏") ? `\u200B${title}` : title;
+}
+
 export function normalizePinName(name) {
   return (name ?? "").trim().replace(/\s+/gu, " ");
 }

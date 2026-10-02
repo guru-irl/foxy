@@ -174,6 +174,14 @@ for (const lifecycle of ["update", "reload"]) {
   });
 }
 
+test("unname escapes a restored marker-like page title instead of naming it again", async () => {
+  const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
+  ff.browser.scripting.executeScript = async () => [{ frameId: 0, result: "  ✏️ Page title" }];
+  assert.deepEqual(await sync.onMessage({ type: "foxy:rename-pin", tabId: 2, name: null }), { ok: true });
+  assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, "\u200B  ✏️ Page title");
+  assert.deepEqual(await sync.onMessage({ type: "foxy:pins" }), { pins: {} });
+});
+
 test("removing a board name restores the keeper and resumes ordinary outbound title sync", async () => {
   const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
   assert.deepEqual(await sync.onMessage({ type: "foxy:rename-pin", tabId: 2, name: null }), { ok: true });
