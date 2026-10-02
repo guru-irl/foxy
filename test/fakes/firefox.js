@@ -731,7 +731,11 @@ export function createFirefox(setup = {}) {
     return true;
   });
   api("scripting", "executeScript", details => {
-    tabById(details.target.tabId);
+    const tab = tabById(details.target.tabId);
+    // Firefox 157's lazy browser cannot answer queryContent; the API exposes
+    // this generic error. Loaded frames without access use ext-tabs-base's error.
+    if (tab.discarded) throw new Error("An unexpected error occurred");
+    if (![...origins].some(grant => covers(grant, tab.url))) throw new Error("Missing host permission for the tab");
     return [{ frameId: 0, result: undefined }];
   });
 
