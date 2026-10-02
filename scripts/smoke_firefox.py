@@ -389,6 +389,8 @@ def check_pin_history(client):
             tab_id = client.script("""
                 return (await browser.tabs.create({url: arguments[0], pinned: true, active: false})).id;
             """, [base + "/a"])
+            poll("history pin initially loaded", lambda: client.script("return await browser.tabs.get(arguments[0]);", [tab_id]),
+                 lambda tab: tab["url"] == base + "/a" and tab["status"] == "complete" and tab["title"] == "A page")
 
             def read():
                 return client.script("""
