@@ -401,6 +401,7 @@ function tabRow(root, tab, handlers) {
         initial: tab.name ?? tab.title, className: "name-editor pin-name-editor", updateLabel: false,
         onSave: name => {
           try {
+            if (name === (tab.name ?? tab.title).trim()) return;
             label.textContent = name || tab.title;
             handlers.onRenamePin?.(tab.id, name || null, tab.origin ?? pinOrigin(tab.url));
           } finally { end(); }

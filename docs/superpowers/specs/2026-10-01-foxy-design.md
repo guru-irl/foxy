@@ -536,7 +536,8 @@ access, and the name then applies through `permissions.onAdded`.
 - The editor replaces the row's label in place, with the same behaviour as
   the group name editor (Enter saves, Escape cancels, blur saves; the row is
   not draggable while editing). It starts with the pin's name, or its title
-  when unnamed, selected. Saving an empty name removes the name.
+  when unnamed, selected. Saving unchanged text cancels without requesting
+  access or renaming. Saving an empty name removes the name.
 - A named pin's row shows its name even where the title is not applied yet
   (no permission, unloaded tab).
 - The page asks the background for pin names with `foxy:pins` →

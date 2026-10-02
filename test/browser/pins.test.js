@@ -138,6 +138,23 @@ test("ALLOW requests the remote pin origin in its click handler, updates access,
   assert.equal(ff.calls.some(c => c.args[0]?.type === "foxy:rename-pin" || c.api === "tabs.update"), false);
 });
 
+for (const id of [11, 21]) for (const ending of ["Enter", "blur"]) {
+  test(`unchanged ${id === 11 ? "unnamed" : "named"} pin ${ending} cancels without requesting or sending`, async () => {
+    const { ff, node, control } = await controller();
+    row(node, id).querySelector(".row-rename").click();
+    const input = row(node, id).querySelector(".name-editor");
+    input.value = `  ${input.value}  `;
+    ff.calls.length = 0;
+    if (ending === "blur") input.dispatchEvent(new FocusEvent("blur"));
+    else ff.withUserInput(() => key(input, "Enter"));
+    await flush(ff);
+    assert.equal(ff.calls.some(c => c.api === "permissions.request" || c.args[0]?.type === "foxy:rename-pin"), false);
+    assert.equal(row(node, id).querySelector(".row-label").textContent, id === 11 ? "Page" : "Home");
+    assert.equal(control.ui.editing, false);
+    assert.equal(row(node, id).draggable, true);
+  });
+}
+
 for (const action of ["rename", "ALLOW"]) {
   test(`pending permission on ${action} does not hold board refresh or saving`, async () => {
     const { ff, node, control } = await controller(true, { requestPending: true });
