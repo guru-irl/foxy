@@ -521,9 +521,14 @@ logged with the "Foxy:" prefix and never retried in a loop.
 - Outbound never writes the title of a named pin's bookmark; URL changes
   still update its URL. Unnamed pins otherwise follow §8.3.
 - Removing a pin's name writes the restored page title, else the last known
-  page title, else the URL, never the bare name. While the tab still shows
-  the old name, later tab events and moves leave that fallback alone; a real
-  page title replaces it once available.
+  page title, else the URL, never the bare name. Each device remembers the
+  name it last displayed, so later events and moves leave the unnamed title
+  alone while that name is still shown. A new top-level document load clears
+  this guard, unlike a same-document URL change, so even a real page title
+  equal to the old name can replace the fallback.
+  Rebuilds recover a still-unloaded pin's matching named label from the tab,
+  or retain its previous shown name by bookmark and URL if it was unnamed
+  while this device was closed.
 - Inbound pins opened from a named bookmark use the name, not the raw
   bookmark title, as the unloaded tab's title.
 - Unpinning a tab removes its bookmark as today, so the name goes with it.
