@@ -164,7 +164,7 @@ export function createOutbound({
       entry.folderId = folderId;
       await save();
     }
-    const named = tab.pinned && bookmark.parentId === state.pinnedId && decodePinTitle(bookmark.title) !== null;
+    const named = tab.pinned && folderId === state.pinnedId && decodePinTitle(bookmark.title) !== null;
     // Compare direction against lastSynced, not against the live bookmark.
     // If the actual bookmark already matches, advance bookkeeping without an echo.
     if (tab.status === "complete" && tab.url !== entry.url && !(state.quietUntil[tabId] > now())) {

@@ -1037,3 +1037,25 @@ test("future-stamped expected moves are pruned outbound after clock rollback", a
   assert.deepEqual(f.state.expectedMoves, { [bid]: [{ parentId: f.folder(), index: 0, at: 100 }] });
   assert.deepEqual(await f.pages(), [abc[2], abc[0], abc[1]]);
 });
+
+test("a pin moved outbound into Pinned preserves an encoded name on the first title delta", async () => {
+  const ff = createFirefox({ tabs: [{ id: 2, windowId: 1, pinned: true,
+    url: "https://example.com/a", title: "Page" }], bookmarks: [
+    { id: "root", title: "Foxy", children: [
+      { id: "pins", title: "📌 Pinned" },
+      { id: "group", title: "🔵 Group", children: [
+        { id: "bookmark", url: "https://example.com/a", title: "✏️ Work" },
+      ] },
+    ] },
+  ] });
+  const state = emptyState();
+  Object.assign(state, { rootId: "root", pinnedId: "pins", tabs: {
+    2: { bookmarkId: "bookmark", folderId: "group", url: "https://example.com/a", title: "Before" },
+  } });
+  const outbound = createOutbound({ api: ff.browser, getState: () => state, save: async () => {} });
+  await outbound.syncTab(2);
+  const [bookmark] = await ff.browser.bookmarks.get("bookmark");
+  assert.equal(bookmark.parentId, "pins");
+  assert.equal(bookmark.title, "✏️ Work");
+  assert.equal(ff.calls.filter(c => c.api === "bookmarks.update").length, 0);
+});
