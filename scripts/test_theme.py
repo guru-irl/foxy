@@ -31,7 +31,7 @@ PIN_NAMES = (
     ("SLIDES", ('[label$="Google Slides"]',)),
     ("MEET", ('[label^="Meet -"]', '[label*="Google Meet"]')),
     ("WHATSAPP", ('[label$="WhatsApp"]',)),
-    ("TELEGRAM", ('[label^="Telegram"]',)),
+    ("TELEGRAM", ('[label*="Telegram"]',)),
     ("X", ('[label$="/ X"]',)),
     ("REDDIT", ('[label$="Reddit"]', '[label*=" : r/"]')),
     ("LINKEDIN", ('[label$="LinkedIn"]',)),
@@ -245,19 +245,43 @@ class ThemeTypographyTest(unittest.TestCase):
         self.assertEqual(set(LABEL_PATTERN.findall(shrink)), content_patterns)
 
     def test_pinned_name_content_order_keeps_specific_names_last(self):
+        # Spec 14.1: an ends/is match (a site's own title suffix) beats any
+        # starts/contains match; within a tier, the later entry wins. So the
+        # content rules are all starts/contains rules first, then all ends/is
+        # rules, each tier in table order, each rule holding exactly its
+        # name's patterns of that tier.
+        def tier(pattern):
+            return 0 if re.match(r'\[label[\^*]=', pattern) else 1
+        expected = [(f'"{name}"', {p for p in patterns if tier(p) == t})
+                    for t in (0, 1) for name, patterns in PIN_NAMES
+                    if any(tier(p) == t for p in patterns)]
         rules = pinned_content_rules(self.chrome)
-        self.assertEqual([content for _, content in rules], [f'"{name}"' for name, _ in PIN_NAMES])
-        # DEVOPS follows AZURE; all Google apps follow GMAIL. These overlapping
-        # titles also exercise the actual selector operators and last-rule win.
+        self.assertEqual([(content, set(LABEL_PATTERN.findall(header))) for header, content in rules], expected)
         titles = (
             ("Discord - Repos", "DEVOPS"),
-            ("Google Calendar - Gmail", "CALENDAR"),
             ("Discord - Google Drive", "DRIVE"),
             ("Discord - Google Docs", "DOCS"),
             ("Discord - Google Sheets", "SHEETS"),
             ("Discord - Google Slides", "SLIDES"),
-            ("Meet - Gmail", "MEET"),
-            ("Google Meet - Gmail", "MEET"),
+            ("Google Calendar - Gmail", "GMAIL"),
+            ("Meet - Gmail", "GMAIL"),
+            ("Google Meet - Gmail", "GMAIL"),
+            # Review A, Important 1: titles that begin with or contain another
+            # site's word keep their own site's suffix name.
+            ("Amazon layoffs explained - YouTube", "YOUTUBE"),
+            ("Spotify Wrapped 2026 - YouTube", "YOUTUBE"),
+            ("Telegram tips - YouTube", "YOUTUBE"),
+            ("How to use Microsoft 365 Copilot - YouTube", "YOUTUBE"),
+            ("Discord Nitro receipt - me@example.com - Gmail", "GMAIL"),
+            ("Amazon order shipped - me@example.com - Gmail", "GMAIL"),
+            ("Invite via Google Meet - me@example.com - Gmail", "GMAIL"),
+            ("Shared in Google Calendar - me@example.com - Gmail", "GMAIL"),
+            ("Amazon S3 - GitHub", "GITHUB"),
+            # Starts/contains still name titles without a known suffix.
+            ("(495) Discord | #rspack | TanStack", "DISCORD"),
+            ("(3) Telegram Web", "TELEGRAM"),
+            ("Google Calendar - Week of 5 October", "CALENDAR"),
+            ("Meet - abc-defg-hij", "MEET"),
         )
         for title, expected in titles:
             selected = None
@@ -270,6 +294,22 @@ class ThemeTypographyTest(unittest.TestCase):
                         selected = content
             with self.subTest(title=title):
                 self.assertEqual(selected, f'"{expected}"')
+
+    def test_pinned_name_selectors_use_only_the_counted_syntax(self):
+        # Patterns written another way ('...', an i flag, ~=) would escape the
+        # drift and order tests above, so every selector must be the plain form.
+        shrink, _ = pinned_shrink_rule(self.chrome)
+        inner = shrink[shrink.index(":is(") + 4:shrink.rindex(") .tab-label")]
+        entries = [entry.strip() for entry in inner.split(",")]
+        self.assertEqual(len(entries), sum(len(patterns) for _, patterns in PIN_NAMES))
+        for entry in entries:
+            with self.subTest(entry=entry):
+                self.assertRegex(entry, rf"^{LABEL_PATTERN.pattern}$")
+        for header, _ in pinned_content_rules(self.chrome):
+            for selector in header.split(","):
+                with self.subTest(selector=selector.strip()):
+                    self.assertRegex(selector.strip(),
+                                     rf"^#pinned-tabs-container \.tabbrowser-tab{LABEL_PATTERN.pattern} \.tab-label::before$")
 
     def test_pinned_label_container_does_not_dim_the_name_again(self):
         # Firefox browser.css dims this parent to 0.7 for unselected tabs.

@@ -454,7 +454,7 @@ label either; only the page's `document.title` changes it.
 | SLIDES | ends `Google Slides` |
 | MEET | starts `Meet -` or contains `Google Meet` |
 | WHATSAPP | ends `WhatsApp` |
-| TELEGRAM | starts `Telegram` |
+| TELEGRAM | contains `Telegram` (an unread count may come first) |
 | X | ends `/ X` |
 | REDDIT | ends `Reddit` or contains ` : r/` |
 | LINKEDIN | ends `LinkedIn` |
@@ -472,9 +472,14 @@ label either; only the page's `document.title` changes it.
 | AMAZON | starts `Amazon` |
 
 - Matching is case-sensitive on the label (CSS attribute selectors). A label
-  that matches two entries uses the later rule; entries are ordered so the
-  more specific name wins (DEVOPS after AZURE, CALENDAR/DRIVE/DOCS/SHEETS/
-  SLIDES/MEET after GMAIL).
+  that matches an *ends* or *is* pattern uses that entry over any *starts* or
+  *contains* match, because a site's own title suffix is the most reliable
+  signal: "Amazon layoffs explained - YouTube" is YOUTUBE and "Invite via
+  Google Meet - me@example.com - Gmail" is GMAIL. Among matches of the same
+  kind the later table entry wins (DEVOPS after AZURE; DRIVE, DOCS, SHEETS
+  and SLIDES after GMAIL). Changed after review on 2026-10-02; the first
+  draft used table order alone, which let broad starts/contains patterns
+  override YOUTUBE and GMAIL.
 - A renamed pin (§14.2) has its name as its label, so it is shown as named;
   it matches a list entry only if the name itself does.
 
