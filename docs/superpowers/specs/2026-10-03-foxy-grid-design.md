@@ -49,11 +49,17 @@ preset: S 2, M 3, L 4, XL 5.
 - **Move or resize** (`place`): the tile takes its new rectangle; any tile it
   overlaps moves down to just below it, and that repeats for tiles those
   overlap. Nothing moves up.
-- **Display fit** (`fit`): tiles whose right edge is past the column count, in
-  reading order, are shown at the first free spot at or below their own row,
-  with width capped at the column count.
-- **New tiles** (a group seen for the first time, a tile shown again in
-  settings): first free spot in reading order that fits the default size.
+- **Display fit** (`fit`): first, in reading order (row, column, then id), a
+  tile stays at its saved place if it is inside the columns and clear of the
+  tiles kept before it. Then every other tile, in reading order, is shown at
+  the first free spot at or below its own row, with width capped at the
+  column count. Saved layouts can overlap (two devices editing at once, a
+  reopened group whose place was taken); this keeps them apart on screen
+  without writing anything.
+- **Only visible tiles count.** Closed groups and hidden tiles keep their
+  saved place but do not reserve space for placement or fit.
+- **New tiles** (a group seen for the first time, or any tile with no saved
+  place): first free spot in reading order that fits the default size.
 - **Reset layout**: clock, then pinned, then groups in tab-strip order (this
   window first), then saved, each at the first free spot.
 

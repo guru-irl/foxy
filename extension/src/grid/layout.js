@@ -17,7 +17,18 @@ export function minSize(kind) {
   return { w: kind === "clock" ? 3 : 2, h: 2 };
 }
 
+// A column count that is not a positive integer counts as one column, so
+// placement loops always terminate.
+function columns(cols) {
+  return Number.isInteger(cols) && cols >= 1 ? cols : 1;
+}
+
+function whole(value) {
+  return Number.isFinite(value) ? Math.round(value) : 0;
+}
+
 export function defaultSize(kind, cell, cols) {
+  cols = columns(cols);
   const min = minSize(kind);
   const width = kind === "clock" ? 480 : 288;
   const height = kind === "clock" ? 208 : 384;
@@ -33,19 +44,20 @@ export function overlaps(a, b) {
 }
 
 export function clampRect(id, rect, cols) {
+  cols = columns(cols);
   const min = minSize(kindOf(id));
-  const w = Math.min(cols, Math.max(min.w, Math.round(rect.w)));
-  const h = Math.max(min.h, Math.round(rect.h));
+  const w = Math.min(cols, Math.max(min.w, whole(rect.w)));
+  const h = Math.max(min.h, whole(rect.h));
   return {
     id,
-    x: Math.min(cols - w, Math.max(0, Math.round(rect.x))),
-    y: Math.max(0, Math.round(rect.y)),
+    x: Math.min(cols - w, Math.max(0, whole(rect.x))),
+    y: Math.max(0, whole(rect.y)),
     w, h,
   };
 }
 
 function readingOrder(a, b) {
-  return a.y - b.y || a.x - b.x;
+  return a.y - b.y || a.x - b.x || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
 export function place(tiles, id, rect, cols) {
@@ -66,6 +78,7 @@ export function place(tiles, id, rect, cols) {
 }
 
 export function firstFree(tiles, size, cols, fromY = 0) {
+  cols = columns(cols);
   const w = Math.min(size.w, cols);
   for (let y = fromY; ; y++) {
     for (let x = 0; x <= cols - w; x++) {
@@ -76,11 +89,19 @@ export function firstFree(tiles, size, cols, fromY = 0) {
   }
 }
 
+// Display only. First pass, in reading order: a tile stays where it is saved
+// if it is inside the columns and clear of the tiles kept before it. Second
+// pass, in reading order: every other tile is shown at the first free spot at
+// or below its own row, width capped at the columns.
 export function fit(tiles, cols) {
+  cols = columns(cols);
   const result = tiles.map(tile => ({ ...tile }));
-  const kept = result.filter(tile => tile.x + tile.w <= cols);
-  const overflow = result.filter(tile => tile.x + tile.w > cols).sort(readingOrder);
-  for (const tile of overflow) {
+  const kept = [], rest = [];
+  for (const tile of [...result].sort(readingOrder)) {
+    const stays = tile.x + tile.w <= cols && !kept.some(other => overlaps(tile, other));
+    (stays ? kept : rest).push(tile);
+  }
+  for (const tile of rest) {
     tile.w = Math.min(tile.w, cols);
     Object.assign(tile, firstFree(kept, tile, cols, tile.y));
     kept.push(tile);

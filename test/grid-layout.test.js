@@ -249,3 +249,42 @@ test("changedTiles includes new tiles but not removed or unchanged tiles", () =>
   assert.deepEqual(changedTiles(chain, [chain[1], added]), [added]);
   assert.deepEqual(changedTiles(chain, structuredClone(chain)), []);
 });
+
+test("fit shows overlapping saved tiles apart: the earlier tile in reading order stays", () => {
+  // Two devices commit at once: A moved x and pushed y; B moved z onto y's new rows.
+  const merged = freezeTiles([
+    { id: "group:x", x: 0, y: 2, w: 3, h: 4 },
+    { id: "group:y", x: 0, y: 6, w: 3, h: 4 },
+    { id: "group:z", x: 0, y: 8, w: 3, h: 4 },
+  ]);
+  const after = fit(merged, 25);
+  assertNoOverlaps(after);
+  assert.deepEqual(after, [
+    { id: "group:x", x: 0, y: 2, w: 3, h: 4 },
+    { id: "group:y", x: 0, y: 6, w: 3, h: 4 },
+    { id: "group:z", x: 3, y: 8, w: 3, h: 4 },
+  ]);
+});
+
+test("fit breaks ties at the same cell by id, whatever the input order", () => {
+  const a = { id: "group:a", x: 0, y: 0, w: 3, h: 4 };
+  const b = { id: "group:b", x: 0, y: 0, w: 3, h: 4 };
+  for (const input of [[a, b], [b, a]]) {
+    const after = fit(freezeTiles(structuredClone(input)), 25);
+    assert.deepEqual(after.find(tile => tile.id === "group:a"), a);
+    assert.deepEqual(after.find(tile => tile.id === "group:b"), { ...b, x: 3 });
+  }
+});
+
+test("a column count that is not a positive integer is treated as one column", () => {
+  assert.deepEqual(addMissing([], ["group:a"], NaN, 80), [{ id: "group:a", x: 0, y: 0, w: 1, h: 4 }]);
+  assert.deepEqual(firstFree([], { w: 3, h: 2 }, 0), { x: 0, y: 0 });
+  assert.deepEqual(clampRect("group:a", { x: 4, y: 0, w: 3, h: 2 }, undefined), { id: "group:a", x: 0, y: 0, w: 1, h: 2 });
+});
+
+test("clampRect maps non-finite fields to the minimum", () => {
+  assert.deepEqual(
+    clampRect("group:a", { x: NaN, y: Infinity, w: NaN, h: -Infinity }, 10),
+    { id: "group:a", x: 0, y: 0, w: 2, h: 2 },
+  );
+});
