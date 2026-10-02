@@ -166,6 +166,45 @@ test("pin editor bounds input at 200 characters without bounding group names", a
   key(node.querySelector(".name-editor"), "Escape");
 });
 
+test("pin editor clips a normalized 300-character title so deleting one character sends a rename", async () => {
+  const options = setup(true);
+  options.tabs[0].title = `  ${"A".repeat(150)}\t\t${"B".repeat(149)}  `;
+  const { ff, node } = await controller(true, options);
+  row(node, 11).querySelector(".row-rename").click();
+  const input = row(node, 11).querySelector(".name-editor");
+  assert.equal(input.value, `${"A".repeat(150)} ${"B".repeat(49)}`);
+  assert.equal(input.value.length, 200);
+  input.setSelectionRange(199, 200);
+  input.setRangeText("", 199, 200, "end");
+  input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
+  ff.calls.length = 0;
+  ff.withUserInput(() => key(input, "Enter"));
+  await flush(ff);
+  const sent = ff.calls.filter(c => c.args[0]?.type === "foxy:rename-pin");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].args[0].name, `${"A".repeat(150)} ${"B".repeat(48)}`);
+  assert.equal(row(node, 11).querySelector(".row-label").textContent, sent[0].args[0].name);
+});
+
+for (const ending of ["Enter", "blur"]) {
+  test(`untouched long pin title ${ending} cancels rather than naming it with the clipped value`, async () => {
+    const options = setup(true);
+    options.tabs[0].title = "A".repeat(300);
+    const { ff, node, control } = await controller(true, options);
+    row(node, 11).querySelector(".row-rename").click();
+    const input = row(node, 11).querySelector(".name-editor");
+    assert.equal(input.value, "A".repeat(200));
+    ff.calls.length = 0;
+    if (ending === "blur") input.dispatchEvent(new FocusEvent("blur"));
+    else ff.withUserInput(() => key(input, "Enter"));
+    await flush(ff);
+    assert.equal(ff.calls.some(c => c.api === "permissions.request" || c.args[0]?.type === "foxy:rename-pin"), false);
+    assert.equal(row(node, 11).querySelector(".row-label").textContent, "A".repeat(300));
+    assert.equal(control.ui.editing, false);
+    assert.equal(row(node, 11).draggable, true);
+  });
+}
+
 test("pin editor normalizes whitespace before requesting and sending a rename", async () => {
   const { ff, node } = await controller();
   row(node, 11).querySelector(".row-rename").click();

@@ -398,12 +398,16 @@ function tabRow(root, tab, handlers) {
         editors.delete(root);
         handlers.onEditEnd?.(null, tab.id);
       };
+      const initialName = normalizePinName(tab.name ?? tab.title);
+      const initial = initialName.slice(0, 200);
       const editor = openNameEditor(open, {
-        initial: tab.name ?? tab.title, className: "name-editor pin-name-editor", updateLabel: false, maxLength: 200,
+        initial, className: "name-editor pin-name-editor", updateLabel: false, maxLength: 200,
         onSave: name => {
           try {
+            // Clipping alone is not a rename. Compare edits to the full title too.
+            if (name === initial.trim()) return;
             name = normalizePinName(name);
-            if (name === normalizePinName(tab.name ?? tab.title)) return;
+            if (name === initialName) return;
             label.textContent = name || tab.title;
             handlers.onRenamePin?.(tab.id, name || null, tab.origin ?? pinOrigin(tab.url));
           } finally { end(); }
