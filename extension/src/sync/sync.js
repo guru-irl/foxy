@@ -492,7 +492,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     "tabs.onCreated": tab => syncTab(tab.id),
     "tabs.onUpdated": async (id, change = {}) => {
       if (change.status === "loading") await saveLoads();
-      if ((change.status === "loading" || change.pinned === false) && state.tabs[id]?.shownName !== undefined) {
+      if (((change.status === "loading" && change.url !== undefined) || change.pinned === false) && state.tabs[id]?.shownName !== undefined) {
         delete state.tabs[id].shownName;
         await save();
       }

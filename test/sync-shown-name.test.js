@@ -40,16 +40,40 @@ async function laterEvents(ff, sync, pin, want) {
   assert.equal(await titleOf(ff), want, "pinned-strip move preserves the unnamed bookmark title");
 }
 
-async function realLoad(ff, sync, pin, live, title = "Work") {
+async function realLoad(ff, sync, pin, live, title = "Work", url = pin.url) {
+  const shownName = (await entryOf(ff, pin.id)).shownName;
   Object.assign(live, { discarded: false, status: "loading", title });
   await sync.handlers["tabs.onUpdated"](pin.id, { discarded: false });
   await sync.handlers["tabs.onUpdated"](pin.id, { status: "loading" });
-  assert.equal((await entryOf(ff, pin.id)).shownName, undefined, "new document ends the old-label guard durably");
+  assert.equal((await entryOf(ff, pin.id)).shownName, shownName, "load start alone does not replace the document");
+  // Firefox 157 sends this even for a reload of the same URL (reload-baseline.log).
+  live.url = url;
+  await sync.handlers["tabs.onUpdated"](pin.id, { status: "loading", url });
+  assert.equal((await entryOf(ff, pin.id)).shownName, undefined, "committed document ends the old-label guard durably");
   live.status = "complete";
   await sync.handlers["tabs.onUpdated"](pin.id, { status: "complete" });
   await sync.handlers["tabs.onUpdated"](pin.id, { title });
   await drain(ff, sync);
 }
+
+// Break caught: load start clears the guard even when HTTP 204 never replaces the document.
+// Firefox 157: {status:"loading"}, then {status:"complete"}, no URL event (review-b4/probe-abort.log).
+test("review P7: HTTP 204 load on a revoked unnamed pin never publishes its surviving Work label", async () => {
+  const { ff, sync, pin, live } = await fixture({ loaded: true });
+  await ff.browser.permissions.remove({ origins: ["https://example.com/*"] });
+  await sync.onMessage({ type: "foxy:rename-pin", tabId: pin.id, name: null });
+  await drain(ff, sync);
+  assert.equal(await titleOf(ff), "Page");
+  live.status = "loading";
+  await sync.handlers["tabs.onUpdated"](pin.id, { status: "loading" });
+  live.status = "complete";
+  await sync.handlers["tabs.onUpdated"](pin.id, { status: "complete" });
+  await drain(ff, sync);
+  assert.equal(await titleOf(ff), "Page", "the old document still shows Work, not a legitimate new page title");
+  assert.equal((await entryOf(ff, pin.id)).title, "Page");
+  assert.equal((await entryOf(ff, pin.id)).shownName, "Work");
+  await laterEvents(ff, sync, pin, "Page");
+});
 
 // Break caught: deriving shownName from the bookmark replaces Work with unapplied Mail.
 test("review P2: revoked Work to Mail rename then board unname keeps the displayed-name guard", async () => {
@@ -84,8 +108,9 @@ test("review P3: discarded Work to remote Mail then board unname keeps the URL t
 });
 
 // Break caught: equality alone keeps a real title equal to the old name suppressed forever.
+// Requiring a URL change instead of a loading URL event also misses these same-URL reloads.
 for (const loaded of [false, true]) {
-  test(`review P1: ${loaded ? "same-as-name keeper removal" : "never-loaded unname"} publishes Work after a real load`, async () => {
+  test(`review P1: ${loaded ? "same-as-name keeper removal" : "never-loaded unname"} publishes Work after a committed same-URL reload`, async () => {
     const { ff, sync, pin, live } = await fixture({ loaded });
     if (loaded) ff.browser.scripting.executeScript = async () => [{ frameId: 0, result: "Work" }];
     await sync.onMessage({ type: "foxy:rename-pin", tabId: pin.id, name: null });
@@ -102,6 +127,20 @@ for (const loaded of [false, true]) {
     assert.equal((await entryOf(ff, pin.id)).shownName, undefined, "cleared guard stays cleared across event-page wake");
   });
 }
+
+// Break caught: retaining the guard after a committed navigation suppresses a legitimate Work title.
+test("navigation with a loading URL clears the guard and publishes the new document title", async () => {
+  const { ff, sync, pin, live } = await fixture({ loaded: true });
+  await ff.browser.permissions.remove({ origins: ["https://example.com/*"] });
+  await sync.onMessage({ type: "foxy:rename-pin", tabId: pin.id, name: null });
+  await drain(ff, sync);
+  await realLoad(ff, sync, pin, live, "Work", "https://example.com/b");
+  const [bookmark] = await ff.browser.bookmarks.get("pin");
+  assert.equal(bookmark.url, "https://example.com/b");
+  assert.equal(bookmark.title, "Work");
+  assert.equal((await entryOf(ff, pin.id)).title, "Work");
+  assert.equal((await entryOf(ff, pin.id)).shownName, undefined);
+});
 
 // Break caught: clearing on a URL event rather than a new document leaks Work on hash navigation.
 test("same-document URL update without loading retains the shown name and writes URL only", async () => {
@@ -124,7 +163,7 @@ test("same-document URL update without loading retains the shown name and writes
 test("load completion records the successfully re-applied name again even when appliedName is unchanged", async () => {
   const { ff, sync, pin, live } = await fixture({ loaded: true });
   Object.assign(live, { status: "loading", title: "Page" });
-  await sync.handlers["tabs.onUpdated"](pin.id, { status: "loading" });
+  await sync.handlers["tabs.onUpdated"](pin.id, { status: "loading", url: pin.url });
   assert.equal((await entryOf(ff, pin.id)).shownName, undefined);
   assert.equal((await entryOf(ff, pin.id)).appliedName, "Work");
   live.status = "complete";

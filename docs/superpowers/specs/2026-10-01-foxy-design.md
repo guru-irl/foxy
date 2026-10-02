@@ -505,7 +505,10 @@ isolated world). The script:
   edited), putting the name back each time, before Firefox reads the title
   for the tab label where possible;
 - is idempotent: injecting it again updates the name and keeps one watcher;
-- given no name, stops watching and restores the page's latest own title.
+- given no name, stops watching and restores the page's latest own title;
+- before entering the back/forward cache, stops watching, restores the page's
+  latest own title and forgets its name; a still-named pin gets a fresh keeper
+  when the restored tab finishes loading.
 
 The background applies a pin's name (or its removal) when: the pin is
 renamed from the board; its bookmark title changes (another device, or the
@@ -523,9 +526,10 @@ logged with the "Foxy:" prefix and never retried in a loop.
 - Removing a pin's name writes the restored page title, else the last known
   page title, else the URL, never the bare name. Each device remembers the
   name it last displayed, so later events and moves leave the unnamed title
-  alone while that name is still shown. A new top-level document load clears
-  this guard, unlike a same-document URL change, so even a real page title
-  equal to the old name can replace the fallback.
+  alone while that name is still shown. A top-level document commit
+  (`status: loading` together with a URL, including same-URL reloads in Firefox
+  157) clears this guard, unlike a same-document URL change or an unfinished
+  load, so even a real page title equal to the old name can replace the fallback.
   Rebuilds recover a still-unloaded pin's matching named label from the tab,
   or retain its previous shown name by bookmark and URL if it was unnamed
   while this device was closed.
