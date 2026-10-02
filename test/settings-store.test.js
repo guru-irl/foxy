@@ -187,3 +187,19 @@ test("concurrent saveSetting calls in one page both persist", async () => {
   assert.equal(synced.showDate, false);
   assert.equal(device.density, "compact");
 });
+
+test("saveSetting reports the value it wrote even if reading back fails", async t => {
+  const ff = createFirefox();
+  await ff.browser.storage.sync.set({ settings: { showClock: false } });
+  const realGet = ff.browser.storage.sync.get;
+  let reads = 0;
+  t.mock.method(ff.browser.storage.sync, "get", async (...args) => {
+    if (++reads > 1) throw new Error("transient");
+    return realGet(...args);
+  });
+  t.mock.method(console, "warn", () => {});
+  const result = await saveSetting(ff.browser, "synced", "showDate", false);
+  assert.equal(result.synced.showDate, false);
+  assert.equal(result.synced.showClock, false);
+  assert.deepEqual(result.device, deviceDefaults);
+});

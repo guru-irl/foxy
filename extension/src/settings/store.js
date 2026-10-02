@@ -25,6 +25,10 @@ async function loadScope(api, area, key, defaults, rules) {
   let stored;
   try { stored = (await api.storage[area].get(key))[key]; }
   catch (error) { console.warn(`Foxy: could not load ${key}`, error); }
+  return validScope(stored, defaults, rules);
+}
+
+function validScope(stored, defaults, rules) {
   const result = { ...defaults };
   if (stored !== null && typeof stored === "object" && !Array.isArray(stored)) {
     for (const [key, validate] of Object.entries(rules)) {
@@ -59,15 +63,23 @@ async function writeSetting(api, scope, key, value) {
   if (!rules || !Object.hasOwn(rules, key)) throw new TypeError("Unknown setting");
   if (!rules[key](value)) throw new TypeError("Invalid setting value");
   const area = scope === "synced" ? "sync" : "local", storageKey = scope === "synced" ? "settings" : "deviceSettings";
+  let written;
   try {
     const stored = (await api.storage[area].get(storageKey))[storageKey];
     const base = stored !== null && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
-    await api.storage[area].set({ [storageKey]: { ...base, [key]: value } });
+    written = { ...base, [key]: value };
+    await api.storage[area].set({ [storageKey]: written });
   } catch (error) {
     console.warn(`Foxy: could not save ${storageKey}`, error);
     throw error;
   }
-  return loadSettings(api);
+  // Report what was written; only the other scope is read back.
+  if (scope === "synced") {
+    return { synced: validScope(written, DEFAULT_SETTINGS, rules),
+      device: await loadScope(api, "local", "deviceSettings", DEFAULT_DEVICE, deviceRules) };
+  }
+  return { synced: await loadScope(api, "sync", "settings", DEFAULT_SETTINGS, syncedRules),
+    device: validScope(written, DEFAULT_DEVICE, rules) };
 }
 
 export function cellPx(device) {

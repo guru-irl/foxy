@@ -79,10 +79,10 @@ export function place(tiles, id, rect, cols) {
 
 export function firstFree(tiles, size, cols, fromY = 0) {
   cols = columns(cols);
-  const w = Math.min(size.w, cols);
-  for (let y = fromY; ; y++) {
+  const w = Math.min(Math.max(1, whole(size.w)), cols), h = Math.max(1, whole(size.h));
+  for (let y = Math.max(0, whole(fromY)); ; y++) {
     for (let x = 0; x <= cols - w; x++) {
-      if (!tiles.some(tile => overlaps({ x, y, w, h: size.h }, tile))) {
+      if (!tiles.some(tile => overlaps({ x, y, w, h }, tile))) {
         return { x, y };
       }
     }

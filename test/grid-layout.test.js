@@ -288,3 +288,8 @@ test("clampRect maps non-finite fields to the minimum", () => {
     { id: "group:a", x: 0, y: 0, w: 2, h: 2 },
   );
 });
+
+test("firstFree normalises a NaN width, height and starting row", () => {
+  assert.deepEqual(firstFree([], { w: NaN, h: NaN }, 5, NaN), { x: 0, y: 0 });
+  assert.deepEqual(firstFree([{ id: "a", x: 0, y: 0, w: 5, h: 2 }], { w: NaN, h: 1 }, 5), { x: 0, y: 2 });
+});
