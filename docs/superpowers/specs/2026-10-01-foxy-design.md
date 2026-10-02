@@ -475,9 +475,9 @@ label either; only the page's `document.title` changes it.
   that matches an *ends* or *is* pattern uses that entry over any *starts* or
   *contains* match, because a site's own title suffix is the most reliable
   signal: "Amazon layoffs explained - YouTube" is YOUTUBE and "Invite via
-  Google Meet - me@example.com - Gmail" is GMAIL. Among matches of the same
-  kind the later table entry wins (DEVOPS after AZURE; DRIVE, DOCS, SHEETS
-  and SLIDES after GMAIL). Changed after review on 2026-10-02; the first
+  Google Meet - me@example.com - Gmail" is GMAIL. Among *starts*/*contains*
+  matches, and among *ends*/*is* matches, the later table entry wins (DEVOPS
+  after AZURE; DRIVE, DOCS, SHEETS and SLIDES after GMAIL). Changed after review on 2026-10-02; the first
   draft used table order alone, which let broad starts/contains patterns
   override YOUTUBE and GMAIL.
 - A renamed pin (§14.2) has its name as its label, so it is shown as named;

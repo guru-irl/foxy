@@ -62,9 +62,10 @@ def pinned_shrink_rule(css):
 
 
 def pinned_content_rules(css):
+    # Every rule giving a tab label ::before a content, whatever its prefix,
+    # so a differently written name rule can't slip past the order tests.
     return [(header, declarations(body)["content"].strip()) for header, body in blocks(css)
-            if header.startswith('#pinned-tabs-container .tabbrowser-tab')
-            and '.tab-label::before' in header and "content" in declarations(body)]
+            if '.tab-label::before' in header and "content" in declarations(body)]
 
 
 def strip_comments(css):
