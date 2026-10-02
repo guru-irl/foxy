@@ -489,7 +489,13 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     "runtime.onInstalled": async () => {},
     "tabs.onCreated": tab => syncTab(tab.id),
     "tabs.onUpdated": async (id, change = {}) => {
-      if (change.pinned === false) await names.apply(id);
+      if (change.pinned === false) {
+        if (state.tabs[id]?.shownName !== undefined) {
+          delete state.tabs[id].shownName;
+          await save();
+        }
+        await names.apply(id);
+      }
       await syncTab(id);
       if (change.status === "complete" || change.pinned === true) await names.apply(id);
     },

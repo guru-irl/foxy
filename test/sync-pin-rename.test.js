@@ -374,6 +374,24 @@ for (const action of ["unpin", "remove"]) {
   });
 }
 
+test("unpin clears the shown-name guard even while group order blocks outbound sync", async () => {
+  const { ff } = await fixture({ groups: [{ id: 10, windowId: 1, title: "Group", color: "blue" }], tabs: [
+    { id: 1, windowId: 1, url: "about:home", active: true },
+    { id: 2, windowId: 1, url: "https://example.com/a", title: "Work", pinned: true },
+    { id: 3, windowId: 1, url: "https://group.com/", title: "Group page", groupId: 10 },
+  ] });
+  const stored = await loadState(ff.browser);
+  stored.tabs[2].shownName = "Work";
+  stored.groups[10].pendingOrder = true;
+  await ff.browser.storage.local.set({ foxySync: stored });
+  const sync = wire(ff);
+  await drain(ff, sync);
+  const get = ff.browser.tabs.get;
+  ff.browser.tabs.get = async id => ({ ...await get(id), ...(id === 2 ? { pinned: false, groupId: 10 } : {}) });
+  await sync.handlers["tabs.onUpdated"](2, { pinned: false });
+  assert.equal((await loadState(ff.browser)).tabs[2].shownName, undefined);
+});
+
 test("removing a board name restores the keeper and resumes ordinary outbound title sync", async () => {
   const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
   assert.deepEqual(await sync.onMessage({ type: "foxy:rename-pin", tabId: 2, name: null }), { ok: true });
