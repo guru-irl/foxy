@@ -72,6 +72,7 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
     node.dataset.kind = tile.kind;
     node.style.gridColumn = `${tile.x + 1} / span ${tile.w}`;
     node.style.gridRow = `${tile.y + 1} / span ${tile.h}`;
+    node.append(button("tile-resize", `Resize ${tile.kind === "group" ? tile.group.title.trim() || "Unnamed" : tile.kind}`));
     grid.append(node);
   }
   const rail = fixedColumn(root, "tabs", "TABS", board.tabs, handlers);
@@ -80,6 +81,7 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   const header = el("header", "rail-header"), title = rail.querySelector(".column-title");
   title.replaceWith(header);
   header.append(title, button("settings-button", "Settings"));
+  rail.append(el("div", "rail-resize"));
   root.replaceChildren(grid, rail);
   updateClock(root, settings);
   const previousBanner = banners.get(root);
@@ -471,7 +473,9 @@ function el(tag, className) {
 
 function clockTile() {
   const tile = el("section", "clock");
-  tile.append(el("time", "clock-time"), el("div", "clock-date"));
+  const header = el("header", "tile-header");
+  header.setAttribute("aria-label", "Move clock");
+  tile.append(header, el("time", "clock-time"), el("div", "clock-date"));
   return tile;
 }
 

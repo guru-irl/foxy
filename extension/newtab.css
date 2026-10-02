@@ -325,8 +325,79 @@ button.dot {
 }
 
 .rail {
+  position: relative;
   flex: none;
   width: calc(var(--rail-cells) * (var(--cell) + var(--gap)) - var(--gap));
+}
+
+.tile {
+  position: relative;
+}
+
+.tile .column-header,
+.tile .column-title,
+.tile-header {
+  touch-action: none;
+  cursor: grab;
+}
+
+.tile-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 24px;
+}
+
+.tile-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  opacity: 0;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.tile-resize::before {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-muted);
+}
+
+.tile:hover .tile-resize,
+.tile:focus-within .tile-resize {
+  opacity: 1;
+}
+
+.rail-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.tile-lifted {
+  opacity: 0.85;
+}
+
+.board[data-grid-dragging] {
+  user-select: none;
+}
+
+.board[data-grid-dragging] .grid {
+  mask-image: none;
 }
 
 .rail-header {
