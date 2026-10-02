@@ -361,6 +361,35 @@ def check_pin_names(client):
                 thread.join(timeout=5)
 
 
+def check_named_inbound(client):
+    bookmarks = client.script("""
+        const {foxySync} = await browser.storage.local.get('foxySync');
+        const later = await browser.bookmarks.create({parentId: foxySync.pinnedId, index: 0,
+            url: 'https://example.com/smoke-later', title: '✏️ Smoke later'});
+        const first = await browser.bookmarks.create({parentId: foxySync.pinnedId, index: 0,
+            url: 'https://example.com/smoke-first', title: '✏️ Smoke first'});
+        return [later.id, first.id];
+    """)
+    try:
+        state = poll("named inbound pins", lambda: client.script("""
+            const {foxySync} = await browser.storage.local.get('foxySync');
+            return await Promise.all(arguments[0].map(async bookmarkId => {
+                const mapped = Object.entries(foxySync.tabs).find(([, entry]) => entry.bookmarkId === bookmarkId);
+                return mapped ? await browser.tabs.get(Number(mapped[0])) : null;
+            }));
+        """, [bookmarks]), lambda tabs: all(tab is not None for tab in tabs)
+            and [tab['index'] for tab in tabs] == [1, 0])
+        for tab, title, index in zip(state, ['Smoke later', 'Smoke first'], [1, 0]):
+            if (tab.get('pinned') is not True or tab.get('discarded') is not True
+                    or tab.get('title') != title or tab.get('index') != index):
+                raise RuntimeError(f"named inbound pin lost its unloaded name or position: {tab!r}")
+        return "pinned, discarded, decoded titles retained, bookmark order at pin positions 0 and 1"
+    finally:
+        client.script("""
+            for (const id of arguments[0]) await browser.bookmarks.remove(id);
+        """, [bookmarks])
+
+
 def run_checks(client, root, scratch, results, base):
     url = base + "newtab.html"
     client.command("Marionette:SetContext", {"value": "content"})
@@ -436,6 +465,7 @@ def run_checks(client, root, scratch, results, base):
         return ", ".join(state["columns"])
     results.check("SMOKE column", smoke_column)
     results.check("pin names", lambda: check_pin_names(client))
+    results.check("named inbound pins", lambda: check_named_inbound(client))
 
     def screenshot():
         client.command("Marionette:SetContext", {"value": "content"})

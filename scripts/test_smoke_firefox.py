@@ -147,14 +147,17 @@ class SmokeSequenceTests(unittest.TestCase):
             self.fail(f"unexpected script: {source}")
 
         client = Mock(command=command, script=script)
+        output = io.StringIO()
         with tempfile.TemporaryDirectory(prefix="smoke-sequence-", dir=SCRATCH) as directory, \
                 patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]), \
                 patch.object(smoke.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)), \
                 patch.object(smoke, "check_pin_names", return_value="isolated pin check", create=True), \
-                contextlib.redirect_stdout(io.StringIO()):
+                patch.object(smoke, "check_named_inbound", return_value="lazy named pins verified", create=True), \
+                contextlib.redirect_stdout(output):
             results = smoke.Results()
             smoke.run_checks(client, smoke.ROOT, Path(directory), results, base)
         self.assertEqual(results.exit_code, 0)
+        self.assertIn("PASS named inbound pins", output.getvalue())
         self.assertEqual(len(navigations), 2)
         self.assertGreaterEqual(navigations[1], root_seen[0] + 1)
 
@@ -198,6 +201,19 @@ class SmokeSequenceTests(unittest.TestCase):
 
 
 class PinNameTests(unittest.TestCase):
+    def test_named_inbound_probe_checks_pin_discard_title_and_position(self):
+        valid = [{"pinned": True, "discarded": True, "title": "Smoke later", "index": 1},
+                 {"pinned": True, "discarded": True, "title": "Smoke first", "index": 0}]
+        client = Mock()
+        client.script.return_value = ["later-bookmark", "first-bookmark"]
+        with patch.object(smoke, "poll", return_value=valid):
+            self.assertIn("discarded", smoke.check_named_inbound(client))
+        for field, value in [("pinned", False), ("discarded", False), ("title", "Wrong"), ("index", 0)]:
+            wrong = [{**valid[0], field: value}, valid[1]]
+            with self.subTest(field=field), patch.object(smoke, "poll", return_value=wrong):
+                with self.assertRaises(RuntimeError):
+                    smoke.check_named_inbound(client)
+
     def test_pin_names_require_tab_document_and_bookmark_titles_to_match(self):
         state = {"tabTitle": "Smoke pin", "documentTitle": "Smoke pin", "bookmarkTitle": "✏️ Smoke pin"}
         self.assertTrue(smoke.pin_name_matches(state, "Smoke pin", "✏️ Smoke pin"))
