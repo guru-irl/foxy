@@ -281,7 +281,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       // pending display pushes. The new group takes priority over existing tiles.
       const beforeView = mapped.length ? buildView(board, { ...options, pending: new Map() }) : view;
       const mappedIds = new Set(mapped.map(group => `group:${savedReply.folders[group.id]}`));
-      const shownBefore = beforeView.tiles.filter(tile => !mappedIds.has(tile.id));
+      const shownBefore = beforeView.tiles.filter(tile => !mappedIds.has(tile.id) && !tile.id.startsWith("local:"));
       let shownAfter = shownBefore;
       for (const group of mapped) {
         shownAfter = place(shownAfter, `group:${savedReply.folders[group.id]}`, pendingTiles.get(group.id), view.cols);

@@ -490,6 +490,38 @@ test("empty-cell drop shows the unmapped tile at its rect, opens its editor and 
   } finally { endName(root); }
 });
 
+async function twoPendingDrops(layout, rects) {
+  let reply = { saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote" } };
+  const { root, ff, control } = await controller(setup(), message => message.type === "foxy:reconcile" ? { ok: true }
+    : message.type === "foxy:saved" ? reply : undefined, layout);
+  const ids = [];
+  for (const [i, tabId] of [15, 23].entries()) {
+    await control.handlers.onTabDrop(tabId, { zone: "cell", rect: rects[i] });
+    await flush(ff); endName(root); await flush(ff);
+    ids.push((await ff.browser.tabs.get(tabId)).groupId);
+  }
+  return { root, ff, control, ids, map: folders => {
+    reply = { ...reply, folders: { ...reply.folders, ...folders } };
+    ff.fire("bookmarks.onCreated", "new", { id: "new", type: "folder" });
+  } };
+}
+
+test("mapping one pending tile ignores another pending tile's first-free position when saving pushes", async () => {
+  const layout = { ...dropLayout, "tile:group:remote": { x: 6, y: 8, w: 3, h: 4 } };
+  const { root, ff, ids, map } = await twoPendingDrops(layout,
+    [{ x: 6, y: 4, w: 3, h: 4 }, { x: 0, y: 14, w: 3, h: 4 }]);
+  try {
+    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:remote"]')), { x: 6, y: 8, w: 3, h: 4 });
+    assert.deepEqual(rectOf(root.querySelector(`[data-tile-id="local:${ids[1]}"]`)), { x: 0, y: 14, w: 3, h: 4 });
+    ff.calls.length = 0;
+    map({ [ids[0]]: "first" }); await flush(ff); await flush(ff);
+    assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set").map(c => c.args[0]),
+      [{ "tile:group:first": { x: 6, y: 4, w: 3, h: 4 } }], "only the mapped tile moves, not a real tile below a phantom local tile");
+    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:remote"]')), { x: 6, y: 8, w: 3, h: 4 });
+    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:remote"], { x: 6, y: 8, w: 3, h: 4 });
+  } finally { endName(root); }
+});
+
 test("a fast folder mapping during the final tab read preserves the pending drop rectangle", async () => {
   let folders = { 101: "one", 102: "two", 201: "remote" };
   const { root, ff, control } = await controller(setup(), message => message.type === "foxy:reconcile" ? { ok: true }
