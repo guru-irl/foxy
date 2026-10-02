@@ -1032,3 +1032,24 @@ test("fix r1: legacy dnd controller helper reads without background warnings", a
   try { await controller(); assert.deepEqual(warnings, []); }
   finally { console.warn = warn; }
 });
+
+test("a failed key check for a post-paint group retries on a later render instead of never saving", async () => {
+  const timer = groupTimers(); let root;
+  const warn = console.warn; console.warn = () => {};
+  try {
+    const result = await externalGroup(timer.options); root = result.root;
+    const { ff, control } = result;
+    const get = ff.browser.storage.sync.get;
+    let failNext = true;
+    ff.browser.storage.sync.get = async key => {
+      if (failNext && key === "tile:group:external") { failNext = false; throw new Error("transient"); }
+      return get(key);
+    };
+    timer.fire(); await flush(ff); await flush(ff);
+    assert.equal((await get(null))["tile:group:external"], undefined);
+    await control.refresh(); await flush(ff);
+    assert.equal(timer.timers.size, 1, "a later render schedules the check again");
+    timer.fire(); await flush(ff); await flush(ff);
+    assert.deepEqual((await get(null))["tile:group:external"], { x: 6, y: 4, w: 3, h: 4 });
+  } finally { console.warn = warn; if (root) { endName(root); root.remove(); } timer.restore(); }
+});

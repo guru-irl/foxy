@@ -113,7 +113,11 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
           ++storageVersion;
           pendingGrid = true;
           enqueue();
-        } catch (error) { console.warn("Foxy: could not check new group tile", error); }
+        } catch (error) {
+          console.warn("Foxy: could not check new group tile", error);
+          // Let a later render schedule the check again.
+          if (deferredGroups.get(groupId) === entry) deferredGroups.delete(groupId);
+        }
       }, newGroupDelay);
     }
     return deferredGroups.get(groupId).ready;
