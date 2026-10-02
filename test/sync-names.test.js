@@ -18,7 +18,9 @@ async function fixture({ tab = {}, origins = [] } = {}) {
     1: { bookmarkId: "pin", folderId: "pins", url: "https://example.com/a", title: "Page" },
   } });
   const { createNames } = await namesModule();
-  return { ...fake, state, names: createNames({ api: fake.browser, getState: () => state, save: async () => {} }) };
+  let saves = 0;
+  return { ...fake, state, saves: () => saves,
+    names: createNames({ api: fake.browser, getState: () => state, save: async () => { saves++; } }) };
 }
 
 test("pin origins are HTTP(S) match patterns with no paths, credentials or ports", async () => {
@@ -66,6 +68,20 @@ test("bookmark unname and local unpin both restore an applied title keeper", asy
   await browser.tabs.update(1, { pinned: false });
   await names.apply(1);
   assert.deepEqual(calls.filter(c => c.api === "scripting.executeScript").at(-1).args[0].args, [null]);
+});
+
+test("repeated successful applications save only when appliedName changes", async () => {
+  const { names, browser, saves } = await fixture({ origins: ["https://example.com/*"] });
+  await names.apply(1);
+  await names.apply(1);
+  assert.equal(saves(), 1);
+  await browser.bookmarks.update("pin", { title: "✏️ Home" });
+  await names.apply(1);
+  assert.equal(saves(), 2);
+  await names.apply(1, true);
+  assert.equal(saves(), 3);
+  await names.apply(1, true);
+  assert.equal(saves(), 3);
 });
 
 test("injection failure is logged once and does not record a successful application", async () => {

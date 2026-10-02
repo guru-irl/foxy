@@ -142,6 +142,28 @@ test("repinning before delayed removal reapplies the retained bookmark name", as
   assert.equal(ff.calls.some(c => ["bookmarks.remove", "bookmarks.create"].includes(c.api)), false);
 });
 
+test("event-page wake and board reconcile do not reinject durable pin keepers", async () => {
+  const { ff } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
+  const sync = wire(ff);
+  await drain(ff, sync);
+  await sync.onMessage({ type: "foxy:reconcile" });
+  assert.equal(scripts(ff).length, 0);
+});
+
+for (const lifecycle of ["update", "reload"]) {
+  test(`extension ${lifecycle} clears its session bucket and rebuild applies names once`, async () => {
+    const { ff } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
+    // Firefox storage.session is keyed by Extension object, not event page.
+    await ff.browser.storage.session.clear();
+    const sync = wire(ff);
+    await drain(ff, sync);
+    assert.deepEqual(scripts(ff).map(c => c.args[0].args), [["Work"]]);
+    await sync.handlers["runtime.onInstalled"]({ reason: lifecycle === "update" ? "update" : "install" });
+    await sync.onMessage({ type: "foxy:reconcile" });
+    assert.equal(scripts(ff).length, 1);
+  });
+}
+
 test("removing a board name restores the keeper and resumes ordinary outbound title sync", async () => {
   const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
   assert.deepEqual(await sync.onMessage({ type: "foxy:rename-pin", tabId: 2, name: null }), { ok: true });

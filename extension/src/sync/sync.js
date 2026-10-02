@@ -9,7 +9,7 @@ import { matchGroups, matchTabs } from "./match.js";
 import { createNames } from "./names.js";
 import { settle, rebuild } from "./startup.js";
 
-/** One controller per event-page lifetime. Only storage.session marks a browser session. */
+/** One controller per event-page lifetime; storage.session survives idle wakes. */
 export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   settleMs = 3000, maxWaitMs = 20000 }) {
   const queue = createQueue();
@@ -141,12 +141,13 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
         for (const [id, info, at] of earlyRemovals.splice(0)) recordRemoved(state, id, info, at);
         if (pruneRemovedIds(state, now()) || Object.keys(state.removedIds).length) await save();
         const session = await api.storage.session.get("foxySession");
+        // Firefox 157 keys storage.session by Extension object (ExtensionStorage).
+        // Updates/reloads get an empty bucket too: rebuild is their one reapply path.
         if (!session.foxySession) {
           await settle(api, { settleMs, maxWaitMs, now });
           await rebuildMaps();
           await api.storage.session.set({ foxySession: true });
         }
-        if (session.foxySession) await names.applyAll();
         await normalWindow();
         // Once per event-page lifetime; queue-owned timers cover later deadlines.
         await ensureTree();
@@ -684,7 +685,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
           return { ok };
         }
         case "foxy:dismiss-missing": state.missing = []; await save(); return { ok: true };
-        case "foxy:reconcile": await inbound.reconcileAll(); await names.applyAll(); return { ok: true };
+        case "foxy:reconcile": await inbound.reconcileAll(); return { ok: true };
         default: return undefined;
       }
     }).catch(() => ({ ok: false })); // The queue logs failures and keeps draining.
