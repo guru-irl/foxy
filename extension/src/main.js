@@ -298,15 +298,21 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     onBringHere: groupId => action(() => bringGroupHere(api, groupId, self.windowId)),
     onRenamePin: (tabId, name, origin) => {
       const permission = requestSite(origin);
+      permission.then(granted => {
+        console.debug("Foxy: pin site access", granted);
+        scheduleSaved();
+      });
       return action(async () => {
-        await permission;
         const reply = await api.runtime.sendMessage({ type: "foxy:rename-pin", tabId, name });
         if (reply?.ok !== true) throw new Error("foxy:rename-pin was not accepted");
       });
     },
     onAllowPin: origin => {
       const permission = requestSite(origin);
-      return action(() => permission);
+      permission.then(granted => {
+        console.debug("Foxy: pin site access", granted);
+        scheduleSaved();
+      });
     },
     onRename: (groupId, title) => action(() => renameGroup(api, groupId, title)),
     onRecolor: (groupId, color) => action(() => recolorGroup(api, groupId, color)),

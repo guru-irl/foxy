@@ -29,8 +29,8 @@ const info = () => ({ 21: { name: "Home", origin: "https://remote.com/*", allowe
 const row = (node, id) => node.querySelector(`[data-tab-id="${id}"]`);
 const key = (node, value) => node.dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true }));
 async function flush(ff) { await ff.settle(); await nextFrame(); await nextFrame(); }
-async function controller(requestGranted = true) {
-  const ff = createFirefox(setup(requestGranted)), node = await root(), pins = info();
+async function controller(requestGranted = true, options = {}) {
+  const ff = createFirefox({ ...setup(requestGranted), ...options }), node = await root(), pins = info();
   ff.browser.runtime.onMessage.addListener(async message => {
     if (message.type === "foxy:reconcile") return { ok: true };
     if (message.type === "foxy:saved") return { saved: [], missing: [] };
@@ -137,6 +137,32 @@ test("ALLOW requests the remote pin origin in its click handler, updates access,
   assert.equal(row(node, 21).querySelector(".pin-allow"), null);
   assert.equal(ff.calls.some(c => c.args[0]?.type === "foxy:rename-pin" || c.api === "tabs.update"), false);
 });
+
+for (const action of ["rename", "ALLOW"]) {
+  test(`pending permission on ${action} does not hold board refresh or saving`, async () => {
+    const { ff, node, control } = await controller(true, { requestPending: true });
+    ff.calls.length = 0;
+    ff.withUserInput(() => {
+      if (action === "ALLOW") row(node, 21).querySelector(".pin-allow").click();
+      else {
+        row(node, 11).querySelector(".row-rename").click();
+        const input = row(node, 11).querySelector(".name-editor");
+        input.value = "Saved now";
+        key(input, "Enter");
+      }
+    });
+    assert.equal(ff.calls[0].api, "permissions.request");
+    await flush(ff);
+    assert.equal(control.ui.editing, false);
+    if (action === "rename") {
+      assert.ok(ff.calls.some(c => c.args[0]?.type === "foxy:rename-pin"));
+      assert.equal(row(node, 11).querySelector(".row-label").textContent, "Saved now");
+    }
+    await ff.browser.tabs.update(12, { url: "https://group.com/changed" });
+    await flush(ff);
+    assert.equal(row(node, 12).querySelector(".row-label").textContent, "https://group.com/changed");
+  });
+}
 
 test("a vanished editing pin releases its hold, while title events do not destroy the input", async () => {
   const { ff, node, control } = await controller();

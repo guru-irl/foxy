@@ -718,6 +718,7 @@ export function createFirefox(setup = {}) {
   api("permissions", "getAll", () => ({ permissions: [], origins: [...origins] }));
   api("permissions", "request", props => {
     if (!userInput) throw new Error("permissions.request requires handling user input");
+    if (setup.requestPending) return new Promise(() => {});
     if (setup.requestGranted === false) return false;
     const added = (props.origins ?? []).filter(origin => !origins.has(origin));
     for (const origin of added) origins.add(origin);
