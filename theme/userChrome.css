@@ -1105,13 +1105,13 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
 }
 
 /* Pinned tabs in the open sidebar: a short site name in the group labels'
-   condensed heavy font and color, but upright (YOUTUBE, GMAIL), instead
-   of the page title.
+   condensed heavy font and color, but upright, instead of the page title.
    userChrome.css can't see a tab's address, only its title (the label
-   attribute), so a site is recognized by how its titles end ("... -
-   YouTube", "... - Gmail"); the title is shrunk to nothing and the name
-   drawn in its place. Other pinned sites show their title in the same
-   font. To add a site, add it to both lists below.
+   attribute), so a site is recognized by case-sensitive title patterns.
+   The title is shrunk to nothing and the name drawn in its place. Other
+   pinned sites show their title in the same font. To add a site, add its
+   patterns to the shrink selector and a content rule below. Keep content
+   rules in spec section 14.1 order: the later name wins an overlap.
    The same 0.5px top nudge as the group labels keeps the flat capitals
    centred at 1x and 2x (see the calibration in section 8). */
 /* Firefox's browser.css gives unselected .tab-label-container opacity 0.7.
@@ -1137,7 +1137,42 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
   letter-spacing: 0 !important;
 }
 
-:root:not(#lf) #pinned-tabs-container[orient="vertical"] .tabbrowser-tab:is([label$="YouTube"], [label$="Gmail"]) .tab-label {
+:root:not(#lf) #pinned-tabs-container[orient="vertical"] .tabbrowser-tab:is(
+  [label$="YouTube"],
+  [label$="Gmail"],
+  [label^="Discord"], [label$="Discord"], [label*="Discord |"],
+  [label$="Microsoft Azure"],
+  [label$="Azure DevOps"], [label$=" - Repos"], [label$=" - Pipelines"],
+  [label$=" - Boards"], [label$=" - Test Plans"], [label$=" - Artifacts"],
+  [label*="Microsoft 365 Copilot"], [label*="M365 Copilot"],
+  [label$="GitHub"],
+  [label$="Slack"],
+  [label$="Microsoft Teams"],
+  [label$="Outlook"],
+  [label*="Google Calendar"],
+  [label$="Google Drive"],
+  [label$="Google Docs"],
+  [label$="Google Sheets"],
+  [label$="Google Slides"],
+  [label^="Meet -"], [label*="Google Meet"],
+  [label$="WhatsApp"],
+  [label^="Telegram"],
+  [label$="/ X"],
+  [label$="Reddit"], [label*=" : r/"],
+  [label$="LinkedIn"],
+  [label="ChatGPT"],
+  [label$="Claude"],
+  [label$="Figma"],
+  [label$="Jira"],
+  [label$="Confluence"],
+  [label$="Notion"],
+  [label^="Spotify"],
+  [label$="Netflix"],
+  [label$="Twitch"],
+  [label$="Instagram"],
+  [label$="Facebook"],
+  [label^="Amazon"]
+) .tab-label {
   font-size: 0 !important;
 
   /* The label's own nudge moves this too; don't apply it twice.
@@ -1149,6 +1184,47 @@ tab-split-view-wrapper:not([hasactivetab]) .tabbrowser-tab:last-child {
 
 #pinned-tabs-container .tabbrowser-tab[label$="YouTube"] .tab-label::before { content: "YOUTUBE"; }
 #pinned-tabs-container .tabbrowser-tab[label$="Gmail"] .tab-label::before { content: "GMAIL"; }
+#pinned-tabs-container .tabbrowser-tab[label^="Discord"] .tab-label::before,
+#pinned-tabs-container .tabbrowser-tab[label$="Discord"] .tab-label::before,
+#pinned-tabs-container .tabbrowser-tab[label*="Discord |"] .tab-label::before { content: "DISCORD"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Microsoft Azure"] .tab-label::before { content: "AZURE"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Azure DevOps"] .tab-label::before,
+#pinned-tabs-container .tabbrowser-tab[label$=" - Repos"] .tab-label::before,
+#pinned-tabs-container .tabbrowser-tab[label$=" - Pipelines"] .tab-label::before,
+#pinned-tabs-container .tabbrowser-tab[label$=" - Boards"] .tab-label::before,
+#pinned-tabs-container .tabbrowser-tab[label$=" - Test Plans"] .tab-label::before,
+#pinned-tabs-container .tabbrowser-tab[label$=" - Artifacts"] .tab-label::before { content: "DEVOPS"; }
+#pinned-tabs-container .tabbrowser-tab[label*="Microsoft 365 Copilot"] .tab-label::before,
+#pinned-tabs-container .tabbrowser-tab[label*="M365 Copilot"] .tab-label::before { content: "COPILOT"; }
+#pinned-tabs-container .tabbrowser-tab[label$="GitHub"] .tab-label::before { content: "GITHUB"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Slack"] .tab-label::before { content: "SLACK"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Microsoft Teams"] .tab-label::before { content: "TEAMS"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Outlook"] .tab-label::before { content: "OUTLOOK"; }
+#pinned-tabs-container .tabbrowser-tab[label*="Google Calendar"] .tab-label::before { content: "CALENDAR"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Google Drive"] .tab-label::before { content: "DRIVE"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Google Docs"] .tab-label::before { content: "DOCS"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Google Sheets"] .tab-label::before { content: "SHEETS"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Google Slides"] .tab-label::before { content: "SLIDES"; }
+#pinned-tabs-container .tabbrowser-tab[label^="Meet -"] .tab-label::before,
+#pinned-tabs-container .tabbrowser-tab[label*="Google Meet"] .tab-label::before { content: "MEET"; }
+#pinned-tabs-container .tabbrowser-tab[label$="WhatsApp"] .tab-label::before { content: "WHATSAPP"; }
+#pinned-tabs-container .tabbrowser-tab[label^="Telegram"] .tab-label::before { content: "TELEGRAM"; }
+#pinned-tabs-container .tabbrowser-tab[label$="/ X"] .tab-label::before { content: "X"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Reddit"] .tab-label::before,
+#pinned-tabs-container .tabbrowser-tab[label*=" : r/"] .tab-label::before { content: "REDDIT"; }
+#pinned-tabs-container .tabbrowser-tab[label$="LinkedIn"] .tab-label::before { content: "LINKEDIN"; }
+#pinned-tabs-container .tabbrowser-tab[label="ChatGPT"] .tab-label::before { content: "CHATGPT"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Claude"] .tab-label::before { content: "CLAUDE"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Figma"] .tab-label::before { content: "FIGMA"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Jira"] .tab-label::before { content: "JIRA"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Confluence"] .tab-label::before { content: "CONFLUENCE"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Notion"] .tab-label::before { content: "NOTION"; }
+#pinned-tabs-container .tabbrowser-tab[label^="Spotify"] .tab-label::before { content: "SPOTIFY"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Netflix"] .tab-label::before { content: "NETFLIX"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Twitch"] .tab-label::before { content: "TWITCH"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Instagram"] .tab-label::before { content: "INSTAGRAM"; }
+#pinned-tabs-container .tabbrowser-tab[label$="Facebook"] .tab-label::before { content: "FACEBOOK"; }
+#pinned-tabs-container .tabbrowser-tab[label^="Amazon"] .tab-label::before { content: "AMAZON"; }
 
 /* Scroll edges of the tab list and pinned tabs (changed 2026-10-01).
    Replace the earlier hard cut with a 20px alpha fade where more tabs are
