@@ -89,6 +89,34 @@ test("permission onAdded applies a saved name on this device, and revocation is 
   assert.equal((await sync.onMessage({ type: "foxy:pins" })).pins[2].allowed, false);
 });
 
+for (const mode of ["restored", "discarded", "revoked", "missing keeper", "unusable", "same as name"]) {
+  test(`board unname writes the page title, not the shown name: ${mode}`, async () => {
+    const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
+    const get = ff.browser.tabs.get;
+    ff.browser.tabs.get = async id => ({ ...await get(id), ...(id === 2 ? {
+      title: "Work", discarded: mode === "discarded",
+    } : {}) });
+    if (mode === "revoked") await ff.browser.permissions.remove({ origins: ["https://example.com/*"] });
+    const injected = [];
+    ff.browser.scripting.executeScript = async details => {
+      injected.push(details.args[0]);
+      assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, "✏️ Work", "restore before writing");
+      return [{ frameId: 0, result: mode === "restored" ? "Latest page" : mode === "unusable" ? {} : mode === "same as name" ? "Work" : undefined }];
+    };
+    assert.deepEqual(await sync.onMessage({ type: "foxy:rename-pin", tabId: 2, name: null }), { ok: true });
+    assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, mode === "restored" ? "Latest page" : "Page");
+    assert.deepEqual(injected, ["discarded", "revoked"].includes(mode) ? [] : [null]);
+  });
+}
+
+test("renaming an already displayed name keeps the last synced page title for fallback", async () => {
+  const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
+  const get = ff.browser.tabs.get;
+  ff.browser.tabs.get = async id => ({ ...await get(id), ...(id === 2 ? { title: "Work" } : {}) });
+  await sync.onMessage({ type: "foxy:rename-pin", tabId: 2, name: "Home" });
+  assert.equal((await loadState(ff.browser)).tabs[2].title, "Page");
+});
+
 test("removing a board name restores the keeper and resumes ordinary outbound title sync", async () => {
   const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
   assert.deepEqual(await sync.onMessage({ type: "foxy:rename-pin", tabId: 2, name: null }), { ok: true });

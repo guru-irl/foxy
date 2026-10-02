@@ -20,7 +20,7 @@ export function keepPinTitle(name) {
   if (name === null) {
     if (keeper) document.title = keeper.pageTitle;
     delete globalThis[key];
-    return;
+    return keeper?.pageTitle;
   }
   if (!keeper) keeper = { pageTitle: document.title };
   keeper.name = name;
@@ -50,20 +50,23 @@ export function createNames({ api, getState, save }) {
   async function allowed(origin) {
     return origin ? api.permissions.contains({ origins: [origin] }) : false;
   }
-  async function apply(tabId) {
+  async function apply(tabId, removing = false) {
     try {
       const entry = getState().tabs[tabId];
       if (!entry || (entry.folderId !== getState().pinnedId && !entry.appliedName)) return;
       const tab = await api.tabs.get(Number(tabId));
       if (tab.incognito || tab.discarded || tab.status !== "complete") return;
-      const name = tab.pinned ? await nameOf(entry) : null;
+      const name = tab.pinned && !removing ? await nameOf(entry) : null;
       if (name === null && !entry.appliedName) return;
       if (!await allowed(pinOrigin(tab.url))) return;
-      await api.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] },
+      const results = await api.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] },
         world: "ISOLATED", func: keepPinTitle, args: [name] });
+      const restored = results?.[0]?.result;
+      const pageTitle = name === null && typeof restored === "string" && restored !== entry.appliedName ? restored : undefined;
       if (name === null) delete entry.appliedName;
       else entry.appliedName = name;
       await save();
+      return pageTitle;
     } catch (error) { warn(error); }
   }
   async function applyAll() {

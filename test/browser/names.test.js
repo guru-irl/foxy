@@ -25,7 +25,7 @@ test("title keeper restores the latest page title after edits, replacement, rein
     assert.equal(document.title, "Home");
     await turn();
     assert.equal(document.title, "Home", "a second observer must not fight the updated name");
-    serialized(null);
+    assert.equal(serialized(null), "Latest (3)");
     assert.equal(document.title, "Latest (3)");
     document.title = "Unwatched";
     await turn();

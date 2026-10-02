@@ -630,11 +630,12 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     const node = await getNode(entry.bookmarkId);
     if (node?.parentId !== state.pinnedId) return { ok: false };
     const name = value?.trim() || null;
-    const title = name === null ? tab.title ?? "" : encodePinTitle(name);
+    const title = name === null ? (await names.apply(tabId, true)) ?? entry.title : encodePinTitle(name);
     if (node.title !== title) await api.bookmarks.update(node.id, { title });
-    entry.title = tab.title ?? "";
-    await save();
-    await names.apply(tabId);
+    if (name === null) {
+      entry.title = title;
+      await save();
+    } else await names.apply(tabId);
     return { ok: true };
   }
   /**
