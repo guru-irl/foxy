@@ -540,6 +540,63 @@ test("pending groups mapped together are saved in drop order rather than tab-str
   } finally { endName(root); }
 });
 
+for (const readEnds of ["before", "after"]) {
+  test(`a storage re-read ending ${readEnds} the pending tile write cannot restore the stale layout`, async () => {
+    const { root, ff, groupId, setReply } = await pendingDrop();
+    endName(root); await flush(ff); await flush(ff);
+    const sync = ff.browser.storage.sync, get = sync.get, set = sync.set, send = ff.browser.runtime.sendMessage;
+    let releaseSaved, releaseRead, releaseWrite, savedBegan, readBegan, writeBegan, writeEnded;
+    const savedGate = new Promise(resolve => { releaseSaved = resolve; });
+    const readGate = new Promise(resolve => { releaseRead = resolve; });
+    const writeGate = new Promise(resolve => { releaseWrite = resolve; });
+    const savedStarted = new Promise(resolve => { savedBegan = resolve; });
+    const readStarted = new Promise(resolve => { readBegan = resolve; });
+    const writeStarted = new Promise(resolve => { writeBegan = resolve; });
+    const writeFinished = new Promise(resolve => { writeEnded = resolve; });
+    let reads = 0, writes = 0;
+    ff.browser.runtime.sendMessage = async message => {
+      const reply = await send(message);
+      if (message.type === "foxy:saved") { savedBegan(); await savedGate; }
+      return reply;
+    };
+    sync.get = async keys => {
+      const value = await get(keys);
+      if (keys === null && ++reads === 1) { readBegan(); await readGate; }
+      return value;
+    };
+    sync.set = async entries => {
+      if (entries["tile:group:new"] && ++writes === 1) {
+        writeBegan(); await writeGate; await set(entries); writeEnded();
+      } else await set(entries);
+    };
+    try {
+      ff.calls.length = 0;
+      setReply({ saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote", [groupId]: "new" } });
+      ff.fire("bookmarks.onCreated", "new", { id: "new", type: "folder" });
+      await ff.settle(); await nextFrame(); await savedStarted;
+      ff.fire("storage.onChanged", { settings: { newValue: { showDate: false } } }, "sync");
+      await ff.settle(); await nextFrame(); await readStarted;
+      releaseSaved(); await writeStarted;
+      if (readEnds === "before") { releaseRead(); await nextFrame(); }
+      releaseWrite(); await writeFinished;
+      // Do not settle the fake yet: the write's onChanged has not been delivered.
+      // Only the page's write guard can invalidate this stale storage snapshot.
+      releaseRead(); await nextFrame(); await nextFrame(); await nextFrame();
+      assert.deepEqual((await get(null))["tile:group:new"], { x: 4, y: 2, w: 3, h: 4 });
+      assert.equal(writes, 1, "the stale read must not write the group again at a first-free spot");
+      assert.ok(reads >= 2, "discard the stale read and re-read storage after the write");
+      assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
+      await flush(ff); await flush(ff);
+      assert.equal(writes, 1);
+      assert.deepEqual(ff.errors, []);
+    } finally {
+      releaseSaved(); releaseRead(); releaseWrite();
+      sync.get = get; sync.set = set; ff.browser.runtime.sendMessage = send; endName(root);
+      await flush(ff);
+    }
+  });
+}
+
 test("a fast folder mapping during the final tab read preserves the pending drop rectangle", async () => {
   let folders = { 101: "one", 102: "two", 201: "remote" };
   const { root, ff, control } = await controller(setup(), message => message.type === "foxy:reconcile" ? { ok: true }

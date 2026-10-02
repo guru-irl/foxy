@@ -46,6 +46,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let gridState;
   let gridRead;
   let storageVersion = 0;
+  let tileWriteVersion = 0;
   let loadedVersion = -1;
   let pendingGrid = false;
   let pendingView = false;
@@ -88,7 +89,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   async function readGrid() {
     if (gridState && loadedVersion === storageVersion) return true;
     if (!gridRead) {
-      const version = storageVersion;
+      const version = storageVersion, writeVersion = tileWriteVersion;
       let failed = false;
       // Stores log failures and return defaults. Track read failures separately
       // so those defaults cannot overwrite a layout we have not read.
@@ -99,11 +100,14 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
         },
       }])) };
       gridRead = Promise.all([loadLayout(readingApi), loadSettings(readingApi)])
-        .then(([layout, settings]) => ({ layout, ...settings, version, writable: !failed }));
+        .then(([layout, settings]) => ({ layout, ...settings, version, writeVersion, writable: !failed }));
     }
     const next = await gridRead;
     gridRead = null;
-    if (held() || next.version !== storageVersion) {
+    // A read can return the old layout before our queued write is visible.
+    // Wait for persistence, then reject snapshots spanning a local tile write.
+    await persistence;
+    if (held() || next.version !== storageVersion || next.writeVersion !== tileWriteVersion) {
       pendingGrid = true;
       enqueue();
       return false;
@@ -328,7 +332,8 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       const keep = new Set([...Object.values(savedReply.folders ?? {}),
         ...board.saved.map(group => group.folderId), ...board.missing.map(group => group.folderId)]);
       persistence = persistence.then(async () => {
-        await saveTiles(api, writes);
+        try { await saveTiles(api, writes); }
+        finally { if (writes.length) ++tileWriteVersion; }
         if (prune) await pruneTiles(api, keep);
       }).catch(() => {}); // The stores log each failed write with the Foxy prefix.
     }
