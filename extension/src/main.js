@@ -38,7 +38,7 @@ function startClock(root, settings) {
 
 /** All board interactions share this state; DnD and editors set it via handlers. */
 export function createController(root, api, ui = { editGroupId: null, dragging: false, editing: false },
-  { maxWait = 30000 } = {}) {
+  { maxWait = 30000, newGroupDelay = 1000 } = {}) {
   ui.confirmFolderId ??= null;
   ui.busy ??= new Set();
   let board;
@@ -57,6 +57,9 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let pruned = false;
   let persistence = Promise.resolve();
   const pendingTiles = new Map();
+  const deferredGroups = new Map();
+  let firstPaintGroups;
+  let unloaded = false;
   let self;
   let generation = 0;
   let queued = false;
@@ -84,6 +87,35 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     ++generation;
   }
 
+  function clearDeferredGroup(groupId) {
+    const entry = deferredGroups.get(groupId);
+    if (entry) clearTimeout(entry.timer);
+    deferredGroups.delete(groupId);
+  }
+
+  function maySaveNewGroup(groupId, tileId) {
+    if (unloaded) return false;
+    if (firstPaintGroups.has(groupId) || pendingTiles.has(groupId)) return true;
+    if (!deferredGroups.has(groupId)) {
+      const entry = { ready: false, timer: 0 };
+      deferredGroups.set(groupId, entry);
+      entry.timer = setTimeout(async () => {
+        if (!root.isConnected) { clearDeferredGroup(groupId); return; }
+        try {
+          // The page receiving the drop gets the first chance to save its rect.
+          const key = tileKey(tileId), stored = await api.storage.sync.get(key);
+          if (deferredGroups.get(groupId) !== entry || unloaded) return;
+          entry.ready = stored[key] === undefined;
+          // Re-read and publish through the normal interaction and write guards.
+          ++storageVersion;
+          pendingGrid = true;
+          enqueue();
+        } catch (error) { console.warn("Foxy: could not check new group tile", error); }
+      }, newGroupDelay);
+    }
+    return deferredGroups.get(groupId).ready;
+  }
+
   // Storage reads share an order independent of tab and bookmark snapshots.
   // An old read, or one completed during an interaction, cannot apply settings.
   async function readGrid() {
@@ -106,7 +138,8 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     gridRead = null;
     // A read can return the old layout before our queued write is visible.
     // Wait for persistence, then reject snapshots spanning a local tile write.
-    await persistence;
+    let settled;
+    do { settled = persistence; await settled; } while (settled !== persistence);
     if (held() || next.version !== storageVersion || next.writeVersion !== tileWriteVersion) {
       pendingGrid = true;
       enqueue();
@@ -251,6 +284,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       snapshot = nextSnapshot;
       const liveGroups = new Set(groups.map(group => group.id));
       for (const id of pendingTiles.keys()) if (!liveGroups.has(id)) pendingTiles.delete(id);
+      for (const id of deferredGroups.keys()) if (!liveGroups.has(id)) clearDeferredGroup(id);
       self = current;
       board = nextBoard;
       // Introduce a newly created tile/editor in the final action snapshot.
@@ -273,6 +307,10 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   function publish(save = true) {
     if (!board || !gridState || !firstPaintReady) return;
     board = buildBoard({ ...snapshot, ...savedReply, otherWindows: gridState.synced.otherWindows });
+    firstPaintGroups ??= new Set(board.columns.map(group => group.id));
+    for (const id of deferredGroups.keys()) {
+      if (gridState.layout.some(tile => tile.id === `group:${savedReply.folders?.[id]}`)) clearDeferredGroup(id);
+    }
     const options = { ...gridState, contentWidth: root.clientWidth,
       folders: savedReply.folders ?? {}, pending: pendingTiles };
     view = buildView(board, options);
@@ -295,6 +333,11 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       const fresh = beforeView.newTiles.filter(tile => !mappedIds.has(tile.id));
       const changed = mapped.length ? changedTiles(shownBefore, shownAfter).filter(tile => !tile.id.startsWith("local:")) : [];
       writes = [...new Map([...fresh, ...changed].map(tile => [tile.id, tile])).values()]
+        .filter(tile => {
+          if (!tile.id.startsWith("group:") || gridState.layout.some(saved => saved.id === tile.id)) return true;
+          const group = board.columns.find(group => tile.id === `group:${options.folders[group.id]}`);
+          return maySaveNewGroup(group.id, tile.id);
+        })
         .map(({ id, x, y, w, h }) => ({ id, x, y, w, h }));
       // Hold placements in memory even on a storage failure, without retrying in
       // a loop or writing twice before storage.onChanged is delivered.
@@ -507,8 +550,14 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   startClock(root, () => gridState?.synced);
 
   const onChange = () => schedule();
+  window.addEventListener("pagehide", () => {
+    unloaded = true;
+    for (const id of deferredGroups.keys()) clearDeferredGroup(id);
+  }, { once: true });
+
   const onGroupRemoved = group => {
     pendingTiles.delete(group.id);
+    clearDeferredGroup(group.id);
     if (group.id === ui.editGroupId) releaseMissingEdit();
     schedule();
   };

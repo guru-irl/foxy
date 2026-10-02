@@ -80,11 +80,11 @@ function luminance(rgb) {
   return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
 }
 async function flush(ff) { await ff.settle(); await nextFrame(); await nextFrame(); }
-async function controller(set = setup(), listener, layout = {}) {
+async function controller(set = setup(), listener, layout = {}, options = {}) {
   const ff = createFirefox(set, listener), root = await makeRoot();
   await ff.browser.storage.sync.set(layout); await ff.settle();
   const { createController } = await import("../../extension/src/main.js");
-  const control = createController(root, ff.browser);
+  const control = createController(root, ff.browser, undefined, options);
   await control.refresh();
   await flush(ff); // Drain the one-time reconcile and deferred first paint.
   await flush(ff); // Deliver fake storage events from the initial tile writes.
@@ -490,6 +490,139 @@ test("empty-cell drop shows the unmapped tile at its rect, opens its editor and 
   } finally { endName(root); }
 });
 
+// Only the injected new-group delay is held; clock and saved-read timers run normally.
+function groupTimers() {
+  const delay = 123456, timers = new Map();
+  const set = window.setTimeout, clear = window.clearTimeout;
+  window.setTimeout = (callback, ms, ...args) => {
+    const timer = set(callback, ms, ...args);
+    if (ms === delay) timers.set(timer, () => callback(...args));
+    return timer;
+  };
+  window.clearTimeout = timer => { timers.delete(timer); clear(timer); };
+  return { options: { newGroupDelay: delay }, timers,
+    fire() {
+      for (const [timer, callback] of [...timers]) {
+        window.clearTimeout(timer); callback();
+      }
+    },
+    restore() {
+      for (const timer of timers.keys()) clear(timer);
+      window.setTimeout = set; window.clearTimeout = clear;
+    },
+  };
+}
+
+for (const order of ["dropper-first", "dropper-second"]) {
+  test(`two Foxy pages (${order}) keep the dropped group's rectangle without another first-free write`, async () => {
+    const timer = groupTimers();
+    let folders = { 101: "one", 102: "two", 201: "remote" };
+    const ff = createFirefox(setup(), message => message.type === "foxy:reconcile" ? { ok: true }
+      : message.type === "foxy:saved" ? { saved: [], missing: [], folders } : undefined);
+    const { createController } = await import("../../extension/src/main.js");
+    const pages = [];
+    try {
+      await ff.browser.storage.sync.set(dropLayout); await ff.settle();
+      for (let i = 0; i < 2; i++) {
+        const root = await makeRoot();
+        const control = createController(root, ff.browser, undefined, timer.options);
+        await control.refresh(); await flush(ff); await flush(ff);
+        pages.push({ root, control });
+      }
+      const A = pages[order === "dropper-first" ? 0 : 1], B = pages[order === "dropper-first" ? 1 : 0];
+      await A.control.handlers.onTabDrop(15, { zone: "cell", rect: { x: 4, y: 2, w: 3, h: 4 } });
+      await flush(ff); endName(A.root); await flush(ff); await flush(ff);
+      const groupId = (await ff.browser.tabs.get(15)).groupId;
+      assert.deepEqual(rectOf(B.root.querySelector(`[data-tile-id="local:${groupId}"]`)), { x: 6, y: 4, w: 3, h: 4 });
+      ff.calls.length = 0;
+      folders = { ...folders, [groupId]: "new" };
+      ff.fire("bookmarks.onCreated", "new", { id: "new", type: "folder" });
+      await flush(ff); await flush(ff);
+      assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:new"], { x: 4, y: 2, w: 3, h: 4 });
+      timer.fire(); await flush(ff); await flush(ff);
+      const writes = ff.calls.filter(c => c.api === "storage.sync.set" && c.args[0]["tile:group:new"]);
+      assert.equal(writes.length, 1, "only the dropping page writes the new tile");
+      for (const { root } of pages) {
+        assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
+      }
+      assert.deepEqual(ff.errors, []);
+    } finally {
+      for (const { root } of pages) { endName(root); root.remove(); }
+      timer.restore();
+    }
+  });
+}
+
+async function externalGroup(options) {
+  let folders = { 101: "one", 102: "two", 201: "remote" };
+  const result = await controller(setup(), message => message.type === "foxy:reconcile" ? { ok: true }
+    : message.type === "foxy:saved" ? { saved: [], missing: [], folders } : undefined, dropLayout, options);
+  const { ff } = result;
+  const groupId = await ff.browser.tabs.group({ tabIds: [15], createProperties: { windowId: 1 } });
+  folders = { ...folders, [groupId]: "external" };
+  ff.fire("bookmarks.onCreated", "external", { id: "external", type: "folder" });
+  await flush(ff); await flush(ff);
+  return { ...result, groupId };
+}
+
+test("a post-paint group stays display-only until the delay and key check, then saves its default rectangle once", async () => {
+  const timer = groupTimers(); let root;
+  try {
+    const result = await externalGroup(timer.options); root = result.root;
+    const { ff, control } = result;
+    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:external"]')), { x: 6, y: 4, w: 3, h: 4 });
+    assert.equal((await ff.browser.storage.sync.get(null))["tile:group:external"], undefined);
+    assert.equal(timer.timers.size, 1);
+    await control.refresh(); await flush(ff);
+    assert.equal(timer.timers.size, 1, "refresh does not restart the delay");
+    ff.calls.length = 0;
+    timer.fire(); await flush(ff); await flush(ff);
+    assert.ok(ff.calls.some(c => c.api === "storage.sync.get" && c.args[0] === "tile:group:external"));
+    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:external"], { x: 6, y: 4, w: 3, h: 4 });
+    assert.equal(ff.calls.filter(c => c.api === "storage.sync.set" && c.args[0]["tile:group:external"]).length, 1);
+    await control.refresh(); await flush(ff);
+    assert.equal(timer.timers.size, 0);
+  } finally { root?.remove(); timer.restore(); }
+});
+
+test("the delayed key check adopts an existing drop rectangle even before storage.onChanged is delivered", async () => {
+  const timer = groupTimers(); let root;
+  try {
+    const result = await externalGroup(timer.options); root = result.root;
+    const { ff } = result;
+    await ff.browser.storage.sync.set({
+      "tile:group:external": { x: 4, y: 2, w: 3, h: 4 },
+      "tile:pinned": { x: 5, y: 6, w: 3, h: 4 },
+      "tile:group:remote": { x: 3, y: 10, w: 3, h: 4 },
+    });
+    // Keep the fake's event queue held until the delayed key read has resolved.
+    ff.calls.length = 0;
+    timer.fire(); await nextFrame(); await nextFrame(); await nextFrame();
+    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:external"], { x: 4, y: 2, w: 3, h: 4 });
+    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:external"]')), { x: 4, y: 2, w: 3, h: 4 });
+    assert.equal(ff.calls.filter(c => c.api === "storage.sync.set").length, 0);
+    await flush(ff);
+  } finally { root?.remove(); timer.restore(); }
+});
+
+for (const ending of ["group removal", "page unload"]) {
+  test(`a deferred group tile cancels its timer on ${ending}`, async () => {
+    const timer = groupTimers(); let root;
+    try {
+      const result = await externalGroup(timer.options); root = result.root;
+      const { ff } = result;
+      assert.equal(timer.timers.size, 1);
+      ff.calls.length = 0;
+      if (ending === "group removal") { await ff.browser.tabs.remove(15); await flush(ff); }
+      else window.dispatchEvent(new Event("pagehide"));
+      assert.equal(timer.timers.size, 0);
+      timer.fire(); await flush(ff); await flush(ff);
+      assert.equal((await ff.browser.storage.sync.get(null))["tile:group:external"], undefined);
+      assert.equal(ff.calls.filter(c => c.api === "storage.sync.set").length, 0);
+    } finally { root?.remove(); timer.restore(); }
+  });
+}
+
 async function twoPendingDrops(layout, rects) {
   let reply = { saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote" } };
   const { root, ff, control } = await controller(setup(), message => message.type === "foxy:reconcile" ? { ok: true }
@@ -596,6 +729,57 @@ for (const readEnds of ["before", "after"]) {
     }
   });
 }
+
+test("a pending tile write queued two microtasks after a layout reply cannot restore a stale rectangle", async () => {
+  const { root, ff, groupId, setReply } = await pendingDrop();
+  endName(root); await flush(ff); await flush(ff);
+  const sync = ff.browser.storage.sync, get = sync.get, set = sync.set, send = ff.browser.runtime.sendMessage;
+  let releaseRead, releaseSaved, releaseWrite, readBegan, savedBegan, writeBegan;
+  const readGate = new Promise(resolve => { releaseRead = resolve; });
+  const savedGate = new Promise(resolve => { releaseSaved = resolve; });
+  const readStarted = new Promise(resolve => { readBegan = resolve; });
+  const savedStarted = new Promise(resolve => { savedBegan = resolve; });
+  const writeGate = new Promise(resolve => { releaseWrite = resolve; });
+  const writeStarted = new Promise(resolve => { writeBegan = resolve; });
+  let reads = 0;
+  sync.get = async keys => {
+    const value = await get(keys);
+    if (keys === null && ++reads === 1) { readBegan(); await readGate; }
+    return value;
+  };
+  ff.browser.runtime.sendMessage = async message => {
+    const reply = await send(message);
+    if (message.type === "foxy:saved") { savedBegan(); await savedGate; }
+    return reply;
+  };
+  sync.set = async entries => {
+    if (entries["tile:group:new"]) { writeBegan(); await writeGate; }
+    return set(entries);
+  };
+  try {
+    setReply({ saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote", [groupId]: "new" } });
+    ff.fire("bookmarks.onCreated", "new", { id: "new", type: "folder" });
+    await ff.settle(); await nextFrame(); await savedStarted;
+    ff.fire("storage.onChanged", { settings: { newValue: { showDate: false } } }, "sync");
+    await ff.settle(); await nextFrame(); await readStarted;
+    ff.calls.length = 0;
+    releaseRead();
+    for (let i = 0; i < 2; i++) await null;
+    releaseSaved();
+    await writeStarted; await nextFrame(); await nextFrame();
+    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
+    releaseWrite();
+    for (let i = 0; i < 6; i++) await flush(ff);
+    const writes = ff.calls.filter(c => c.api === "storage.sync.set" && c.args[0]["tile:group:new"]);
+    assert.deepEqual((await get(null))["tile:group:new"], { x: 4, y: 2, w: 3, h: 4 });
+    assert.equal(writes.length, 1, "a chain queued during the await must finish before checking the write counter");
+    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
+    assert.deepEqual(ff.errors, []);
+  } finally {
+    releaseRead(); releaseSaved(); releaseWrite(); sync.get = get; sync.set = set; ff.browser.runtime.sendMessage = send;
+    endName(root); await flush(ff);
+  }
+});
 
 test("a fast folder mapping during the final tab read preserves the pending drop rectangle", async () => {
   let folders = { 101: "one", 102: "two", 201: "remote" };
