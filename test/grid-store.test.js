@@ -59,9 +59,23 @@ test("saveTiles writes only the given rectangles in one set and does nothing for
   });
 });
 
-test("pruneTiles removes only unknown group tiles and returns their tile ids", async () => {
+for (const count of [400, 401]) {
+  test(`pruneTiles ${count === 400 ? "preserves unknown folders at" : "prunes unknown folders past"} 400 tile keys`, async () => {
+    const ff = createFirefox();
+    const entries = Object.fromEntries(Array.from({ length: count - 1 }, (_, i) => [`tile:foreign-${i}`, "bad"]));
+    entries["tile:group:unknown"] = rect;
+    await ff.browser.storage.sync.set({ ...entries, settings: {}, unrelated: 1 });
+    ff.calls.length = 0;
+    assert.deepEqual(await pruneTiles(ff.browser, new Set()), count === 400 ? [] : ["group:unknown"]);
+    assert.equal((await ff.browser.storage.sync.get())["tile:group:unknown"] === undefined, count > 400);
+    assert.equal(ff.calls.filter(c => c.api === "storage.sync.remove").length, count > 400 ? 1 : 0);
+  });
+}
+
+test("pruneTiles past 400 keys removes only unknown group tiles and returns their tile ids", async () => {
   const ff = createFirefox();
-  const kept = { "tile:group:open": rect, "tile:group:closed": rect, "tile:group:missing": rect,
+  const extras = Object.fromEntries(Array.from({ length: 400 }, (_, i) => [`tile:foreign-${i}`, "bad"]));
+  const kept = { ...extras, "tile:group:open": rect, "tile:group:closed": rect, "tile:group:missing": rect,
     "tile:pinned": rect, "tile:saved": rect, "tile:clock": rect, settings: {}, unrelated: 1 };
   await ff.browser.storage.sync.set({ ...kept, "tile:group:gone": rect, "tile:group:corrupt": "bad" });
   ff.calls.length = 0;
@@ -125,7 +139,8 @@ test("failed layout reads log once and use an empty layout without pruning", asy
 for (const operation of ["set", "remove"]) {
   test(`failed layout ${operation} logs once and rejects without retrying`, async t => {
     const ff = createFirefox(), error = new Error("storage unavailable");
-    await ff.browser.storage.sync.set({ "tile:group:gone": rect });
+    const extras = Object.fromEntries(Array.from({ length: 400 }, (_, i) => [`tile:foreign-${i}`, "bad"]));
+    await ff.browser.storage.sync.set({ ...extras, "tile:group:gone": rect });
     const write = t.mock.method(ff.browser.storage.sync, operation, async () => { throw error; });
     const warn = t.mock.method(console, "warn", () => {});
     await assert.rejects(operation === "set"
@@ -133,6 +148,6 @@ for (const operation of ["set", "remove"]) {
     assert.equal(write.mock.calls.length, 1);
     assert.equal(warn.mock.calls.length, 1);
     assert.match(warn.mock.calls[0].arguments[0], /^Foxy:/);
-    assert.deepEqual(await ff.browser.storage.sync.get(), { "tile:group:gone": rect });
+    assert.deepEqual(await ff.browser.storage.sync.get(), { ...extras, "tile:group:gone": rect });
   });
 }

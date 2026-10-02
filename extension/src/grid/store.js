@@ -29,9 +29,10 @@ export async function saveTiles(api, tiles) {
   catch (error) { console.warn("Foxy: could not save tile layout", error); throw error; }
 }
 
-/** Returns tile ids, not storage keys or folder ids. */
+/** Load-time safety cap. Returns tile ids, not storage keys or folder ids. */
 export async function pruneTiles(api, keepFolderIds) {
   const entries = await readTiles(api);
+  if (Object.keys(entries).filter(key => key.startsWith("tile:")).length <= 400) return [];
   const keys = Object.keys(entries).filter(key => key.startsWith("tile:group:")
     && !keepFolderIds.has(key.slice(11)));
   if (!keys.length) return [];

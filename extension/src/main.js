@@ -6,7 +6,7 @@ import { openTab, closeTabs, closeGroup, bringGroupHere, renameGroup, recolorGro
   dropTab } from "./board/moves.js";
 
 import { buildView } from "./grid/view.js";
-import { loadLayout, saveTiles, pruneTiles, watchStorage } from "./grid/store.js";
+import { tileKey, loadLayout, saveTiles, pruneTiles, watchStorage } from "./grid/store.js";
 import { loadSettings, cardAlpha } from "./settings/store.js";
 export { renderTime, updateClock } from "./board/render.js";
 
@@ -43,6 +43,9 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let pendingGrid = false;
   let pendingView = false;
   let hasSavedReply = false;
+  let hasValidSavedReply = false;
+  let firstPaintReady = false;
+  let firstPaintTimer = 0;
   let pruned = false;
   let persistence = Promise.resolve();
   const pendingTiles = new Map();
@@ -117,10 +120,21 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     if (savedReadsInFlight) { savedDirty = true; savedDirtyRetry ||= retry; return; }
     const mine = ++savedGeneration;
     ++savedReadsInFlight;
-    let reply, timer, valid = false;
+    let reply, timer, valid = false, arrived = false;
+    if (!firstPaintReady && !firstPaintTimer) {
+      firstPaintTimer = setTimeout(() => {
+        firstPaintTimer = 0;
+        firstPaintReady = true;
+        pendingView = true;
+        enqueue();
+      }, 500);
+    }
     try {
       const responses = await Promise.race([
-        Promise.all([api.runtime.sendMessage({ type: "foxy:saved" }),
+        Promise.all([api.runtime.sendMessage({ type: "foxy:saved" }).then(value => {
+          arrived = true;
+          return value;
+        }),
           api.runtime.sendMessage({ type: "foxy:pins" })]),
         new Promise((resolve, reject) => {
           timer = setTimeout(() => reject(new Error("foxy:saved timed out")), maxWait);
@@ -146,7 +160,13 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
         } else {
           // Saved data is independent of the tab snapshot's generation.
           savedReply = reply;
-          hasSavedReply ||= valid;
+          hasSavedReply ||= arrived;
+          hasValidSavedReply ||= valid;
+          if (hasSavedReply) {
+            firstPaintReady = true;
+            clearTimeout(firstPaintTimer);
+            firstPaintTimer = 0;
+          }
           if (snapshot) {
             board = buildBoard({ ...snapshot, ...savedReply });
             publish();
@@ -192,7 +212,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       if (mine !== generation) return;
       pending = false;
       pendingSaved = false;
-      // Do not await the background: startup settling can take up to 20s.
+      // Read tabs concurrently; publish holds the first paint for up to 500ms.
       readSaved(retry);
       reading = true;
       ++readsInFlight;
@@ -226,13 +246,14 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   }
 
   function publish(save = true) {
-    if (!board || !gridState) return;
+    if (!board || !gridState || !firstPaintReady) return;
     board = buildBoard({ ...snapshot, ...savedReply, otherWindows: gridState.synced.otherWindows });
     view = buildView(board, { ...gridState, contentWidth: root.clientWidth,
       folders: savedReply.folders ?? {}, pending: pendingTiles });
     pendingView = false;
     // JSON.stringify(Set) is {}, so serialize its folder IDs explicitly.
-    const key = JSON.stringify({ board, view, settings: gridState.synced, device: gridState.device,
+    const { saved: savedLayout, newTiles, ...shown } = view;
+    const key = JSON.stringify({ board, view: shown, settings: gridState.synced, device: gridState.device,
       ui: { ...ui, busy: [...ui.busy].sort() } });
     if (key !== lastRenderedKey) {
       const saved = captureView(root);
@@ -244,12 +265,12 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       restoreView(root, saved);
       lastRenderedKey = key;
     }
-    if (!save || !gridState.writable) return;
+    if (!save || !gridState.writable || !hasSavedReply) return;
     const fresh = view.newTiles;
     // Keep the current placement even if a write fails. No retry loop, and a
     // second publish before storage.onChanged cannot write these tiles twice.
     if (fresh.length) gridState.layout = [...gridState.layout, ...fresh];
-    const prune = hasSavedReply && !pruned;
+    const prune = hasValidSavedReply && !pruned;
     if (prune) pruned = true;
     if (fresh.length || prune) {
       const keep = new Set([...Object.values(savedReply.folders ?? {}),
@@ -324,6 +345,10 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
           }),
         ]);
         if (reply?.ok !== true) throw new Error(`${message.type} was not accepted`);
+        if (deleting) {
+          await api.storage.sync.remove(tileKey(`group:${id}`));
+          gridState.layout = gridState.layout.filter(tile => tile.id !== `group:${id}`);
+        }
         return reply;
       } finally {
         clearTimeout(timer);
