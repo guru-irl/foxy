@@ -378,3 +378,21 @@ test("the page has the same space above the grid as below it", async () => {
   assert.equal(style.paddingTop, "24px");
   assert.equal(style.paddingBottom, "24px");
 });
+
+test("a failed saved-groups reply writes no tiles, since group places are unknown", async () => {
+  const ff = createBoardFirefox({ windows: [{ id: 1 }], selfTabId: 99,
+    groups: [{ id: 1, windowId: 1, title: "Group" }],
+    tabs: [{ id: 10, windowId: 1, groupId: 1 }, { id: 99, windowId: 1 }] },
+  message => message.type === "foxy:reconcile" ? { ok: true }
+    : message.type === "foxy:saved" ? { ok: false } : undefined);
+  await ff.browser.storage.sync.set({ "tile:group:open": { x: 0, y: 0, w: 3, h: 4 } }); await ff.settle();
+  ff.calls.length = 0;
+  const warn = console.warn; console.warn = () => {};
+  try {
+    const node = await root(); const { createController } = await import("../../extension/src/main.js");
+    const control = createController(node, ff.browser); await control.refresh(); await flush(ff);
+    await new Promise(resolve => setTimeout(resolve, 600)); await flush(ff);
+    assert.ok(node.querySelector(".grid .tile"), "the board still paints");
+    assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set"), []);
+  } finally { console.warn = warn; }
+});

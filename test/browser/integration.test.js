@@ -343,8 +343,8 @@ for (const answer of ["reject", "undefined", "malformed"]) {
       assert.equal(root.querySelector(".saved"), null); assert.equal(page.querySelector(".banner"), null);
       assert.equal(warnings.length, 1); assert.ok(warnings[0][0].startsWith("Foxy:"));
       assert.equal(control.ui.busy.size, 0);
-      assert.equal(ff.calls.some(call => call.api === "storage.sync.set"), answer !== "reject",
-        "any arrived reply allows new tiles; a rejected request is not a reply");
+      assert.equal(ff.calls.some(call => call.api === "storage.sync.set"), false,
+        "tiles are written only after a valid reply with the group-to-folder map");
     });
   });
 }

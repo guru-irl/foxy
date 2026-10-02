@@ -276,7 +276,10 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       restoreView(root, saved);
       lastRenderedKey = key;
     }
-    if (!save || !gridState.writable || !hasSavedReply) return;
+    // New tiles need the open groups' saved places, so only a valid reply
+    // with the group-to-folder map allows writes ({ ok: false } does not).
+    const knowsFolders = hasValidSavedReply && savedReply.folders !== null && typeof savedReply.folders === "object";
+    if (!save || !gridState.writable || !knowsFolders) return;
     const fresh = view.newTiles;
     // Keep the current placement even if a write fails. No retry loop, and a
     // second publish before storage.onChanged cannot write these tiles twice.
