@@ -1,3 +1,4 @@
+import { pinOrigin } from "../sync/names.js";
 import { colorKey } from "../model.js";
 import { attachDnd } from "./dnd.js";
 import { openNameEditor, openColorPicker } from "./edit.js";
@@ -71,8 +72,8 @@ export function renderBoard(root, board, ui, handlers) {
   action.textContent = "+ NEW GROUP";
   create.append(action);
   strip.append(create);
-  root.replaceChildren(fixedColumn("pinned", "PINNED", board.pinned, handlers), strip,
-    fixedColumn("tabs", "TABS", board.tabs, handlers));
+  root.replaceChildren(fixedColumn(root, "pinned", "PINNED", board.pinned, handlers), strip,
+    fixedColumn(root, "tabs", "TABS", board.tabs, handlers));
   const previousBanner = banners.get(root);
   const missingCount = board.missing?.length ?? 0;
   if (missingCount && previousBanner?.dataset.count === String(missingCount)) {
@@ -253,7 +254,7 @@ function setBusy(node, busy) {
   for (const button of node.querySelectorAll("button")) button.setAttribute("aria-disabled", String(Boolean(busy)));
 }
 
-function fixedColumn(zone, title, sections, handlers) {
+function fixedColumn(root, zone, title, sections, handlers) {
   const column = el("section", "column fixed");
   column.dataset.zone = zone;
   const heading = el("h2", "column-title");
@@ -270,7 +271,7 @@ function fixedColumn(zone, title, sections, handlers) {
         list.append(el("div", "window-gap"));
       }
     }
-    list.append(...section.rows.map(row => tabRow(row, handlers)));
+    list.append(...section.rows.map(row => tabRow(root, row, handlers)));
   }
   column.append(heading, list);
   return column;
@@ -335,7 +336,7 @@ function groupColumn(root, group, handlers) {
   }
   header.append(close);
   const list = rows("group", group.id);
-  list.append(...group.rows.map(row => tabRow(row, handlers)));
+  list.append(...group.rows.map(row => tabRow(root, row, handlers)));
   column.append(header);
   if (!group.current) {
     const other = el("div", "other-window");
@@ -356,7 +357,7 @@ function rows(zone, groupId) {
   return list;
 }
 
-function tabRow(tab, handlers) {
+function tabRow(root, tab, handlers) {
   const row = el("div", "row");
   // The open action and close are sibling buttons, never nested controls.
   row.tabIndex = -1;
@@ -378,7 +379,52 @@ function tabRow(tab, handlers) {
     if (event.button !== 0 || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
     handlers.onOpen?.(tab);
   });
-  row.append(open, close);
+  row.append(open);
+  if (tab.pinned) {
+    const rename = button("row-rename", `Rename pin: ${tab.title}`);
+    const start = () => {
+      if (row.querySelector(".name-editor")) return;
+      editors.get(root)?.finish();
+      handlers.onEditState?.(true, null, tab.id);
+      const active = { finish: null, cancel: null };
+      editors.set(root, active);
+      // Keep the favicon visible, with the input as a sibling, not inside a button.
+      const favicon = open.firstElementChild;
+      row.insertBefore(favicon, open);
+      const end = () => {
+        open.prepend(favicon);
+        if (editors.get(root) !== active) return;
+        editors.delete(root);
+        handlers.onEditEnd?.(null, tab.id);
+      };
+      const editor = openNameEditor(open, {
+        initial: tab.name ?? tab.title, className: "name-editor pin-name-editor", updateLabel: false,
+        onSave: name => {
+          try {
+            label.textContent = name || tab.title;
+            handlers.onRenamePin?.(tab.id, name || null, tab.origin ?? pinOrigin(tab.url));
+          } finally { end(); }
+        }, onCancel: end,
+      });
+      active.finish = editor.save;
+      active.cancel = editor.cancel;
+    };
+    rename.addEventListener("click", event => { event.stopPropagation(); start(); });
+    row.addEventListener("keydown", event => {
+      if (event.key !== "F2" || event.isComposing || event.target.matches("input")) return;
+      event.preventDefault(); event.stopPropagation(); start();
+    });
+    if (tab.name && tab.allowed === false) {
+      const allow = button("pin-allow", `Allow pin name on this site: ${tab.name}`, "ALLOW");
+      allow.addEventListener("click", event => {
+        event.stopPropagation();
+        handlers.onAllowPin?.(tab.origin);
+      });
+      row.append(allow);
+    }
+    row.append(rename);
+  }
+  row.append(close);
   return row;
 }
 

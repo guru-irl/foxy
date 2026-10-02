@@ -469,7 +469,8 @@ button.group-name:focus-visible {
   background: transparent;
 }
 
-.row-close {
+.row-close,
+.row-rename {
   flex: none;
   width: 20px;
   height: 20px;
@@ -478,7 +479,9 @@ button.group-name:focus-visible {
 }
 
 .row:hover .row-close,
-.row:focus-within .row-close {
+.row:focus-within .row-close,
+.row:hover .row-rename,
+.row:focus-within .row-rename {
   opacity: 1;
 }
 
@@ -666,4 +669,33 @@ button.group-name:focus-visible {
   height: 16px;
   background-color: var(--text-muted);
   mask: url("icons/bring-here.svg") center / contain no-repeat;
+}
+
+/* Pin actions share the close button's neutral hover/focus treatment. */
+.row-rename::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: auto;
+  background: currentColor;
+  mask: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"%3E%3Cpath fill="black" d="m3 17 11-11 4 4L7 21H3zm13-13 2-2a1 1 0 0 1 2 0l2 2a1 1 0 0 1 0 2l-2 2z"/%3E%3C/svg%3E') center / contain no-repeat;
+}
+
+.pin-allow {
+  flex: none;
+  padding: 3px 5px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  font: normal 700 14px / 1 "Foxy Sans", system-ui, sans-serif;
+  font-stretch: 80%;
+}
+
+.pin-name-editor {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  font: normal 400 14px / 1 "Foxy Sans", system-ui, sans-serif;
+  font-stretch: 100%;
+  text-transform: none;
 }
