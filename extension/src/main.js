@@ -7,7 +7,8 @@ import { openTab, closeTabs, closeGroup, bringGroupHere, renameGroup, recolorGro
 
 import { buildView } from "./grid/view.js";
 import { attachGridDrag } from "./grid/drag.js";
-import { place, changedTiles } from "./grid/layout.js";
+import { place, changedTiles, railLimits } from "./grid/layout.js";
+import { renderSettings, settingActions, resetLayout } from "./settings/pane.js";
 import { tileKey, loadLayout, saveTiles, pruneTiles, watchStorage } from "./grid/store.js";
 import { loadSettings, saveSetting, cardAlpha } from "./settings/store.js";
 export { renderTime, updateClock } from "./board/render.js";
@@ -59,6 +60,28 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let pruned = false;
   let persistence = Promise.resolve();
   const pendingTiles = new Map();
+  const settingsPane = root.parentElement?.querySelector(":scope > .settings-pane");
+  const paneHandlers = settingActions(api, async () => {
+    await persistence;
+    await resetLayout(api);
+    pendingTiles.clear();
+  });
+  const gear = () => root.querySelector(".settings-button");
+  function setPaneOpen(open) {
+    if (!settingsPane) return;
+    settingsPane.hidden = !open;
+    gear()?.setAttribute("aria-expanded", String(open));
+    if (open) settingsPane.querySelector("button, input")?.focus({ preventScroll: true });
+    else gear()?.focus({ preventScroll: true });
+  }
+  root.addEventListener("click", event => {
+    if (event.target.closest(".settings-button")) setPaneOpen(settingsPane?.hidden);
+  });
+  window.addEventListener("keydown", event => {
+    if (event.key === "Escape" && root.isConnected && settingsPane && !settingsPane.hidden) {
+      event.preventDefault(); setPaneOpen(false);
+    }
+  });
   const deferredGroups = new Map();
   let firstPaintGroups;
   let unloaded = false;
@@ -371,9 +394,13 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       root.style.setProperty("--card-alpha-light", cardAlpha(gridState.synced.transparency, "light"));
       root.style.setProperty("--row", gridState.device.density === "compact" ? "24px" : "32px");
       renderBoard(root, board, view, ui, handlers, gridState.synced);
+      gear()?.setAttribute("aria-expanded", String(settingsPane ? !settingsPane.hidden : false));
+      if (settingsPane?.id) gear()?.setAttribute("aria-controls", settingsPane.id);
       restoreView(root, saved);
       lastRenderedKey = key;
     }
+    if (settingsPane) renderSettings(settingsPane, { synced: gridState.synced, device: gridState.device,
+      railMax: railLimits(view.total).max }, paneHandlers);
     if (writes.length || prune) {
       const keep = new Set([...Object.values(savedReply.folders ?? {}),
         ...board.saved.map(group => group.folderId), ...board.missing.map(group => group.folderId)]);
@@ -485,7 +512,8 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     },
     onRestoreAll: () => savedAction("banner", { type: "foxy:restore-all", windowId: self?.windowId }),
     onDismissMissing: () => savedAction("banner", { type: "foxy:dismiss-missing" }),
-    onOpen: row => action(() => openTab(api, row, self, { close: history.length === 1 })),
+    onOpen: row => action(() => openTab(api, row, self, { close: history.length === 1,
+      pinsMoveHere: gridState.synced.pinsMoveHere })),
     onCloseTab: tabId => action(() => closeTabs(api, [tabId], self?.id)),
     onCloseGroup: groupId => action(() => closeGroup(api, groupId, self?.id)),
     onBringHere: groupId => action(() => bringGroupHere(api, groupId, self.windowId)),

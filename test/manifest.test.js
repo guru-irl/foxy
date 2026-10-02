@@ -37,6 +37,13 @@ test("the background script exists and imports the close helper", () => {
   assert.ok(existsSync(new URL("src/close.js", root)), "missing src/close.js");
 });
 
+test("manifest registers the embedded options page and its references exist", () => {
+  assert.deepEqual(manifest.options_ui, { page: "options.html" });
+  for (const ref of [...read("options.html").matchAll(/(?:src|href)="([^"]+)"/g)].map(m => m[1])) {
+    assert.ok(existsSync(new URL(ref, root)), `missing ${ref}`);
+  }
+});
+
 test("manifest has the gecko settings AMO needs", () => {
   const gecko = manifest.browser_specific_settings.gecko;
   assert.equal(gecko.id, "{4408f971-7930-41ea-9f93-b01231e40861}");

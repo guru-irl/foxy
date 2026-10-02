@@ -268,6 +268,15 @@ for (const [tabId, one, two, focused] of [
   });
 }
 
+test("pinsMoveHere off focuses and activates a foreign pin without moving or closing", async () => {
+  const ff = openFixture();
+  assert.equal(await openTab(ff.browser, { id: 3 }, { id: 99, windowId: 1 }, { pinsMoveHere: false }), true);
+  await layouts(ff, "P1 | 2 99", "P3 | 4");
+  assert.equal((await ff.browser.tabs.get(3)).active, true);
+  assert.equal((await ff.browser.windows.getLastFocused()).id, 2);
+  assert.equal(ff.calls.filter(c => c.api === "tabs.move" || c.api === "runtime.sendMessage").length, 0);
+});
+
 test("open tab delegates the only-history-entry close after switching", async () => {
   const ff = openFixture();
   ff.browser.runtime.onMessage.addListener(async message => {

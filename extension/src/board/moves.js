@@ -133,9 +133,13 @@ export async function bringGroupHere(api, groupId, windowId) {
 }
 
 /** Activate via the existing close protocol. Only pins follow across windows. */
-export async function openTab(api, row, self, { close = true } = {}) {
+export async function openTab(api, row, self, { close = true, pinsMoveHere = true } = {}) {
   try {
     const tab = await api.tabs.get(row.id);
+    if (tab.pinned && tab.windowId !== self.windowId && !pinsMoveHere) {
+      await api.windows.update(tab.windowId, { focused: true });
+      return await activateTab(api, tab.id, self.id, { close: false });
+    }
     if (tab.pinned && tab.windowId !== self.windowId) {
       await api.tabs.move(tab.id, { windowId: self.windowId, index: await pinnedCount(api, self.windowId) });
     }

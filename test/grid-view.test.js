@@ -9,6 +9,19 @@ const board = { columns: [group(1), group(2)], saved: [], pinned: [], tabs: [] }
 const options = (overrides = {}) => ({ layout: [], synced: { ...DEFAULT_SETTINGS, showClock: false, showPinned: false },
   device: DEFAULT_DEVICE, contentWidth: 944, folders: { 1: "a", 2: "b" }, pending: new Map(), ...overrides });
 
+test("new tiles use clock, pinned, current tab-strip groups, remote groups, saved order", () => {
+  const ordered = buildBoard({ windows: [{ id: 2, type: "normal" }, { id: 1, type: "normal" }],
+    currentWindowId: 1, groups: [{ id: 3, windowId: 2 }, { id: 2, windowId: 1 }, { id: 1, windowId: 1 }],
+    tabs: [{ id: 30, windowId: 2, groupId: 3, index: 0 }, { id: 20, windowId: 1, groupId: 2, index: 5 },
+      { id: 10, windowId: 1, groupId: 1, index: 1 }], saved: [{ folderId: "closed" }] });
+  const view = buildView(ordered, options({ synced: DEFAULT_SETTINGS, contentWidth: 1232, folders: { 1: "a", 2: "b", 3: "c" } }));
+  assert.deepEqual(view.newTiles, [
+    { id: "clock", x: 0, y: 0, w: 5, h: 2 }, { id: "pinned", x: 5, y: 0, w: 3, h: 4 },
+    { id: "group:a", x: 0, y: 2, w: 3, h: 4 }, { id: "group:b", x: 3, y: 4, w: 3, h: 4 },
+    { id: "group:c", x: 6, y: 4, w: 3, h: 4 }, { id: "saved", x: 0, y: 6, w: 3, h: 4 },
+  ]);
+});
+
 test("new group tiles get first-free defaults and are returned for saving", () => {
   const view = buildView(board, options());
   assert.deepEqual([view.cell, view.total, view.cols, view.railCells], [80, 10, 7, 3]);

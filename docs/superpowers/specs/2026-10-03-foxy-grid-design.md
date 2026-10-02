@@ -60,8 +60,15 @@ preset: S 2, M 3, L 4, XL 5.
   saved place but do not reserve space for placement or fit.
 - **New tiles** (a group seen for the first time, or any tile with no saved
   place): first free spot in reading order that fits the default size.
-- **Reset layout**: clock, then pinned, then groups in tab-strip order (this
-  window first), then saved, each at the first free spot.
+- **Reset layout**: after a second click within 3 s confirms, read
+  `storage.sync.get(null)` and remove every `tile:` key in one
+  `storage.sync.remove` call. Leave settings and all other keys alone, and
+  clear this page's pending tile placements. This is the same action in the
+  board pane and the options page. Open Foxy boards then place their visible
+  tiles as new through the normal storage-change path and existing write
+  rules: clock, then pinned, then groups in tab-strip order (this window
+  first), then saved, each at the first free spot. Hidden and closed tiles
+  no longer have a saved position after a reset.
 
 ## 4. Board
 
@@ -158,9 +165,13 @@ preset: S 2, M 3, L 4, XL 5.
   and tabs.
 - With pins moving off, clicking another window's pin focuses that window.
 - The pane is a glass panel over the rail, 360 px wide, sections as above,
-  plain labels, changes apply immediately. Escape or the gear closes it.
+  plain labels, changes apply immediately. Its fill alpha is
+  `min(0.92, card alpha + 0.2)` in each scheme, with blur. While it is open,
+  the rail heading and rows are hidden but keep their space and scroll
+  position; the gear stays visible and focusable. Escape or the gear closes
+  it.
 - `options_ui` points at `options.html`, which renders the same pane.
-- Hidden tiles keep their saved position.
+- Hidden tiles keep their saved position unless Reset layout removes it.
 
 ## 8. Errors
 
