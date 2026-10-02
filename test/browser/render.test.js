@@ -50,21 +50,12 @@ async function board(ff) {
 async function draw(handlers = {}) {
   const ff = createFirefox(setup());
   const node = await root();
-  const { renderBoard } = await import("../../extension/src/board/render.js");
+  const { renderBoard } = await import("./view.js");
   renderBoard(node, await board(ff), { editGroupId: null }, handlers);
   return node;
 }
 
 // A renderer that drops, reorders or conflates current/remote columns fails these literal contracts.
-test("board columns keep fixed edges and model group order", async () => {
-  const node = await draw();
-  assert.deepEqual([...node.querySelectorAll(".column")].map(el => el.dataset.zone ?? el.dataset.groupId),
-    ["pinned", "101", "102", "201", "new-group", "tabs"]);
-  assert.equal(node.firstElementChild.querySelector("h2").textContent, "PINNED");
-  assert.equal(node.lastElementChild.querySelector("h2").textContent, "TABS");
-  assert.equal(node.querySelector(".new-group .action").textContent, "+ NEW GROUP");
-});
-
 test("remote window sections have a subheading and space-only boundaries", async () => {
   const node = await draw();
   for (const zone of ["pinned", "tabs"]) {
@@ -147,7 +138,7 @@ for (const scheme of ["light", "dark"]) {
   });
 }
 
-test("unnamed and long groups retain 264px glass columns without masking short lists", async () => {
+test("unnamed and long groups retain cell-sized glass tiles without masking short lists", async () => {
   const node = await draw();
   const unnamed = node.querySelector('[data-group-id="102"] .group-name');
   assert.equal(unnamed.textContent, "UNNAMED");
@@ -157,7 +148,7 @@ test("unnamed and long groups retain 264px glass columns without masking short l
     assert.equal(style.borderTopWidth, "0px");
     assert.equal(style.outlineStyle, "none");
     assert.equal(style.boxShadow, "none");
-    if (el.classList.contains("column")) assert.equal(el.offsetWidth, 264);
+    if (el.classList.contains("column")) assert.equal(el.offsetWidth, 272);
     else assert.equal(el.offsetHeight, 32);
   }
   const name = node.querySelector('[data-group-id="201"] .group-name');
@@ -242,14 +233,6 @@ for (const hold of ["drag", "edit", "action"]) {
     assert.equal(control.ui.confirmFolderId, "f1");
   });
 }
-
-test("empty board still offers fixed columns and new group", async () => {
-  const node = await root();
-  const { renderBoard } = await import("../../extension/src/board/render.js");
-  const ff = createFirefox({ tabs: [{ id: 99, windowId: 1 }] });
-  renderBoard(node, await board(ff), { editGroupId: null }, {});
-  assert.deepEqual([...node.querySelectorAll(".column")].map(el => el.dataset.zone), ["pinned", "new-group", "tabs"]);
-});
 
 // The shared fake does not implement Firefox's optional onUpdated filter.
 // Preserve its queued delivery, adding only the filter at this API boundary.
@@ -363,7 +346,7 @@ test("controller batches remote tab, group, window and activation events per fra
   assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
 });
 
-test("controller retains horizontal and vertical scroll and focus through rebuild", async () => {
+test("controller retains grid and row scroll and focus through rebuild", async () => {
   const set = setup();
   for (let i = 0; i < 30; i++) set.tabs.push({ id: 1000 + i, windowId: 1, groupId: 101, title: `Tab ${i}` });
   const { ff, node, control } = await controller(set);
@@ -371,13 +354,13 @@ test("controller retains horizontal and vertical scroll and focus through rebuil
   const row = node.querySelector('[data-tab-id="1000"]');
   row.focus({ preventScroll: true });
   node.querySelector('.rows[data-group-id="101"]').scrollTop = 120;
-  node.querySelector(".strip").scrollLeft = 90;
+  node.querySelector(".grid").scrollTop = 90;
   await ff.browser.tabGroups.update(201, { title: "Rebuild while a row is focused" });
   await control.refresh();
   assert.ok(node.querySelector('[data-tab-id="1000"]') !== row, "exercise a real rebuild");
-  assert.equal(node.querySelector(".strip").scrollLeft, 90);
+  assert.equal(node.querySelector(".grid").scrollTop, 90);
   assert.equal(node.querySelector('.rows[data-group-id="101"]').scrollTop, 120);
-  assert.equal(node.querySelector(".strip").hasAttribute("data-scroll-start"), true, "fade must reflect restored scroll before the next event");
+  assert.equal(node.querySelector(".grid").hasAttribute("data-scroll-start"), true, "fade must reflect restored scroll before the next event");
   assert.equal(node.querySelector('.rows[data-group-id="101"]').hasAttribute("data-scroll-start"), true);
   assert.equal(document.activeElement.dataset.tabId, "1000");
   const close = node.querySelector('[data-group-id="101"] .column-close');
@@ -455,7 +438,7 @@ for (const [tabId, nextId, child] of [[23, 32, false], [32, 23, false], [11, 21,
   });
 }
 
-for (const selector of [".strip", '.fixed .rows[data-zone="pinned"]', '.fixed .rows[data-zone="tabs"]']) {
+for (const selector of [".grid", '.fixed .rows[data-zone="pinned"]', '.fixed .rows[data-zone="tabs"]']) {
   test(`review minor 3: focused scroll container ${selector} survives a rebuild`, async () => {
     const { ff, node } = await controller();
     const original = node.querySelector(selector);
@@ -561,8 +544,7 @@ test("controller routes drops through target resolvers and requests a new group'
   assert.ok(control.ui.editGroupId != null);
   assert.ok(node.querySelector(`.column[data-group-id="${control.ui.editGroupId}"] [data-tab-id="23"]`));
   control.handlers.onEditEnd();
-  await control.handlers.onGroupDrop(201, 0);
-  assert.equal((await ff.browser.tabGroups.get(201)).windowId, 1);
+
   await flush(ff);
 });
 
@@ -813,7 +795,7 @@ test("missing and broken favicons use the globe at the same 16px size", async ()
   const ff = createFirefox(setup());
   const model = await board(ff);
   model.columns[0].rows[0].icon = "data:image/png;base64,AAAA";
-  const { renderBoard } = await import("../../extension/src/board/render.js");
+  const { renderBoard } = await import("./view.js");
   renderBoard(node, model, { editGroupId: null }, {});
   const image = node.querySelector('[data-tab-id="12"] img');
   await new Promise(resolve => image.addEventListener("error", resolve, { once: true }));
@@ -863,17 +845,6 @@ test("stale row actions warn and re-read instead of throwing or closing the page
     assert.equal(ff.calls.filter(call => call.api === "runtime.sendMessage" && call.args[0].type === "blank-and-close").length, 0);
   } finally { console.warn = warn; }
   await flush(ff);
-});
-
-
-test("fixed and scrolling columns share the same top and bottom edges", async () => {
-  const node = await draw();
-  const fixed = node.querySelector(".fixed").getBoundingClientRect();
-  for (const column of node.querySelectorAll(".column")) {
-    const bounds = column.getBoundingClientRect();
-    assert.equal(bounds.top, fixed.top);
-    assert.equal(bounds.bottom, fixed.bottom);
-  }
 });
 
 

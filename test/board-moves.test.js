@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createFirefox } from "./fakes/firefox.js";
 import { buildBoard } from "../extension/src/board/model.js";
-import { resolveTabTarget, resolveGroupTarget } from "../extension/src/board/targets.js";
+import { resolveTabTarget } from "../extension/src/board/targets.js";
 import {
-  dropTab, dropGroup, bringGroupHere, openTab, closeTabs, closeGroup, renameGroup, recolorGroup,
+  dropTab, bringGroupHere, openTab, closeTabs, closeGroup, renameGroup, recolorGroup,
 } from "../extension/src/board/moves.js";
 
 const W1 = "P1 P2 | 3 [101: 4 5] 6 [102: 7 8] 9";
@@ -202,45 +202,6 @@ for (const [tabId, one, two = W2] of [
   });
 }
 
-for (const [name, groupId, windowId, beforeGroupId, one, two = W2] of [
-  ["forwards before another group", 101, 1, 102, "P1 P2 | 3 6 [101: 4 5] [102: 7 8] 9"],
-  ["backwards before another group", 102, 1, 101, "P1 P2 | 3 [102: 7 8] [101: 4 5] 6 9"],
-  ["to local end", 101, 1, null, "P1 P2 | 3 6 [102: 7 8] 9 [101: 4 5]"],
-  ["to another window before its group", 101, 2, 201, "P1 P2 | 3 6 [102: 7 8] 9", "P11 P12 | 13 [101: 4 5] [201: 14 15] 16 [202: 17 18] 19"],
-  ["to another window end", 101, 2, null, "P1 P2 | 3 6 [102: 7 8] 9", "P11 P12 | 13 [201: 14 15] 16 [202: 17 18] 19 [101: 4 5]"],
-]) {
-  test(`group column moves ${name}`, async () => {
-    const ff = fixture();
-    assert.equal(await dropGroup(ff.browser, groupId, { windowId, beforeGroupId }), true);
-    await layouts(ff, one, two);
-  });
-}
-
-for (const [name, prepare, one, two] of [
-  ["moved out of the target window", api => api.tabGroups.move(201, { windowId: 1, index: 2 }),
-    "P1 P2 | [201: 14 15] 3 6 [102: 7 8] 9", "P11 P12 | 13 16 [202: 17 18] 19 [101: 4 5]"],
-  ["closed after render", api => api.tabs.remove([14, 15]),
-    "P1 P2 | 3 6 [102: 7 8] 9", "P11 P12 | 13 16 [202: 17 18] 19 [101: 4 5]"],
-]) {
-  test(`review minor 3: before group ${name} falls back to the target window end`, async () => {
-    const ff = fixture();
-    await prepare(ff.browser);
-    assert.equal(await dropGroup(ff.browser, 101, { windowId: 2, beforeGroupId: 201 }), true);
-    await layouts(ff, one, two);
-    assert.deepEqual(ff.calls.filter(call => call.api === "tabGroups.move").at(-1).args,
-      [101, { windowId: 2, index: -1 }]);
-  });
-}
-
-test("group column forwards offset uses the dragged group's full size", async () => {
-  const ff = createFirefox({ windows: [{ id: 1 }, { id: 2 }], groups: [101, 102, 103].map(id => ({ id, windowId: 1 })),
-    tabs: [{ id: 1, windowId: 1, groupId: 101 }, { id: 2, windowId: 1, groupId: 101 },
-      { id: 3, windowId: 1, groupId: 101 }, { id: 4, windowId: 1, groupId: 102 },
-      { id: 5, windowId: 1, groupId: 103 }, { id: 6, windowId: 2 }] });
-  assert.equal(await dropGroup(ff.browser, 101, { windowId: 1, beforeGroupId: 103 }), true);
-  await layouts(ff, "| [102: 4] [101: 1 2 3] [103: 5]", "| 6");
-});
-
 test("bring here keeps a group's identity and metadata, appending after the current window's last tab", async () => {
   const ff = fixture();
   await ff.browser.tabGroups.update(201, { title: "Work", color: "red", collapsed: true });
@@ -268,17 +229,6 @@ for (const drop of [
     await layouts(ff);
   });
 }
-for (const [groupId, slot] of [[101, 0], [101, 1], [102, 2], [201, 2], [201, 3], [202, 4]]) {
-  test(`no-op group ${groupId} slot ${slot} makes no API calls`, async () => {
-    const ff = fixture(), target = resolveGroupTarget(await board(ff), groupId, slot, 1);
-    ff.calls.length = 0;
-    assert.equal(target, null);
-    assert.equal(await dropGroup(ff.browser, groupId, target), true);
-    assert.deepEqual(ff.calls, []);
-    await layouts(ff);
-  });
-}
-
 test("a foreign PINNED slot redirects a local first pin to the local end", async () => {
   const ff = fixture(), target = resolveTabTarget(await board(ff), { zone: "pinned", tabId: 1, slot: 3 }, 1);
   assert.deepEqual(target, { kind: "pinned", windowId: 1, beforeTabId: null });
@@ -438,7 +388,6 @@ for (const kind of ["group", "tabs", "pinned", "new-group"]) {
   });
 }
 for (const [name, run] of [
-  ["dropGroup", api => dropGroup(api, 999, { windowId: 1, beforeGroupId: null })],
   ["bringGroupHere", api => bringGroupHere(api, 999, 1)],
   ["openTab", api => openTab(api, { id: 999, windowId: 2, pinned: false }, { id: 9, windowId: 1 }, { close: true })],
   ["closeTabs", api => closeTabs(api, [999])], ["closeGroup", api => closeGroup(api, 999)],

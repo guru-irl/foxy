@@ -1,6 +1,6 @@
 import { test, assert, fixture, dispatchDrag, withPseudoState } from "./harness.js";
 import { buildBoard } from "../../extension/src/board/model.js";
-import { renderBoard } from "../../extension/src/board/render.js";
+import { renderBoard } from "./view.js";
 
 const entries = () => [
   { folderId: "f1", title: "<b>Dev server</b>", color: "red", count: 4, cantReopen: ["about:config", "file:///x"] },
@@ -16,9 +16,9 @@ async function draw({ saved = entries(), missing = [], ui = {}, handlers = {} } 
   });
   await css; await document.fonts.ready;
   const page = document.createElement("main"); page.className = "page";
-  const date = document.createElement("header"); date.className = "clock"; date.textContent = "DATE";
   const root = document.createElement("div"); root.className = "board"; root.style.height = "400px";
-  page.append(date, root); fixture().append(page);
+  page.style.width = "1600px";
+  page.append(root); fixture().append(page);
   const board = buildBoard({ windows: [{ id: 1, type: "normal" }], currentWindowId: 1,
     groups: [{ id: 10, windowId: 1, title: "Open group", color: "blue" }],
     tabs: [{ id: 1, windowId: 1, index: 0, groupId: 10, title: "Member" }], saved, missing });
@@ -30,16 +30,13 @@ const key = (node, value, extra = {}) => node.dispatchEvent(new KeyboardEvent("k
   key: value, bubbles: true, cancelable: true, ...extra,
 }));
 
-// Removing the SAVED branch or inserting it outside the strip breaks these contracts.
-test("SAVED is absent with empty lists and first in the strip with entries", async () => {
+test("SAVED is absent with empty lists and a grid tile with entries", async () => {
   const empty = await draw({ saved: [] });
   assert.equal(empty.page.querySelector(".saved"), null);
   assert.equal(empty.page.querySelector(".banner"), null);
   const { root } = await draw();
-  assert.deepEqual([...root.querySelectorAll(".column")].map(el => el.dataset.zone ?? el.dataset.groupId),
-    ["pinned", "saved", "10", "new-group", "tabs"]);
-  assert.equal(root.querySelector(".strip").firstElementChild.querySelector("h2").textContent, "SAVED");
-  assert.equal(root.firstElementChild.dataset.zone, "pinned");
+  assert.deepEqual([...root.querySelectorAll(".tile")].map(el => el.dataset.kind), ["clock", "pinned", "group", "saved"]);
+  assert.equal(root.querySelector('.tile[data-kind="saved"] h2').textContent, "SAVED");
   assert.equal(root.lastElementChild.dataset.zone, "tabs");
 });
 
@@ -81,7 +78,7 @@ test("malformed saved replies render safe defaults and omit entries without fold
 });
 
 for (const [count, text] of [[1, "1 GROUP DIDN'T COME BACK"], [3, "3 GROUPS DIDN'T COME BACK"]]) {
-  test(`banner reports ${count} missing groups between date and board and routes both actions`, async () => {
+  test(`banner reports ${count} missing groups above grid and rail and routes both actions`, async () => {
     const calls = [];
     const { page, root } = await draw({ missing: entries().slice(0, count), handlers: {
       onRestoreAll: () => calls.push("restore"), onDismissMissing: () => calls.push("dismiss"),
@@ -89,7 +86,7 @@ for (const [count, text] of [[1, "1 GROUP DIDN'T COME BACK"], [3, "3 GROUPS DIDN
     const banner = page.querySelector(".banner");
     assert.ok(banner, "missing groups need a banner");
     assert.equal(banner.getAttribute("role"), "status");
-    assert.equal(banner.previousElementSibling.className, "clock");
+    assert.equal(banner.previousElementSibling, null);
     assert.equal(banner.nextElementSibling, root);
     assert.equal(banner.querySelector(".banner-text").textContent, text);
     assert.equal(banner.querySelector(".banner-restore").textContent, "RESTORE ALL");
@@ -189,16 +186,17 @@ for (const selector of [".row-open", ".saved-delete", ".banner-restore", ".banne
       onConfirmDelete: () => calls.push("confirm"), onRestoreAll: () => calls.push("restore"),
       onDismissMissing: () => calls.push("dismiss"),
     } });
-    page.querySelector(selector).focus();
+    const find = () => selector.startsWith(".banner") ? page.querySelector(selector) : row(root).querySelector(selector);
+    find().focus();
     ui.busy.add(selector.startsWith(".banner") ? "banner" : "f1");
     renderBoard(root, board, ui, handlers);
-    const control = page.querySelector(selector);
+    const control = find();
     assert.equal(document.activeElement, control, "busy controls must keep keyboard focus");
     control.click(); key(control, "Enter"); key(control, " "); key(control, "Delete");
     assert.deepEqual(calls, []);
     ui.busy.clear(); renderBoard(root, board, ui, handlers);
-    assert.equal(document.activeElement, page.querySelector(selector));
-    assert.equal(page.querySelector(selector).getAttribute("aria-disabled"), "false");
+    assert.equal(document.activeElement, find());
+    assert.equal(find().getAttribute("aria-disabled"), "false");
   });
 }
 
@@ -221,7 +219,7 @@ for (const scheme of ["light", "dark"]) {
       assert.equal(style.borderTopWidth, "0px"); assert.equal(style.outlineStyle, "none"); assert.equal(style.boxShadow, "none");
       assert.ok(style.fontFamily.includes("Foxy Sans"));
     }
-    assert.equal(column.offsetWidth, 264);
+    assert.equal(column.offsetWidth, 272);
     for (const el of root.querySelectorAll(".saved-row")) assert.equal(el.offsetHeight, 32);
     assert.equal(getComputedStyle(column.querySelector("h2")).fontStyle, "normal");
     assert.equal(getComputedStyle(root.querySelector(".group-name")).fontStyle, "oblique 10deg");
@@ -231,7 +229,7 @@ for (const scheme of ["light", "dark"]) {
     const unnamed = row(root, "f2").querySelector(".row-label");
     assert.equal(getComputedStyle(unnamed).color, getComputedStyle(banner.querySelector(".banner-text")).color);
     assert.equal(getComputedStyle(row(root).querySelector(".dot")).width, "12px");
-    assert.ok(getComputedStyle(row(root).querySelector(".dot")).boxShadow !== "none");
+    assert.equal(getComputedStyle(row(root).querySelector(".dot")).boxShadow, "none");
     assert.equal(getComputedStyle(row(root).querySelector(".saved-count")).fontVariantNumeric, "tabular-nums");
     assert.equal(getComputedStyle(row(root).querySelector(".cant-reopen")).fontWeight, "700");
     assert.equal(getComputedStyle(row(root, "f3").querySelector(".saved-delete")).color,
@@ -247,16 +245,14 @@ for (const scheme of ["light", "dark"]) {
 }
 
 // Titles share .column-title with ordinary drop headings: SAVED must be excluded explicitly.
-for (const kind of ["tab", "group"]) {
-  test(`${kind} drag rejects every SAVED surface and clears old feedback`, async () => {
+test("tab drag rejects every SAVED surface and clears old feedback", async () => {
     const calls = [];
-    const { root } = await draw({ handlers: { onTabDrop: (...args) => calls.push(args), onGroupDrop: (...args) => calls.push(args) } });
-    const source = root.querySelector(kind === "tab" ? "[data-tab-id]" : ".column-header");
-    const dt = kind === "tab" ? dispatchDrag("dragstart", source).dataTransfer : new DataTransfer();
-    if (kind === "group") dt.setData("application/x-foxy-group", "999");
+    const { root } = await draw({ handlers: { onTabDrop: (...args) => calls.push(args) } });
+    const source = root.querySelector("[data-tab-id]");
+    const dt = dispatchDrag("dragstart", source).dataTransfer;
     try {
       for (const selector of [".saved", ".saved .column-title", ".saved .rows", ".saved-row", ".saved-row .dot"]) {
-        const valid = root.querySelector(kind === "tab" ? '.rows[data-zone="tabs"]' : ".group");
+        const valid = root.querySelector('.rows[data-zone="tabs"]');
         const target = root.querySelector(selector), bounds = target.getBoundingClientRect();
         dispatchDrag("dragover", valid, { dataTransfer: dt, clientX: bounds.right, clientY: bounds.top });
         assert.ok(root.querySelector(".drop-line"), "exercise clearing a previous valid marker");
@@ -267,10 +263,9 @@ for (const kind of ["tab", "group"]) {
       }
       assert.deepEqual(calls, []);
     } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
-  });
-}
+});
 
-test("SAVED never starts a tab or column drag", async () => {
+test("SAVED never starts a tab drag", async () => {
   const calls = [];
   const { root } = await draw({ handlers: { onDragState: value => calls.push(value) } });
   const dt = dispatchDrag("dragstart", row(root)).dataTransfer;
@@ -306,7 +301,7 @@ for (const selector of [".row-open", ".saved-delete"]) {
     renderBoard(root, { ...board, saved: remaining }, ui, handlers);
     assert.equal(document.activeElement, row(root, "f3").querySelector(".row-open"));
     renderBoard(root, { ...board, saved: [] }, ui, handlers);
-    assert.equal(document.activeElement, root.querySelector(".strip"));
+    assert.equal(document.activeElement, root.querySelector(".grid"));
   });
 }
 
@@ -318,7 +313,7 @@ for (const selector of [".banner-restore", ".banner-dismiss"]) {
     assert.equal(document.activeElement, page.querySelector(selector));
     assert.ok(document.activeElement !== original);
     renderBoard(root, { ...board, missing: [] }, {}, {});
-    assert.equal(document.activeElement, root.querySelector(".strip"));
+    assert.equal(document.activeElement, root.querySelector(".grid"));
   });
 }
 

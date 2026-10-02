@@ -1,26 +1,26 @@
-import { formatDate, formatTime, msUntilNextMinute } from "./model.js";
+import { msUntilNextMinute } from "./model.js";
 import { buildBoard } from "./board/model.js";
-import { renderBoard, updateScrollEdges } from "./board/render.js";
-import { resolveTabTarget, resolveGroupTarget } from "./board/targets.js";
+import { renderBoard, updateScrollEdges, updateClock } from "./board/render.js";
+import { resolveTabTarget } from "./board/targets.js";
 import { openTab, closeTabs, closeGroup, bringGroupHere, renameGroup, recolorGroup,
-  dropTab, dropGroup } from "./board/moves.js";
+  dropTab } from "./board/moves.js";
+
+import { buildView } from "./grid/view.js";
+import { loadLayout, saveTiles, pruneTiles, watchStorage } from "./grid/store.js";
+import { loadSettings, cardAlpha } from "./settings/store.js";
+export { renderTime, updateClock } from "./board/render.js";
 
 const root = document.getElementById("board");
-if (root) {
-  startClock(document.getElementById("time"), document.getElementById("date"));
-  createController(root, globalThis.browser).refresh();
-}
+if (root) createController(root, globalThis.browser).refresh();
 
-// Updates on each minute boundary, and again whenever the page becomes visible,
-// because Firefox throttles timers in background tabs.
-function startClock(timeEl, dateEl) {
+// Minute boundaries and visibility changes update the tile without a board read.
+function startClock(root, settings) {
   let timer = 0;
   const tick = () => {
-    const now = new Date();
-    const time = formatTime(now);
-    renderTime(timeEl, time);
-    dateEl.textContent = formatDate(now);
     clearTimeout(timer);
+    if (!root.isConnected) return;
+    const now = new Date();
+    updateClock(root, settings(), now);
     timer = setTimeout(tick, msUntilNextMinute(now));
   };
   document.addEventListener("visibilitychange", () => {
@@ -29,27 +29,23 @@ function startClock(timeEl, dateEl) {
   tick();
 }
 
-// Separate the colon so CSS can centre its ink without moving the digits.
-export function renderTime(timeEl, time) {
-  const hours = document.createElement("span");
-  const colon = document.createElement("span");
-  const minutes = document.createElement("span");
-  hours.textContent = time.slice(0, 2);
-  colon.className = "clock-colon";
-  colon.textContent = ":";
-  minutes.textContent = time.slice(3);
-  timeEl.replaceChildren(hours, colon, minutes);
-  timeEl.dataset.lead = time[0];
-  timeEl.setAttribute("aria-label", time);
-  if (timeEl.localName === "time") timeEl.setAttribute("datetime", time);
-}
-
 /** All board interactions share this state; DnD and editors set it via handlers. */
 export function createController(root, api, ui = { editGroupId: null, dragging: false, editing: false },
   { maxWait = 30000 } = {}) {
   ui.confirmFolderId ??= null;
   ui.busy ??= new Set();
   let board;
+  let view;
+  let gridState;
+  let gridRead;
+  let storageVersion = 0;
+  let loadedVersion = -1;
+  let pendingGrid = false;
+  let pendingView = false;
+  let hasSavedReply = false;
+  let pruned = false;
+  let persistence = Promise.resolve();
+  const pendingTiles = new Map();
   let self;
   let generation = 0;
   let queued = false;
@@ -60,7 +56,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let savedDirty = false;
   let savedDirtyRetry = false;
   let savedGeneration = 0;
-  let savedReply = { saved: [], missing: [], pins: {} };
+  let savedReply = { saved: [], missing: [], pins: {}, folders: {} };
   let snapshot;
   let warnedSaved = false;
   let retryQueued = true;
@@ -77,13 +73,51 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     ++generation;
   }
 
+  // Storage reads share an order independent of tab and bookmark snapshots.
+  // An old read, or one completed during an interaction, cannot apply settings.
+  async function readGrid() {
+    if (gridState && loadedVersion === storageVersion) return true;
+    if (!gridRead) {
+      const version = storageVersion;
+      let failed = false;
+      // Stores log failures and return defaults. Track read failures separately
+      // so those defaults cannot overwrite a layout we have not read.
+      const readingApi = { storage: Object.fromEntries(["sync", "local"].map(area => [area, {
+        get: async (...args) => {
+          try { return await api.storage[area].get(...args); }
+          catch (error) { failed = true; throw error; }
+        },
+      }])) };
+      gridRead = Promise.all([loadLayout(readingApi), loadSettings(readingApi)])
+        .then(([layout, settings]) => ({ layout, ...settings, version, writable: !failed }));
+    }
+    const next = await gridRead;
+    gridRead = null;
+    if (held() || next.version !== storageVersion) {
+      pendingGrid = true;
+      enqueue();
+      return false;
+    }
+    gridState = !next.writable && gridState ? { ...gridState, writable: false } : next;
+    loadedVersion = next.version;
+    pendingGrid = false;
+    return true;
+  }
+
+  async function refreshGrid() {
+    if (await readGrid()) {
+      publish();
+      if (pendingSaved) enqueue();
+    }
+  }
+
   // Saved replies have their own request order: a bookmark-only read must not
   // invalidate an in-flight tab snapshot, nor can an old reply replace a new one.
   async function readSaved(retry = true) {
     if (savedReadsInFlight) { savedDirty = true; savedDirtyRetry ||= retry; return; }
     const mine = ++savedGeneration;
     ++savedReadsInFlight;
-    let reply, timer;
+    let reply, timer, valid = false;
     try {
       const responses = await Promise.race([
         Promise.all([api.runtime.sendMessage({ type: "foxy:saved" }),
@@ -96,6 +130,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       if (!Array.isArray(reply?.saved) || !Array.isArray(reply?.missing)) {
         throw new Error("Background did not return saved and missing arrays");
       }
+      valid = true;
     } catch (error) {
       reply = savedReply;
       if (!warnedSaved) {
@@ -111,6 +146,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
         } else {
           // Saved data is independent of the tab snapshot's generation.
           savedReply = reply;
+          hasSavedReply ||= valid;
           if (snapshot) {
             board = buildBoard({ ...snapshot, ...savedReply });
             publish();
@@ -152,6 +188,8 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
         releaseMissingEdit();
       }
       const mine = ++generation;
+      if (!await readGrid()) { pending = true; return; }
+      if (mine !== generation) return;
       pending = false;
       pendingSaved = false;
       // Do not await the background: startup settling can take up to 20s.
@@ -166,11 +204,11 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       if (mine !== generation) { pending = true; return; }
       const nextSnapshot = { windows, tabs, groups, currentWindowId: current.windowId,
         selfTabId: current.id, selfUrl: location.origin + location.pathname };
-      const nextBoard = buildBoard({ ...nextSnapshot, ...savedReply });
+      const nextBoard = buildBoard({ ...nextSnapshot, ...savedReply, otherWindows: gridState.synced.otherWindows });
       snapshot = nextSnapshot;
       self = current;
       board = nextBoard;
-      // Introduce a newly created column/editor in the final action snapshot.
+      // Introduce a newly created tile/editor in the final action snapshot.
       // Once published, editGroupId holds every subsequent refresh.
       if (requestedEditGroupId != null) {
         ui.editGroupId = board.columns.some(column => column.id === requestedEditGroupId)
@@ -187,15 +225,40 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     } finally { if (reading) --readsInFlight; }
   }
 
-  function publish() {
-    if (!board) return;
+  function publish(save = true) {
+    if (!board || !gridState) return;
+    board = buildBoard({ ...snapshot, ...savedReply, otherWindows: gridState.synced.otherWindows });
+    view = buildView(board, { ...gridState, contentWidth: root.clientWidth,
+      folders: savedReply.folders ?? {}, pending: pendingTiles });
+    pendingView = false;
     // JSON.stringify(Set) is {}, so serialize its folder IDs explicitly.
-    const key = JSON.stringify({ board, ui: { ...ui, busy: [...ui.busy].sort() } });
-    if (key === lastRenderedKey) return;
-    const saved = captureView(root);
-    renderBoard(root, board, ui, handlers);
-    restoreView(root, saved);
-    lastRenderedKey = key;
+    const key = JSON.stringify({ board, view, settings: gridState.synced, device: gridState.device,
+      ui: { ...ui, busy: [...ui.busy].sort() } });
+    if (key !== lastRenderedKey) {
+      const saved = captureView(root);
+      root.style.setProperty("--card-alpha-dark", cardAlpha(gridState.synced.transparency, "dark"));
+      root.style.setProperty("--card-alpha-light", cardAlpha(gridState.synced.transparency, "light"));
+      root.style.setProperty("--row", gridState.device.density === "compact" ? "24px" : "32px");
+      renderBoard(root, board, view, ui, handlers);
+      updateClock(root, gridState.synced);
+      restoreView(root, saved);
+      lastRenderedKey = key;
+    }
+    if (!save || !gridState.writable) return;
+    const fresh = view.newTiles;
+    // Keep the current placement even if a write fails. No retry loop, and a
+    // second publish before storage.onChanged cannot write these tiles twice.
+    if (fresh.length) gridState.layout = [...gridState.layout, ...fresh];
+    const prune = hasSavedReply && !pruned;
+    if (prune) pruned = true;
+    if (fresh.length || prune) {
+      const keep = new Set([...Object.values(savedReply.folders ?? {}),
+        ...board.saved.map(group => group.folderId), ...board.missing.map(group => group.folderId)]);
+      persistence = persistence.then(async () => {
+        await saveTiles(api, fresh);
+        if (prune) await pruneTiles(api, keep);
+      }).catch(() => {}); // The stores log each failed write with the Foxy prefix.
+    }
   }
 
   function schedule(retry = true) {
@@ -215,9 +278,11 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     retryQueued = retry;
     requestAnimationFrame(() => {
       queued = false;
-      if ((held() && !(pending && canCheckEdit())) || (!pending && !pendingSaved)) return;
+      if ((held() && !(pending && canCheckEdit())) || (!pending && !pendingSaved && !pendingGrid && !pendingView)) return;
       if (pending) refresh(retryQueued);
-      else refreshSaved(retryQueued);
+      else if (pendingGrid) refreshGrid();
+      else if (pendingSaved) refreshSaved(retryQueued);
+      else publish(false);
     });
   }
 
@@ -229,7 +294,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       // during an otherwise idle interaction must not cause tab re-read storms.
       if (readsInFlight) pending = true;
       if (savedReadsInFlight) pendingSaved = true;
-    } else if (pending || pendingSaved) enqueue();
+    } else if (pending || pendingSaved || pendingGrid || pendingView) enqueue();
     else if (!held()) publish();
   }
 
@@ -329,13 +394,6 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
         return result;
       });
     },
-    onGroupDrop: (groupId, slot) => {
-      if (!board?.columns.some(column => column.id === groupId)) {
-        console.debug("Foxy: ignored drop of a group not on the board", groupId);
-        return;
-      }
-      return action(() => dropGroup(api, groupId, resolveGroupTarget(board, groupId, slot, self.windowId)));
-    },
     onDragState: dragging => interaction("dragging", dragging),
     onEditState: (editing, groupId, tabId) => {
       if (editing && tabId != null) ui.editTabId = tabId;
@@ -350,6 +408,18 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       interaction("editing", false);
     },
   };
+
+  watchStorage(api, () => {
+    ++storageVersion;
+    pendingGrid = true;
+    enqueue();
+  });
+  window.addEventListener("resize", () => {
+    if (!root.isConnected) return;
+    pendingView = true;
+    enqueue();
+  });
+  startClock(root, () => gridState?.synced);
 
   const onChange = () => schedule();
   const onGroupRemoved = group => {
@@ -391,9 +461,9 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       const reply = await api.runtime.sendMessage({ type: "foxy:reconcile" });
       if (reply?.ok !== true) console.warn("Foxy: background reconcile was not accepted");
     } catch (error) { console.warn("Foxy: could not reconcile on board open", error); }
-    finally { await refresh(); }
+    finally { schedule(); }
   })();
-  return { refresh, schedule, handlers, ui };
+  return { refresh, schedule, handlers, ui, get view() { return view; } };
 }
 
 function rowsKey(list) {
@@ -411,20 +481,20 @@ function captureView(root) {
       focus = { tabId: row.dataset.tabId, className: active.className,
         rowsKey: rowsKey(list), index: [...list.querySelectorAll(".row")].indexOf(row) };
     } else if (active.matches(".rows")) focus = { rowsKey: rowsKey(active) };
-    else if (active.matches(".strip")) focus = { strip: true };
+    else if (active.matches(".grid")) focus = { grid: true };
     else if (group) focus = { groupId: group.dataset.groupId, className: active.className,
       index: [...root.querySelectorAll(".column[data-group-id]")].indexOf(group) };
   }
-  return { focus, left: root.querySelector(".strip")?.scrollLeft ?? 0,
+  return { focus, top: root.querySelector(".grid")?.scrollTop ?? 0,
     tops: new Map([...root.querySelectorAll(".rows")].map(list => [rowsKey(list), list.scrollTop])) };
 }
 
-function restoreView(root, { focus, left, tops }) {
+function restoreView(root, { focus, top, tops }) {
   const editor = root.querySelector(".name-editor");
   if (focus && !editor) {
     let active;
     const list = [...root.querySelectorAll(".rows")].find(list => rowsKey(list) === focus.rowsKey);
-    if (focus.strip) active = root.querySelector(".strip");
+    if (focus.grid) active = root.querySelector(".grid");
     else if (focus.tabId === undefined && focus.rowsKey !== undefined) active = list;
     else {
       const container = focus.tabId !== undefined
@@ -434,19 +504,19 @@ function restoreView(root, { focus, left, tops }) {
         : [...(container?.querySelectorAll("*") ?? [])].find(el => el.className === focus.className);
       if (!container && focus.tabId !== undefined) {
         const rows = [...(list?.querySelectorAll(".row") ?? [])];
-        active = rows[Math.min(focus.index, rows.length - 1)]?.querySelector(".row-open") ?? list ?? root.querySelector(".strip");
+        active = rows[Math.min(focus.index, rows.length - 1)]?.querySelector(".row-open") ?? list ?? root.querySelector(".grid");
       } else if (!container && focus.groupId !== undefined) {
         const columns = [...root.querySelectorAll(".column[data-group-id]")];
         const neighbour = columns[Math.min(focus.index, columns.length - 1)];
         active = [...(neighbour?.querySelectorAll("button, .rows") ?? [])]
-          .find(el => el.className === focus.className) ?? neighbour?.querySelector(".rows") ?? root.querySelector(".strip");
+          .find(el => el.className === focus.className) ?? neighbour?.querySelector(".rows") ?? root.querySelector(".grid");
       }
     }
     active?.focus({ preventScroll: true });
   }
-  root.querySelector(".strip").scrollLeft = left;
+  root.querySelector(".grid").scrollTop = top;
   for (const list of root.querySelectorAll(".rows")) list.scrollTop = tops.get(rowsKey(list)) ?? 0;
-  // A new group's input can be beyond the old horizontal viewport.
+  // A new group's input can be below the old grid viewport.
   editor?.scrollIntoView({ block: "nearest", inline: "nearest" });
   updateScrollEdges(root);
 }

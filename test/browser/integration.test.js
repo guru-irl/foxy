@@ -690,7 +690,7 @@ test("fix r2: first saved read timeout renders tabs without a saved column", asy
       assert.equal(page.querySelector(".banner"), null);
       assert.equal(control.ui.busy.size, 0);
       const reads = messages(ff, "foxy:saved").length;
-      assert.ok(reads <= 2, "timeouts must not create a read loop");
+      assert.ok(reads <= 2, `timeouts must not create a read loop: ${reads} saved reads; ${ff.calls.filter(c => c.api === "windows.getAll").length} tab reads`);
       waiting = false;
       ff.fire("bookmarks.onChanged", "dev", { title: "Recovered" }); await drain(ff);
       assert.equal(messages(ff, "foxy:saved").length, reads + 1, "timeout clears the flight guard for later reads");

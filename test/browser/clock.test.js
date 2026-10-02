@@ -1,93 +1,77 @@
-import { test, assert, fixture } from "./harness.js";
+import { test, assert, fixture, nextFrame } from "./harness.js";
+import { renderBoard } from "./view.js";
+import { DEFAULT_SETTINGS } from "../../extension/src/settings/store.js";
 
-async function clock() {
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.href = "/extension/newtab.css";
+async function clock(w = 3, h = 2) {
+  const link = document.createElement("link"); link.rel = "stylesheet"; link.href = "/extension/newtab.css";
   await new Promise(resolve => { link.onload = resolve; document.head.append(link); });
-  const time = document.createElement("time");
-  time.className = "clock-time";
-  fixture().append(time);
-  const main = await import("../../extension/src/main.js");
-  assert.equal(typeof main.renderTime, "function", "clock renderer must expose an independently positionable colon");
-  return { time, renderTime: main.renderTime };
+  const node = document.createElement("div"); node.className = "board"; node.style.cssText = "width:1600px;height:700px";
+  fixture().append(node);
+  const { updateClock, renderTime } = await import("../../extension/src/main.js");
+  renderBoard(node, { columns: [], pinned: [], tabs: [], saved: [] }, {}, {}, { layout: [{ id: "clock", x: 0, y: 0, w, h }] });
+  await document.fonts.ready; await nextFrame();
+  return { node, time: node.querySelector(".clock-time"), date: node.querySelector(".clock-date"), updateClock, renderTime };
 }
 
-test("clock size reaches the calibrated clamp ends in actual Firefox viewports", async () => {
-  for (const [width, expectedSize] of [[800, 96.8], [1600, 176]]) {
-    const frame = document.createElement("iframe");
-    frame.style.cssText = `width:${width}px;height:300px;border:0`;
-    frame.srcdoc = '<link rel="stylesheet" href="/extension/newtab.css"><time class="clock-time">0124</time>';
-    await new Promise(resolve => { frame.onload = resolve; fixture().append(frame); });
-    try {
-      await frame.contentDocument.fonts.load(`600 ${expectedSize}px "Foxy Serif"`);
-      const time = frame.contentDocument.querySelector("time");
-      assert.ok(Math.abs(parseFloat(frame.contentWindow.getComputedStyle(time).fontSize) - expectedSize) < 0.1);
-      const widths = [...time.textContent].map((_, i) => {
-        const range = frame.contentDocument.createRange();
-        range.setStart(time.firstChild, i); range.setEnd(time.firstChild, i + 1);
-        return range.getBoundingClientRect().width;
-      });
-      assert.ok(Math.max(...widths) - Math.min(...widths) < 0.05, "lining digits need equal tabular advances");
-    } finally { frame.remove(); }
-  }
-});
+for (const [w, h] of [[3, 2], [8, 4]]) {
+  test(`clock tile scales to ${w}x${h} cells and time/date stay within its content`, async () => {
+    const { node, time, date, updateClock } = await clock(w, h);
+    for (const format of ["24", "12"]) {
+      for (const hour of [0, 1, 12, 23]) {
+        updateClock(node, { ...DEFAULT_SETTINGS, timeFormat: format }, new Date(2026, 8, 30, hour, 59));
+        const tile = time.closest(".tile"), bounds = tile.getBoundingClientRect();
+        const range = document.createRange(); range.selectNodeContents(time);
+        const text = range.getBoundingClientRect();
+        assert.ok(text.left >= bounds.left && text.right <= bounds.right, `time must fit: ${time.textContent}`);
+        assert.ok(text.bottom <= bounds.bottom);
+        assert.ok(date.getBoundingClientRect().bottom <= bounds.bottom);
+        assert.ok(parseFloat(getComputedStyle(time).fontSize) <= tile.clientHeight * 0.7);
+        assert.ok(parseFloat(getComputedStyle(time).fontSize) > 40, "time must scale, not remain a small fixed label");
+      }
+    }
+    assert.equal(getComputedStyle(time.closest(".tile")).containerType, "size");
+  });
+}
 
-test("clock updates preserve the formatted time while isolating its centred colon", async () => {
+test("clock updates retain the formatted time and isolate its colon", async () => {
   const { time, renderTime } = await clock();
-  for (const value of ["12:24", "14:54", "02:04", "23:59"]) {
+  for (const value of ["12:24", "14:54", "02:04", "23:59", "1:05 PM", "12:05 AM"]) {
     renderTime(time, value);
     assert.equal(time.textContent, value);
     assert.equal(time.dataset.lead, value[0]);
-    assert.deepEqual([...time.children].map(child => child.textContent), [value.slice(0, 2), ":", value.slice(3)]);
-    assert.equal(time.querySelectorAll(".clock-colon").length, 1, "ticks must not accumulate colons");
-  }
-});
-
-test("clock exposes each formatted tick as its accessible label and time value", async () => {
-  const { time, renderTime } = await clock();
-  for (const value of ["15:27", "00:00", "23:59"]) {
-    renderTime(time, value);
+    const [hours, minutes] = value.split(":");
+    assert.deepEqual([...time.children].map(child => child.textContent), [hours, ":", minutes]);
+    assert.equal(time.querySelectorAll(".clock-colon").length, 1);
     assert.equal(time.getAttribute("aria-label"), value);
-    assert.equal(time.getAttribute("datetime"), value);
   }
-  const label = document.createElement("div");
-  renderTime(label, "15:27");
-  assert.equal(label.getAttribute("aria-label"), "15:27");
-  assert.equal(label.hasAttribute("datetime"), false, "datetime belongs only on a time element");
 });
 
-test("clock digits stay on one line even when the container is narrower than the time", async () => {
-  const { time, renderTime } = await clock();
-  time.style.width = "80px";
-  time.style.fontSize = "96.8px";
-  renderTime(time, "15:27");
-  await document.fonts.load('600 96.8px "Foxy Serif"');
-  const tops = [time.firstElementChild, time.lastElementChild].map(child => {
-    const range = document.createRange(); range.selectNodeContents(child);
-    return range.getBoundingClientRect().top;
-  });
-  assert.equal(tops[0], tops[1], "hours and minutes must share a line");
-  assert.equal(getComputedStyle(time).whiteSpace, "nowrap");
+test("clock settings show 13:05 or 1:05 PM, an ISO time value, and an optional Sans date", async () => {
+  const { node, time, date, updateClock } = await clock();
+  const now = new Date(2026, 9, 3, 13, 5);
+  updateClock(node, DEFAULT_SETTINGS, now);
+  assert.equal(time.textContent, "13:05"); assert.equal(time.getAttribute("datetime"), "13:05");
+  assert.equal(date.textContent, "SATURDAY, 3 OCTOBER"); assert.equal(date.hidden, false);
+  assert.ok(getComputedStyle(date).fontFamily.includes("Foxy Sans"));
+  updateClock(node, { ...DEFAULT_SETTINGS, timeFormat: "12", showDate: false }, now);
+  assert.equal(time.textContent, "1:05 PM"); assert.equal(time.getAttribute("datetime"), "13:05"); assert.equal(date.hidden, true);
+  for (const [hour, text] of [[0, "12:05 AM"], [12, "12:05 PM"]]) {
+    updateClock(node, { ...DEFAULT_SETTINGS, timeFormat: "12" }, new Date(2026, 9, 3, hour, 5)); assert.equal(time.textContent, text);
+  }
 });
 
-test("clock uses bundled semibold upright lining tabular figures and an independently raised colon", async () => {
-  const { time, renderTime } = await clock();
-  renderTime(time, "12:24");
-  await document.fonts.load('600 176px "Foxy Serif"');
-  assert.ok(document.fonts.check('600 176px "Foxy Serif"'));
+test("clock uses bundled bold upright lining tabular figures and the raised colon", async () => {
+  const { time, renderTime } = await clock(); renderTime(time, "12:24");
   const style = getComputedStyle(time);
-  assert.equal(style.fontFamily, '"Foxy Serif", serif');
-  assert.equal(style.fontWeight, "600");
-  assert.equal(style.fontStyle, "normal");
-  assert.equal(style.fontVariantNumeric, "lining-nums tabular-nums");
+  assert.equal(style.fontFamily, '"Foxy Serif", serif'); assert.equal(style.fontWeight, "700");
+  assert.equal(style.fontStyle, "normal"); assert.equal(style.fontVariantNumeric, "lining-nums tabular-nums");
+  assert.equal(style.whiteSpace, "nowrap");
   const colon = getComputedStyle(time.querySelector(".clock-colon"));
-  assert.equal(colon.display, "inline-block");
-  assert.equal(colon.textIndent, "0px", "the lead-digit correction must not distort the colon slot");
-  for (const size of [96.8, 176]) {
-    time.style.fontSize = `${size}px`;
-    const shift = new DOMMatrix(getComputedStyle(time.querySelector(".clock-colon")).transform);
-    assert.ok(shift.m41 >= 0.35 && shift.m41 <= 0.8, "equal colon ink bearings need the measured subpixel rightward correction");
-    assert.ok(Math.abs(shift.m42 + size * 0.134) < 0.1, "colon ink must keep its measured digit-midpoint correction");
-  }
+  assert.equal(colon.display, "inline-block"); assert.equal(colon.textIndent, "0px");
+  const shift = new DOMMatrix(colon.transform), size = parseFloat(style.fontSize);
+  assert.ok(Math.abs(shift.m42 + size * 0.134) < 0.1);
+  const range = document.createRange(); const widths = [];
+  time.textContent = "0124";
+  for (let i = 0; i < 4; i++) { range.setStart(time.firstChild, i); range.setEnd(time.firstChild, i + 1); widths.push(range.getBoundingClientRect().width); }
+  assert.ok(Math.max(...widths) - Math.min(...widths) < 0.05);
 });

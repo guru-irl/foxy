@@ -128,24 +128,6 @@ async function dropPinned(api, tab, target) {
   return true;
 }
 
-/** Execute a group column target. Null means a resolver-detected no-op. */
-export async function dropGroup(api, groupId, target) {
-  if (target == null) return true;
-  return attempt("could not drop group", async () => {
-    let index = -1;
-    if (target.beforeGroupId != null) {
-      const group = await api.tabGroups.get(groupId);
-      const members = await orderedTabs(api, { groupId });
-      const first = (await orderedTabs(api, { groupId: target.beforeGroupId }))[0];
-      if (first?.windowId === target.windowId) {
-        const forward = group.windowId === first.windowId && members[0].index < first.index;
-        index = first.index - (forward ? members.length : 0);
-      }
-    }
-    await api.tabGroups.move(groupId, { windowId: target.windowId, index });
-  });
-}
-
 export async function bringGroupHere(api, groupId, windowId) {
   return attempt("could not bring group here", () => api.tabGroups.move(groupId, { windowId, index: -1 }));
 }

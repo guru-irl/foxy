@@ -30,10 +30,9 @@ async function draw(set = setup(), width = 1600) {
   const ff = createFirefox(set), root = await makeRoot(width);
   const board = buildBoard({ windows: await ff.browser.windows.getAll(), tabs: await ff.browser.tabs.query({}),
     groups: await ff.browser.tabGroups.query({}), currentWindowId: 1, selfTabId: 99 });
-  const calls = { tabs: [], groups: [], states: [], opened: [] };
-  const handlers = { onTabDrop: (...args) => calls.tabs.push(args), onGroupDrop: (...args) => calls.groups.push(args),
-    onDragState: value => calls.states.push(value), onOpen: row => calls.opened.push(row.id) };
-  const { renderBoard } = await import("../../extension/src/board/render.js");
+  const calls = { tabs: [], states: [], opened: [] };
+  const handlers = { onTabDrop: (...args) => calls.tabs.push(args), onDragState: value => calls.states.push(value), onOpen: row => calls.opened.push(row.id) };
+  const { renderBoard } = await import("./view.js");
   renderBoard(root, board, {}, handlers);
   return { root, board, calls, handlers, renderBoard };
 }
@@ -101,7 +100,7 @@ for (const [id, label] of [[99, "self"], [55, "other Foxy-page"], [123456, "unkn
     console.debug = (...args) => messages.push(args);
     try {
       for (const selector of ['.rows[data-zone="pinned"]', '.rows[data-zone="tabs"]',
-        '.rows[data-group-id="101"]', '.new-group']) {
+        '.rows[data-group-id="101"]']) {
         const target = root.querySelector(selector), dt = new DataTransfer();
         dt.setData(TAB, String(id));
         ff.calls.length = 0;
@@ -109,32 +108,11 @@ for (const [id, label] of [[99, "self"], [55, "other Foxy-page"], [123456, "unkn
         await flush(ff);
         assert.deepEqual(ff.calls, [], "a non-board tab must not reach any API, including refresh");
       }
-      assert.equal(messages.length, 4);
+      assert.equal(messages.length, 3);
       assert.ok(messages.every(args => args[0].startsWith("Foxy:")));
     } finally { console.debug = debug; }
   });
 }
-for (const [id, label] of [[301, "excluded"], [123456, "unknown"]]) {
-  test(`foreign ${label} group payload is ignored without API calls`, async () => {
-    const set = setup();
-    set.groups.push({ id: 301, windowId: 1, title: "Excluded" });
-    set.tabs.push({ id: 55, windowId: 1, groupId: 301, url: location.origin + location.pathname + "?foreign" });
-    const { root, ff } = await controller(set);
-    const target = root.querySelector('.column[data-group-id="101"]'), dt = new DataTransfer();
-    dt.setData(GROUP, String(id));
-    const messages = [], debug = console.debug;
-    console.debug = (...args) => messages.push(args);
-    try {
-      ff.calls.length = 0;
-      dispatchDrag("drop", target, { dataTransfer: dt, ...point(target, 0, 0.5) });
-      await flush(ff);
-      assert.deepEqual(ff.calls, [], "a non-board group must not reach any API, including refresh");
-      assert.equal(messages.length, 1);
-      assert.ok(messages[0][0].startsWith("Foxy:"));
-    } finally { console.debug = debug; }
-  });
-}
-
 // Wrong midpoint axis/slot, a layout-affecting marker, or an unreadable-data
 // branch fails these assertions on actual DragEvents and Firefox geometry.
 test("tab drag uses types during dragover and places one neutral 2px line between rows", async () => {
@@ -243,19 +221,6 @@ for (const zone of ["pinned", "tabs"]) {
     } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
   });
 }
-test("new group is a fill-only tab target and emits its payload", async () => {
-  const { root, calls } = await draw();
-  const source = tab(root), dt = start(source), target = root.querySelector(".new-group");
-  try {
-    const opts = { dataTransfer: dt, ...point(target) };
-    assert.ok(dispatchDrag("dragover", target.querySelector(".action"), opts).defaultPrevented);
-    assert.ok(target.classList.contains("drop-target"));
-    assert.equal(root.querySelector(".drop-line"), null);
-    dispatchDrag("drop", target, opts);
-    assert.deepEqual(calls.tabs, [[15, { zone: "new-group", slot: 0, tabId: 15 }]]);
-  } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
-});
-
 for (const [selector, drop] of [
   ['.column[data-group-id="101"] .group-name', { zone: "group", groupId: 101, slot: 0, tabId: 15 }],
   ['.column[data-group-id="201"] .other-window', { zone: "group", groupId: 201, slot: 0, tabId: 15 }],
@@ -280,39 +245,6 @@ for (const [selector, drop] of [
   });
 }
 
-test("group header drag computes horizontal column slot and a vertical line", async () => {
-  const { root, calls } = await draw();
-  const source = header(root), dt = start(source), strip = root.querySelector(".strip");
-  try {
-    assert.equal(dt.getData(GROUP), "201"); assert.equal(getComputedStyle(source).opacity, "0.4");
-    const first = strip.querySelector(".group"), second = first.nextElementSibling;
-    const coords = point(first, 1, 0.5);
-    assert.ok(dispatchDrag("dragover", first.querySelector(".rows"), { dataTransfer: dt, ...coords }).defaultPrevented);
-    const line = root.querySelector(".drop-line");
-    assert.ok(line); assert.equal(line.getBoundingClientRect().width, 2);
-    assert.ok(line.getBoundingClientRect().left >= first.getBoundingClientRect().right - 1);
-    assert.ok(line.getBoundingClientRect().right <= second.getBoundingClientRect().left + 1);
-    dispatchDrag("drop", strip, { dataTransfer: dt, ...coords });
-    assert.deepEqual(calls.groups, [[201, 1]]);
-  } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
-  assert.deepEqual(calls.states, [true, false]); clean(root);
-});
-for (const selector of ['.fixed[data-zone="pinned"] .rows', '.fixed[data-zone="tabs"] .rows', ".new-group"]) {
-  test(`group drag rejects ${selector} and clears previous feedback`, async () => {
-    const { root, calls } = await draw();
-    const source = header(root), dt = start(source), strip = root.querySelector(".strip");
-    try {
-      dispatchDrag("dragover", strip.querySelector(".group"), { dataTransfer: dt, ...point(strip.querySelector(".group")) });
-      assert.ok(root.querySelector(".drop-line"));
-      const target = root.querySelector(selector);
-      assert.equal(dispatchDrag("dragover", target, { dataTransfer: dt, ...point(target) }).defaultPrevented, false);
-      assert.equal(dt.dropEffect, "none"); assert.equal(root.querySelector(".drop-line"), null);
-      assert.equal(root.querySelector(".drop-target"), null);
-      dispatchDrag("drop", target, { dataTransfer: dt, ...point(target) });
-      assert.deepEqual(calls.groups, []);
-    } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
-  });
-}
 test("leaving the board and cancelled dragend clear feedback without opening a row", async () => {
   const { root, calls } = await draw();
   const source = tab(root), dt = start(source), target = root.querySelector('.rows[data-group-id="101"]');
@@ -339,10 +271,10 @@ test("delegation is attached once and uses the newest render handlers", async ()
   const { root, board, renderBoard, calls } = await draw();
   const latest = [];
   renderBoard(root, board, {}, { onTabDrop: (...args) => latest.push(args), onDragState: v => latest.push(v) });
-  const source = tab(root), dt = start(source), target = root.querySelector(".new-group");
+  const source = tab(root), dt = start(source), target = root.querySelector('.column[data-group-id="101"] .column-header');
   dispatchDrag("drop", target, { dataTransfer: dt, ...point(target) });
   dispatchDrag("dragend", source, { dataTransfer: dt });
-  assert.deepEqual(latest, [true, [15, { zone: "new-group", slot: 0, tabId: 15 }], false]);
+  assert.deepEqual(latest, [true, [15, { zone: "group", groupId: 101, slot: 0, tabId: 15 }], false]);
   assert.deepEqual(calls.states, []); assert.deepEqual(calls.tabs, []);
 });
 test("unknown drag types and malformed IDs cannot trigger a move", async () => {
@@ -356,47 +288,6 @@ test("unknown drag types and malformed IDs cannot trigger a move", async () => {
     "a typed valid zone is accepted even when the eventual payload is malformed");
   dispatchDrag("drop", target, { dataTransfer: dt, ...point(target) });
   assert.deepEqual(calls.tabs, []); clean(root);
-});
-
-for (const kind of ["tab", "group"]) {
-  test(`${kind} drag continuously auto-scrolls both strip edges and stops at dragend`, async () => {
-    const { root } = await draw(setup(), 1000);
-    const source = kind === "tab" ? tab(root) : header(root), dt = start(source), strip = root.querySelector(".strip");
-    try {
-      const r = strip.getBoundingClientRect();
-      const opts = { dataTransfer: dt, clientX: r.right - 4, clientY: r.top + 60 };
-      dispatchDrag("dragover", strip, opts);
-      for (let i = 0; i < 6; i++) await nextFrame();
-      assert.ok(strip.scrollLeft > 0, "an edge hover must scroll without repeated dragovers");
-      const right = strip.scrollLeft;
-      dispatchDrag("dragover", strip, { ...opts, clientX: r.left + 4 });
-      for (let i = 0; i < 4; i++) await nextFrame();
-      assert.ok(strip.scrollLeft < right, "left-edge hover reverses scrolling");
-      dispatchDrag("dragover", strip, opts);
-      // Bounded animation frames exercise continuous scrolling all the way to
-      // the off-screen new-group card, without fresh dragover events.
-      for (let i = 0; i < 80; i++) await nextFrame();
-      assert.equal(strip.scrollLeft, strip.scrollWidth - strip.clientWidth);
-      const create = strip.querySelector(".new-group").getBoundingClientRect();
-      assert.ok(create.right <= strip.getBoundingClientRect().right + 1, "new group must be reachable");
-    } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
-    const stopped = strip.scrollLeft;
-    for (let i = 0; i < 3; i++) await nextFrame();
-    assert.equal(strip.scrollLeft, stopped); clean(root);
-  });
-}
-test("classic overflowing strip scrollbar never shortens group columns relative to fixed columns", async () => {
-  const { root } = await draw(setup(), 1000);
-  await nextFrame();
-  const strip = root.querySelector(".strip"), fixed = root.querySelector(".fixed").getBoundingClientRect();
-  assert.ok(strip.scrollWidth > strip.clientWidth);
-  assert.ok(strip.offsetHeight > strip.clientHeight, "runner must exercise classic scrollbars");
-  for (const col of root.querySelectorAll(".column")) {
-    assert.equal(col.getBoundingClientRect().height, fixed.height);
-    assert.equal(col.getBoundingClientRect().bottom, fixed.bottom);
-  }
-  root.style.width = "2400px"; await nextFrame(); await nextFrame();
-  for (const col of root.querySelectorAll(".column")) assert.equal(col.offsetHeight, root.querySelector(".fixed").offsetHeight);
 });
 
 test("real drag events hold controller updates and release exactly one changed render", async () => {
@@ -463,18 +354,6 @@ for (const id of [11, 12, 15, 24]) {
     });
   }
 }
-for (const id of [101, 102]) {
-  for (const edge of [0, 1]) {
-    test(`group ${id} has no insertion line at its adjacent no-op slot (edge ${edge})`, async () => {
-      const { root } = await draw();
-      const column = root.querySelector(`.column[data-group-id="${id}"]`), source = column.querySelector(".column-header"), dt = start(source);
-      try {
-        assert.ok(dispatchDrag("dragover", column, { dataTransfer: dt, ...point(column, edge, 0.5) }).defaultPrevented);
-        assert.equal(root.querySelector(".drop-line"), null, "a no-op group slot must not show an insertion line");
-      } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
-    });
-  }
-}
 for (const id of [21, 23]) {
   test(`remote tab ${id} keeps its line when the adjacent boundary actually moves it here`, async () => {
     const { root } = await draw();
@@ -488,21 +367,18 @@ for (const id of [21, 23]) {
 
 // Supplementary integration checks on the already implemented resolver/moves
 // contract: a wrong payload from DnD would change these real fake layouts.
-for (const kind of ["tab", "group"]) {
-  test(`${kind} dropped beside itself makes no move API calls through DOM delegation`, async () => {
+test("tab dropped beside itself makes no move API calls through DOM delegation", async () => {
     const { root, ff } = await controller();
-    const source = kind === "tab" ? root.querySelector('[data-tab-id="12"]')
-      : root.querySelector('.column[data-group-id="101"] .column-header');
+    const source = root.querySelector('[data-tab-id="12"]');
     const dt = start(source);
-    const target = kind === "tab" ? source.closest(".rows") : source.closest(".group");
+    const target = source.closest(".rows");
     ff.calls.length = 0;
-    dispatchDrag("drop", target, { dataTransfer: dt, ...point(kind === "tab" ? source : target, 0, 0) });
+    dispatchDrag("drop", target, { dataTransfer: dt, ...point(source, 0, 0) });
     dispatchDrag("dragend", source, { dataTransfer: dt });
     await flush(ff);
     assert.equal(ff.calls.some(call => ["tabs.move", "tabs.group", "tabs.ungroup", "tabs.update", "tabGroups.move"].includes(call.api)), false);
     assert.equal(ff.layout(1), "P11 | [101: 12 13] [102: 14] 15 99");
-  });
-}
+});
 for (const [zone, one, two] of [
   ["tabs", "P11 | [101: 12 13] [102: 14] 15 99 22", "P21 | 23"],
   ["pinned", "P11 P22 | [101: 12 13] [102: 14] 15 99", "P21 | 23"],
@@ -556,17 +432,15 @@ test("a scrolled row list places its marker in scroll-content coordinates", asyn
 });
 
 // SAVED headings look like ordinary drop headings but are never drop zones.
-for (const kind of ["tab", "group"]) {
-  test(`${kind} drag over SAVED has no feedback and drop calls no handler`, async () => {
+test("tab drag over SAVED has no feedback and drop calls no handler", async () => {
     const { root, board, calls, handlers, renderBoard } = await draw();
     renderBoard(root, { ...board, saved: [{ folderId: "f1", title: "Saved", color: "grey", count: 1, cantReopen: [] }] }, {}, handlers);
-    const source = kind === "tab" ? tab(root) : header(root);
+    const source = tab(root);
     const dt = start(source);
     try {
       for (const selector of [".saved", ".saved .column-title", ".saved .rows", ".saved-row .row-open"]) {
         const target = root.querySelector(selector);
-        const valid = root.querySelector(kind === "tab" ? '.rows[data-zone="pinned"]' : ".strip");
-        // The start edge is not adjacent to the remote source group's slot.
+        const valid = root.querySelector('.rows[data-zone="pinned"]');
         dispatchDrag("dragover", valid, { dataTransfer: dt, ...point(valid, 0.5, 0) });
         assert.ok(root.querySelector(".drop-line"));
         const event = dispatchDrag("dragover", target, { dataTransfer: dt, ...point(target) });
@@ -574,10 +448,9 @@ for (const kind of ["tab", "group"]) {
         assert.equal(root.querySelector(".drop-line, .drop-target"), null);
         dispatchDrag("drop", target, { dataTransfer: dt, ...point(target) });
       }
-      assert.deepEqual(calls.tabs, []); assert.deepEqual(calls.groups, []);
+      assert.deepEqual(calls.tabs, []);
     } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
-  });
-}
+});
 
 
 // Legacy tab-board tests should not exercise the absent saved-background error path.
