@@ -119,10 +119,19 @@ preset: S 2, M 3, L 4, XL 5.
 - A new group created by a drop on empty cells: the page remembers the target
   rectangle for that group id and writes `tile:group:<folderId>` when the
   mapping arrives (within the page's lifetime).
-- Pruning: after the board loads, keys `tile:group:<id>` whose folder is
-  neither open (in `folders`) nor saved (in `saved` or `missing`) are
-  removed. A closed group keeps its tile key, so reopening returns it to
-  its place.
+- Pruning: tile layouts and bookmark folders sync separately and in any
+  order, so a tile key can arrive before its folder. Keys are therefore not
+  pruned just because their folder is unknown. A tile key is removed when
+  its saved group is deleted from the board (with the folder). On load,
+  only when there are more than 400 `tile:` keys, keys `tile:group:<id>`
+  whose folder is neither open (in `folders`) nor saved (in `saved` or
+  `missing`) are removed. A closed group keeps its tile key, so reopening
+  returns it to its place.
+- First paint: the grid waits for the first `foxy:saved` reply (up to
+  500 ms) so groups appear at their saved places. New tiles are written
+  only after a `foxy:saved` reply has arrived. A new tile is saved at its
+  full default size, even when the window is too narrow to show it; the
+  display caps it.
 - Invalid stored values (wrong types, negative or non-integer cells) are
   ignored and the tile is placed as new.
 
