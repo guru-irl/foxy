@@ -216,10 +216,11 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     const tab = await api.tabs.get(tabId);
     if (await isShown(tab)) { defer(entry.folderId); return; }
     const updated = await api.tabs.update(tabId, { url: node.url });
+    // A named pin's resulting label can still be the name, not a page title.
+    // Retain a known page title; a URL-only fallback follows the new URL.
+    if (decodePinTitle(node.title) === null) entry.title = updated.title ?? "";
+    else if (entry.title === entry.url) entry.title = node.url;
     entry.url = node.url;
-    // There is no tabs.update({title}) API. Record the resulting tab title so
-    // outbound's complete/title branch does not echo an immediate title write.
-    entry.title = updated.title ?? "";
     getState().quietUntil[tabId] = now() + quietMs;
   }
 

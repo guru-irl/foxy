@@ -165,6 +165,32 @@ test("a named pin URL update preserves the page-title fallback when access is re
   assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, "Page");
 });
 
+for (const knownPageTitle of [true, false]) {
+  test(`inbound named pin navigation preserves ${knownPageTitle ? "the last page title" : "a new URL fallback"} before revoked unname`, async () => {
+    const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"],
+      ...(!knownPageTitle ? { tabs: [{ id: 1, windowId: 1, url: "about:home", active: true }] } : {}) });
+    const [pin] = await ff.browser.tabs.query({ pinned: true });
+    const get = ff.browser.tabs.get, update = ff.browser.tabs.update;
+    // Firefox can keep showing the keeper's name while tabs.update navigates.
+    ff.browser.tabs.get = async id => ({ ...await get(id), ...(id === pin.id ? { title: "Work" } : {}) });
+    ff.browser.tabs.update = async (id, props) => ({ ...await update(id, props), ...(id === pin.id ? { title: "Work" } : {}) });
+    await ff.browser.bookmarks.update("pin", { url: "https://example.com/b" });
+    await drain(ff, sync);
+    const want = knownPageTitle ? "Page" : "https://example.com/b";
+    assert.equal((await ff.browser.tabs.get(pin.id)).url, "https://example.com/b");
+    assert.equal((await loadState(ff.browser)).tabs[pin.id].title, want);
+    await ff.browser.permissions.remove({ origins: ["https://example.com/*"] });
+    ff.calls.length = 0;
+    assert.deepEqual(await sync.onMessage({ type: "foxy:rename-pin", tabId: pin.id, name: null }), { ok: true });
+    assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, want);
+    await sync.handlers["tabs.onUpdated"](pin.id, { mutedInfo: { muted: true } });
+    await sync.handlers["tabs.onMoved"](pin.id, { windowId: 1, fromIndex: 0, toIndex: 0 });
+    await drain(ff, sync);
+    assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, want);
+    assert.equal(ff.calls.some(c => ["tabs.create", "tabs.update", "scripting.executeScript"].includes(c.api)), false);
+  });
+}
+
 test("repinning before delayed removal reapplies the retained bookmark name", async () => {
   const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
   await ff.browser.tabs.update(2, { pinned: false });
