@@ -56,6 +56,11 @@ for (const tab of [{ discarded: true }, { status: "loading" }, { url: "about:con
   });
 }
 
+test("named non-HTTP pins have no requestable permission state", async () => {
+  const { names } = await fixture({ tab: { url: "about:config" } });
+  assert.deepEqual(await names.pins(), { pins: { 1: { name: "Work", origin: null, allowed: null } } });
+});
+
 test("bookmark unname and local unpin both restore an applied title keeper", async () => {
   const { names, browser, state, calls } = await fixture({ origins: ["https://example.com/*"] });
   await names.apply(1);

@@ -417,7 +417,7 @@ function tabRow(root, tab, handlers) {
       if (event.key !== "F2" || event.isComposing || event.target.matches("input")) return;
       event.preventDefault(); event.stopPropagation(); start();
     });
-    if (tab.name && tab.allowed === false) {
+    if (tab.name && tab.origin && tab.allowed === false) {
       const allow = button("pin-allow", `Allow pin name on this site: ${tab.name}`, "ALLOW");
       allow.addEventListener("click", event => {
         event.stopPropagation();

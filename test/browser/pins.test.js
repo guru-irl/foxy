@@ -126,6 +126,16 @@ for (const ending of ["Escape", "empty", "blur", "denied"]) {
   });
 }
 
+test("named pins without an origin never offer ALLOW", async () => {
+  const ff = createFirefox(setup()), node = await root();
+  const board = buildBoard({ windows: await ff.browser.windows.getAll(), tabs: await ff.browser.tabs.query({}),
+    groups: await ff.browser.tabGroups.query({}), currentWindowId: 1, selfTabId: 99,
+    pins: { 21: { name: "Settings", origin: null, allowed: false } } });
+  renderBoard(node, board, {}, {});
+  assert.equal(row(node, 21).querySelector(".pin-allow"), null);
+  assert.equal(row(node, 21).querySelector(".row-label").textContent, "Settings");
+});
+
 test("ALLOW requests the remote pin origin in its click handler, updates access, and never opens or renames the tab", async () => {
   const { ff, node } = await controller();
   const allow = row(node, 21).querySelector(".pin-allow");

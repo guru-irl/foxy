@@ -92,7 +92,7 @@ export function createNames({ api, getState, save }) {
         const name = await nameOf(entry);
         if (name === null) continue;
         const origin = pinOrigin(tab.url);
-        pins[id] = { name, origin, allowed: await allowed(origin) };
+        pins[id] = { name, origin, allowed: origin ? await allowed(origin) : null };
       } catch (error) { warn(error); }
     }
     return { pins };
