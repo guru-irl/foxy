@@ -117,6 +117,17 @@ test("renaming an already displayed name keeps the last synced page title for fa
   assert.equal((await loadState(ff.browser)).tabs[2].title, "Page");
 });
 
+test("a named pin URL update preserves the page-title fallback when access is revoked", async () => {
+  const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
+  const get = ff.browser.tabs.get;
+  await ff.browser.tabs.update(2, { url: "https://example.com/b" });
+  ff.browser.tabs.get = async id => ({ ...await get(id), ...(id === 2 ? { title: "Work" } : {}) });
+  await drain(ff, sync);
+  await ff.browser.permissions.remove({ origins: ["https://example.com/*"] });
+  await sync.onMessage({ type: "foxy:rename-pin", tabId: 2, name: null });
+  assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, "Page");
+});
+
 test("removing a board name restores the keeper and resumes ordinary outbound title sync", async () => {
   const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
   assert.deepEqual(await sync.onMessage({ type: "foxy:rename-pin", tabId: 2, name: null }), { ok: true });

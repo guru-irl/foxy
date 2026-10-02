@@ -173,7 +173,7 @@ export function createOutbound({
           named ? { url: tab.url } : { url: tab.url, title }));
       }
       entry.url = tab.url;
-      entry.title = title;
+      if (!named) entry.title = title;
       await save();
     } else if (!named && tab.status === "complete" && tab.url === entry.url && title !== entry.title) {
       if (bookmark.title !== title) await bookmarkCall([entry.bookmarkId], () => api.bookmarks.update(entry.bookmarkId, { title }));
