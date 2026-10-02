@@ -113,15 +113,19 @@ for (const ending of ["Escape", "empty", "blur", "denied"]) {
     row(node, 21).querySelector(".row-rename").click();
     const input = row(node, 21).querySelector(".name-editor");
     assert.ok(input); input.value = ending === "empty" ? "  " : "Renamed"; ff.calls.length = 0;
-    ff.withUserInput(() => {
-      if (ending === "blur") input.blur(); else key(input, ending === "Escape" ? "Escape" : "Enter");
-    });
+    if (ending === "blur") input.dispatchEvent(new FocusEvent("blur"));
+    else ff.withUserInput(() => key(input, ending === "Escape" ? "Escape" : "Enter"));
     input.dispatchEvent(new FocusEvent("blur")); key(input, "Enter"); await flush(ff);
     const sent = ff.calls.filter(c => c.api === "runtime.sendMessage" && c.args[0].type === "foxy:rename-pin");
     assert.equal(sent.length, ending === "Escape" ? 0 : 1);
     if (ending !== "Escape") assert.equal(sent[0].args[0].name, ending === "empty" ? null : "Renamed");
     else assert.equal(ff.calls.filter(c => c.api === "permissions.request").length, 0);
     assert.equal(row(node, 21).draggable, true);
+    if (ending === "blur") {
+      assert.equal(await ff.browser.permissions.contains({ origins: ["https://remote.com/*"] }), false,
+        "blur outside user input must refuse site access while still saving the name");
+      assert.equal(row(node, 21).querySelector(".row-label").textContent, "Renamed");
+    }
     if (ending === "denied") assert.ok(row(node, 21).querySelector(".pin-allow"));
   });
 }
