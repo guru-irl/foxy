@@ -568,15 +568,15 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     },
   };
 
-  function buildGridView(options) {
+  function buildGridView(options, pending = pendingTiles) {
     // Pending groups enter through place after fit, never at phantom first-free
     // spots or through fit's overlap repair, which may move a neighbour sideways.
-    return buildView({ ...board, columns: board.columns.filter(group => !pendingTiles.has(group.id)) }, options);
+    return buildView({ ...board, columns: board.columns.filter(group => !pending.has(group.id)) }, options);
   }
 
-  function displayPending(next) {
+  function displayPending(next, pending = pendingTiles) {
     const metadata = new Map(next.tiles.map(tile => [tile.id, tile]));
-    for (const [groupId, rect] of pendingTiles) {
+    for (const [groupId, rect] of pending) {
       const group = board.columns.find(group => group.id === groupId);
       if (!group) continue;
       const folder = savedReply.folders?.[groupId], id = folder ? `group:${folder}` : `local:${groupId}`;
@@ -603,6 +603,21 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     updateScrollEdges(root);
   }
 
+  function tileChangeState(changed) {
+    const rectangles = changed.map(({ id, x, y, w, h }) => ({ id, x, y, w, h }));
+    const pending = new Map(pendingTiles);
+    for (const tile of rectangles) {
+      if (tile.id.startsWith("local:")) {
+        const group = board.columns.find(group => tile.id === `local:${group.id}`);
+        if (group) pending.set(group.id, tile);
+      }
+    }
+    // An unmapped tile and its pushes follow the pending-placement write rule.
+    const writes = draggedTileId?.startsWith("local:") ? [] : rectangles.filter(tile => !tile.id.startsWith("local:"));
+    const layout = [...new Map([...gridState.layout, ...writes].map(tile => [tile.id, tile])).values()];
+    return { pending, writes, layout };
+  }
+
   const detachGridDrag = attachGridDrag(root, {
     view: () => view,
     canCommit: async tile => {
@@ -614,20 +629,18 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       interaction("gridDragging", active);
       if (!active) draggedTileId = undefined;
     },
-    onPreview: previewTiles,
+    onPreview: changed => {
+      const { pending, layout } = tileChangeState(changed);
+      const preview = buildGridView({ ...gridState, layout, contentWidth: root.clientWidth,
+        folders: savedReply.folders ?? {}, pending: new Map() }, pending);
+      displayPending(preview, pending);
+      previewTiles(preview.tiles);
+    },
     onCancel: () => { pendingView = true; },
     onCommit: changed => {
-      const rectangles = changed.map(({ id, x, y, w, h }) => ({ id, x, y, w, h }));
-      for (const tile of rectangles) {
-        if (tile.id.startsWith("local:")) {
-          const group = board.columns.find(group => tile.id === `local:${group.id}`);
-          if (group) pendingTiles.set(group.id, tile);
-        }
-      }
-      // An unmapped tile and its pushes follow the pending-placement write rule.
-      if (draggedTileId?.startsWith("local:")) return;
-      const writes = rectangles.filter(tile => !tile.id.startsWith("local:"));
-      gridState.layout = [...new Map([...gridState.layout, ...writes].map(tile => [tile.id, tile])).values()];
+      const { pending, writes, layout } = tileChangeState(changed);
+      for (const [groupId, rect] of pending) pendingTiles.set(groupId, rect);
+      gridState.layout = layout;
       if (!writes.length || !gridState.writable || !hasValidSavedReply || !validFoldersReply(savedReply)) return;
       persistence = persistence.then(async () => {
         try { await saveTiles(api, writes); }

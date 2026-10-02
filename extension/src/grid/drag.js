@@ -1,8 +1,9 @@
-import { GAP, place, fit, clampRect, changedTiles, railLimits } from "./layout.js";
+import { GAP, place, clampRect, changedTiles, railLimits } from "./layout.js";
 import { scrollAtEdge } from "./scroll.js";
 
-/** Previews keep the captured DOM node alive. onRail's second argument marks
- * release; onState holds board updates from pointer down through completion. */
+/** onPreview receives changed rectangles; the controller builds display geometry
+ * without replacing the captured node. onRail's second argument marks release;
+ * onState holds board updates from pointer down through completion. */
 export function attachGridDrag(root, { view, canCommit, onPreview, onCommit, onCancel, onRail, onState }) {
   let drag = null, ending = false, frame = 0, suppressClick = false, clickTimer = 0;
 
@@ -28,12 +29,8 @@ export function attachGridDrag(root, { view, canCommit, onPreview, onCommit, onC
         h: Math.round((point.y + drag.offset.y + GAP) / step) - tile.y };
     const placed = place(before.tiles, tile.id, clampRect(tile.id, rect, before.cols), before.cols);
     drag.changed = changedTiles(before.tiles, placed);
-    // Fit-only moves are for display, never part of the committed change set.
-    // Keep shown rectangles as fallbacks for tiles without a saved place.
-    const saved = new Map(before.tiles.map(tile => [tile.id, tile]));
-    for (const tile of before.saved) if (saved.has(tile.id)) saved.set(tile.id, tile);
-    for (const tile of drag.changed) saved.set(tile.id, tile);
-    onPreview(fit([...saved.values()], before.cols));
+    // The controller builds previews through the same placement path as release.
+    onPreview(drag.changed);
   }
 
   function scrollStep() {
@@ -68,7 +65,7 @@ export function attachGridDrag(root, { view, canCommit, onPreview, onCommit, onC
           } else onCommit(ended.changed);
         } else {
           if (ended.kind === "rail") onRail(ended.before.railCells, false);
-          else onPreview(ended.before.tiles);
+          else onPreview([]);
           onCancel();
         }
       }
