@@ -72,6 +72,18 @@ test("an inbound named pin opens unloaded with the decoded label and no eager pa
   assert.equal((await sync.onMessage({ type: "foxy:pins" })).pins[pin.id].name, "Work");
 });
 
+test("inbound named pins explicitly append before pinning and moving among pins", async () => {
+  const { ff, sync } = await fixture();
+  await ff.browser.bookmarks.create({ parentId: "pins", url: "https://remote.com/", title: "✏️ Remote" });
+  await drain(ff, sync);
+  const create = ff.calls.find(c => c.api === "tabs.create").args[0];
+  assert.equal(create.index, 2, "append to the window, not after the selected tab or into its group");
+  const pins = await ff.browser.tabs.query({ pinned: true });
+  assert.equal(pins[1].title, "Remote");
+  assert.equal(pins[1].discarded, true);
+  assert.equal(pins[1].index, 1);
+});
+
 test("a granted site applies names at startup, load completion, permission events and remote bookmark edits", async () => {
   const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
   assert.equal((await loadState(ff.browser)).tabs[2].appliedName, "Work", "startup applied name");

@@ -168,7 +168,8 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
       if (name !== null) {
         // Firefox 157 allows title only on discarded, unpinned creation. Pinning
         // a lazy tab afterwards preserves its unloaded title and document.
-        tab = await api.tabs.create({ windowId: win.id, url: node.url, title: name, discarded: true, active: false });
+        const appendIndex = (await api.tabs.query({ windowId: win.id })).length;
+        tab = await api.tabs.create({ windowId: win.id, index: appendIndex, url: node.url, title: name, discarded: true, active: false });
         try {
           tab = await api.tabs.update(tab.id, { pinned: true });
           await api.tabs.move(tab.id, { index });
