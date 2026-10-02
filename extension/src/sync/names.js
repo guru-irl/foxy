@@ -53,7 +53,7 @@ export function createNames({ api, getState, save }) {
   async function apply(tabId) {
     try {
       const entry = getState().tabs[tabId];
-      if (!entry) return;
+      if (!entry || (entry.folderId !== getState().pinnedId && !entry.appliedName)) return;
       const tab = await api.tabs.get(Number(tabId));
       if (tab.incognito || tab.discarded || tab.status !== "complete") return;
       const name = tab.pinned ? await nameOf(entry) : null;
@@ -72,6 +72,7 @@ export function createNames({ api, getState, save }) {
   async function pins() {
     const pins = {};
     for (const [id, entry] of Object.entries(getState().tabs)) {
+      if (entry.folderId !== getState().pinnedId) continue;
       try {
         const tab = await api.tabs.get(Number(id));
         if (!tab.pinned || tab.incognito) continue;

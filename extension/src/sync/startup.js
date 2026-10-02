@@ -30,7 +30,7 @@ export function settle(api, { settleMs = 3000, maxWaitMs = 20000, now = Date.now
 }
 
 /** Never infer bookmark deletion from absent tabs, even after failed restore. */
-export async function rebuild({ api, state, outbound, inbound, lostIdentity = false }) {
+export async function rebuild({ api, state, outbound, inbound, names, lostIdentity = false }) {
   const previous = lostIdentity ? structuredClone(state) : null;
   let knownRootId = state.rootId;
   const previousOpen = [...new Set([...state.openFolders, ...state.missing])];
@@ -85,7 +85,8 @@ export async function rebuild({ api, state, outbound, inbound, lostIdentity = fa
       const tab = local.find(tab => tab.id === pair.tabId);
       const old = previous?.tabs[tab.id];
       state.tabs[tab.id] = { bookmarkId: pair.bookmarkId, folderId: folder.id,
-        url: old?.url ?? tab.url, title: old?.title ?? tab.title ?? "" };
+        url: old?.url ?? tab.url, title: old?.title ?? tab.title ?? "",
+        ...(old?.appliedName ? { appliedName: old.appliedName } : {}) };
       if (old) {
         if (previous.quietUntil[tab.id] !== undefined) state.quietUntil[tab.id] = previous.quietUntil[tab.id];
         const removal = previous.pendingRemovals[tab.id];
@@ -145,4 +146,5 @@ export async function rebuild({ api, state, outbound, inbound, lostIdentity = fa
   for (const tabId of pins.unmatchedTabs) await outbound.syncTab(tabId);
   // Inbound implements folder-relative pin order and Firefox's create-then-discard rule.
   await inbound.reconcileFolder(state.pinnedId);
+  await names?.applyAll();
 }

@@ -1,4 +1,4 @@
-import { encodeFolderTitle, decodeFolderTitle, isSyncableUrl } from "./codec.js";
+import { encodeFolderTitle, decodeFolderTitle, decodePinTitle, isSyncableUrl } from "./codec.js";
 import { folderOfGroup, groupOfFolder, probeMissingBookmark, wasRemoved } from "./state.js";
 
 /**
@@ -164,16 +164,18 @@ export function createOutbound({
       entry.folderId = folderId;
       await save();
     }
+    const named = tab.pinned && bookmark.parentId === state.pinnedId && decodePinTitle(bookmark.title) !== null;
     // Compare direction against lastSynced, not against the live bookmark.
     // If the actual bookmark already matches, advance bookkeeping without an echo.
     if (tab.status === "complete" && tab.url !== entry.url && !(state.quietUntil[tabId] > now())) {
-      if (bookmark.url !== tab.url || bookmark.title !== title) {
-        await bookmarkCall([entry.bookmarkId], () => api.bookmarks.update(entry.bookmarkId, { url: tab.url, title }));
+      if (bookmark.url !== tab.url || (!named && bookmark.title !== title)) {
+        await bookmarkCall([entry.bookmarkId], () => api.bookmarks.update(entry.bookmarkId,
+          named ? { url: tab.url } : { url: tab.url, title }));
       }
       entry.url = tab.url;
       entry.title = title;
       await save();
-    } else if (tab.status === "complete" && tab.url === entry.url && title !== entry.title) {
+    } else if (!named && tab.status === "complete" && tab.url === entry.url && title !== entry.title) {
       if (bookmark.title !== title) await bookmarkCall([entry.bookmarkId], () => api.bookmarks.update(entry.bookmarkId, { title }));
       entry.title = title;
       await save();

@@ -1,11 +1,12 @@
 import { handleMessage } from "../close.js";
-import { isOpenableUrl, isSyncableUrl, encodeFolderTitle, ROOT_TITLE, isPinnedFolderTitle } from "./codec.js";
+import { isOpenableUrl, isSyncableUrl, encodeFolderTitle, encodePinTitle, ROOT_TITLE, isPinnedFolderTitle } from "./codec.js";
 import { createQueue, loadState, saveState, groupOfFolder, probeMissingBookmark,
   recordRemoved, pruneRemovedIds, wasRemoved } from "./state.js";
 import { ensurePinnedFolder, readTree, mergeRoots, OTHER_BOOKMARKS } from "./tree.js";
 import { createOutbound } from "./outbound.js";
 import { createInbound } from "./inbound.js";
 import { matchGroups, matchTabs } from "./match.js";
+import { createNames } from "./names.js";
 import { settle, rebuild } from "./startup.js";
 
 /** One controller per event-page lifetime. Only storage.session marks a browser session. */
@@ -17,6 +18,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   const returnTimers = new Map(), movedTabs = new Set();
   let moveTimer;
   const save = () => saveState(api, state);
+  const names = createNames({ api, getState: () => state, save });
   const outbound = createOutbound({ api, getState: () => state, save, now, removeDelayMs, quietMs,
     extensionBaseUrl: api.runtime.getURL(""),
     schedule: ms => setTimeout(() => queue.run(flush).catch(() => {}), ms),
@@ -112,7 +114,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
   });
 
   async function rebuildMaps(lostIdentity = false) {
-    await rebuild({ api, state, outbound, inbound, lostIdentity });
+    await rebuild({ api, state, outbound, inbound, names, lostIdentity });
     await save();
     if (lostIdentity) for (const id of Object.keys(state.groups)) scheduleReturningGroup(Number(id));
   }
@@ -144,6 +146,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
           await rebuildMaps();
           await api.storage.session.set({ foxySession: true });
         }
+        if (session.foxySession) await names.applyAll();
         await normalWindow();
         // Once per event-page lifetime; queue-owned timers cover later deadlines.
         await ensureTree();
@@ -484,7 +487,12 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     "runtime.onStartup": async () => {},
     "runtime.onInstalled": async () => {},
     "tabs.onCreated": tab => syncTab(tab.id),
-    "tabs.onUpdated": syncTab,
+    "tabs.onUpdated": async (id, change = {}) => {
+      if (change.pinned === false) await names.apply(id);
+      await syncTab(id);
+      if (change.status === "complete") await names.apply(id);
+    },
+    "permissions.onAdded": () => names.applyAll(),
     "tabs.onRemoved": async (id, info) => {
       // A normal mapped group can subsequently move into a private window.
       // Its private close is not evidence for deleting a shared bookmark.
@@ -510,7 +518,12 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       }
       await changed(id, node);
     },
-    "bookmarks.onChanged": async id => changed(id, await managedNode(id)),
+    "bookmarks.onChanged": async id => {
+      await changed(id, await managedNode(id));
+      for (const [tabId, entry] of Object.entries(state.tabs)) {
+        if (entry.bookmarkId === id) await names.apply(Number(tabId));
+      }
+    },
     "bookmarks.onRemoved": async (id, info) => {
       recordRemoved(state, id, info, now());
       await save();
@@ -527,7 +540,12 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       if (!await relevant(id, info.parentId) && !await relevant(id, info.oldParentId)) return;
       const node = await managedNode(id);
       if (node?.type === "folder") await changed(id, node);
-      else await inbound.bookmarkMoved(id, info);
+      else {
+        await inbound.bookmarkMoved(id, info);
+        for (const [tabId, entry] of Object.entries(state.tabs)) {
+          if (entry.bookmarkId === id) await names.apply(Number(tabId));
+        }
+      }
     },
     "windows.onFocusChanged": async id => {
       if (id === api.windows.WINDOW_ID_NONE) return;
@@ -602,8 +620,27 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     await save();
     return { ok: true, groupId };
   }
+  async function renamePin(tabId, value) {
+    if (!Number.isInteger(tabId) || (value !== null && typeof value !== "string")) return { ok: false };
+    const tab = await api.tabs.get(tabId);
+    if (!tab.pinned || tab.incognito) return { ok: false };
+    if (!state.tabs[tabId]) await syncTab(tabId);
+    const entry = state.tabs[tabId];
+    if (entry?.folderId !== state.pinnedId) return { ok: false };
+    const node = await getNode(entry.bookmarkId);
+    if (node?.parentId !== state.pinnedId) return { ok: false };
+    const name = value?.trim() || null;
+    const title = name === null ? tab.title ?? "" : encodePinTitle(name);
+    if (node.title !== title) await api.bookmarks.update(node.id, { title });
+    entry.title = tab.title ?? "";
+    await save();
+    await names.apply(tabId);
+    return { ok: true };
+  }
   /**
    * Page protocol (foxy:* replies can wait up to maxWaitMs at session start):
+   * - foxy:pins -> { pins: { [tabId]: { name, origin, allowed } } } (named pins only)
+   * - foxy:rename-pin { tabId, name: string | null } -> { ok }
    * - foxy:saved -> { saved: [{ folderId, title, color, count, cantReopen }],
    *                   missing: [{ folderId, title, color }] }
    * - foxy:open-saved { folderId, windowId } -> { ok: true, groupId } on success
@@ -620,6 +657,8 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     }
     return run(async () => {
       switch (message?.type) {
+        case "foxy:pins": return names.pins();
+        case "foxy:rename-pin": return renamePin(message.tabId, message.name);
         case "foxy:saved": return saved();
         case "foxy:open-saved": return openSaved(message.folderId, message.windowId);
         case "foxy:delete-saved": {
@@ -644,7 +683,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
           return { ok };
         }
         case "foxy:dismiss-missing": state.missing = []; await save(); return { ok: true };
-        case "foxy:reconcile": await inbound.reconcileAll(); return { ok: true };
+        case "foxy:reconcile": await inbound.reconcileAll(); await names.applyAll(); return { ok: true };
         default: return undefined;
       }
     }).catch(() => ({ ok: false })); // The queue logs failures and keeps draining.

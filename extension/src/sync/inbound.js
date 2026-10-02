@@ -1,4 +1,4 @@
-import { decodeFolderTitle, encodeFolderTitle, isOpenableUrl } from "./codec.js";
+import { decodeFolderTitle, decodePinTitle, encodeFolderTitle, isOpenableUrl } from "./codec.js";
 import { emptyState, groupOfFolder, tabsInFolder, probeMissingBookmark, wasRemoved } from "./state.js";
 import { matchTabs } from "./match.js";
 
@@ -164,7 +164,21 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
         const pin = await attempt(() => api.tabs.get(Number(pair[0])));
         if (pin?.pinned && pin.windowId === win.id) { index = pin.index + 1; break; }
       }
-      tab = await api.tabs.create({ windowId: win.id, index, url: node.url, pinned: true, active: false });
+      const name = decodePinTitle(node.title);
+      if (name !== null) {
+        // Firefox 157 allows title only on discarded, unpinned creation. Pinning
+        // a lazy tab afterwards preserves its unloaded title and document.
+        tab = await api.tabs.create({ windowId: win.id, url: node.url, title: name, discarded: true, active: false });
+        try {
+          tab = await api.tabs.update(tab.id, { pinned: true });
+          await api.tabs.move(tab.id, { index });
+        } catch (error) {
+          await attempt(() => api.tabs.remove(tab.id));
+          throw error;
+        }
+      } else {
+        tab = await api.tabs.create({ windowId: win.id, index, url: node.url, pinned: true, active: false });
+      }
     } else {
       tab = await api.tabs.create({ windowId: group.windowId, url: node.url,
         title: node.title, discarded: true, active: false });
@@ -183,10 +197,10 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
     const state = getState();
     state.tabs[tab.id] = { bookmarkId: node.id, folderId, url: node.url, title: tab.title ?? "" };
     state.quietUntil[tab.id] = now() + quietMs;
-    if (tab.pinned) {
-      // Firefox cannot create a discarded pin. Discard failure is non-fatal.
+    if (tab.pinned && !tab.discarded) {
+      // Firefox cannot create a discarded pin directly. Discard failure is non-fatal.
       await attempt(() => api.tabs.discard(tab.id));
-    } else {
+    } else if (!tab.pinned) {
       await positionTab(tab.id, folderId, await bookmarks(folderId));
     }
   }

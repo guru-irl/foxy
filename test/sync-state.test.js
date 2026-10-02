@@ -307,3 +307,14 @@ test("legacy state without removal evidence or folder snapshots preserves its id
   await saveState(ff.browser, state);
   assert.deepEqual((await loadState(ff.browser)).tabs, legacy.tabs);
 });
+
+test("applied pin names survive valid state and malformed optional names do not lose identity", async () => {
+  const ff = createFirefox(), state = populated();
+  state.tabs[0].appliedName = "Work";
+  state.tabs[9].appliedName = 42;
+  await saveState(ff.browser, state);
+  const loaded = await loadState(ff.browser);
+  assert.equal(loaded.tabs[0].appliedName, "Work");
+  assert.equal(loaded.tabs[9].appliedName, undefined);
+  assert.equal(loaded.tabs[9].bookmarkId, "bookmark-b");
+});
