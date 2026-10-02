@@ -149,7 +149,9 @@ for (const keptGroup of [false, true]) test(`startup identical siblings with ${k
     assert.equal(after.state.tabs[id].bookmarkId, folder.bookmarks[0].id);
     assert.equal(folder.bookmarks.length, 1);
   }
-  assert.deepEqual(await sync.onMessage({ type: "foxy:saved" }), { saved: [], missing: [] });
+  assert.deepEqual(await sync.onMessage({ type: "foxy:saved" }), {
+    saved: [], missing: [], folders: { 11: keptGroup ? "canonical" : "first", 12: "second" },
+  });
   assert.equal(ff.calls.some(call => /^bookmarks\.remove/.test(call.api)), false);
 });
 
