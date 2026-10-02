@@ -232,3 +232,11 @@ test("a storage change and bookmark update in one frame both publish without tab
     assert.equal(ff.calls.filter(c => c.api === "runtime.sendMessage" && c.args[0].type === "foxy:saved").length, 1);
   } finally { ff.browser.runtime.sendMessage = send; }
 });
+
+test("the page has the same space above the grid as below it", async () => {
+  await root();
+  const page = document.createElement("main"); page.className = "page"; fixture().append(page);
+  const style = getComputedStyle(page);
+  assert.equal(style.paddingTop, "24px");
+  assert.equal(style.paddingBottom, "24px");
+});

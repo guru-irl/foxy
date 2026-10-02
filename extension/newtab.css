@@ -65,7 +65,7 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  padding-block: 10vh 24px;
+  padding-block: 24px;
 }
 
 /* --- Clock ------------------------------------------------------------- */
