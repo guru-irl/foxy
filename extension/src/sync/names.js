@@ -10,6 +10,7 @@ export function pinOrigin(url) {
 
 /** Serialized by executeScript: everything this function uses must live here. */
 export function keepPinTitle(name) {
+  if (name !== null) name = name.trim().replace(/\s+/gu, " ");
   const key = "__foxyPinTitle";
   let keeper = globalThis[key];
   if (keeper) {

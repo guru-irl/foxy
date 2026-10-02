@@ -1,4 +1,5 @@
 import { pinOrigin } from "../sync/names.js";
+import { normalizePinName } from "../sync/codec.js";
 import { colorKey } from "../model.js";
 import { attachDnd } from "./dnd.js";
 import { openNameEditor, openColorPicker } from "./edit.js";
@@ -401,7 +402,8 @@ function tabRow(root, tab, handlers) {
         initial: tab.name ?? tab.title, className: "name-editor pin-name-editor", updateLabel: false,
         onSave: name => {
           try {
-            if (name === (tab.name ?? tab.title).trim()) return;
+            name = normalizePinName(name);
+            if (name === normalizePinName(tab.name ?? tab.title)) return;
             label.textContent = name || tab.title;
             handlers.onRenamePin?.(tab.id, name || null, tab.origin ?? pinOrigin(tab.url));
           } finally { end(); }

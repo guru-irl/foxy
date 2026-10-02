@@ -138,6 +138,18 @@ test("ALLOW requests the remote pin origin in its click handler, updates access,
   assert.equal(ff.calls.some(c => c.args[0]?.type === "foxy:rename-pin" || c.api === "tabs.update"), false);
 });
 
+test("pin editor normalizes whitespace before requesting and sending a rename", async () => {
+  const { ff, node } = await controller();
+  row(node, 11).querySelector(".row-rename").click();
+  const input = row(node, 11).querySelector(".name-editor");
+  input.value = "  A  B\t C  ";
+  ff.calls.length = 0;
+  ff.withUserInput(() => key(input, "Enter"));
+  await flush(ff);
+  const sent = ff.calls.find(c => c.args[0]?.type === "foxy:rename-pin");
+  assert.equal(sent.args[0].name, "A B C");
+});
+
 for (const id of [11, 21]) for (const ending of ["Enter", "blur"]) {
   test(`unchanged ${id === 11 ? "unnamed" : "named"} pin ${ending} cancels without requesting or sending`, async () => {
     const { ff, node, control } = await controller();

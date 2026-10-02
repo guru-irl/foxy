@@ -2,6 +2,19 @@ import { test, assert } from "./harness.js";
 
 const turn = () => new Promise(resolve => setTimeout(resolve, 0));
 
+test("title keeper normalizes A  B without mistaking the collapsed name for a page edit", async () => {
+  const { keepPinTitle } = await import("../../extension/src/sync/names.js");
+  const old = document.title;
+  try {
+    document.title = "Original";
+    keepPinTitle("A  B");
+    document.head.append(document.createElement("meta"));
+    await turn();
+    assert.equal(document.title, "A B");
+    assert.equal(keepPinTitle(null), "Original");
+  } finally { keepPinTitle(null); document.title = old; }
+});
+
 test("title keeper restores the latest page title after edits, replacement, reinjection and removal", async () => {
   const { keepPinTitle } = await import("../../extension/src/sync/names.js");
   const old = document.title;

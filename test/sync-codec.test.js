@@ -86,6 +86,8 @@ test("pin title codec trims names and accepts the pencil with either presentatio
     ["✏️Work", "Work"], ["✏️  ", null], ["✏", null], ["Work", null],
     ["A ✏️ Work", null], ["", null]]) assert.equal(decodePinTitle(title), name, title);
   assert.equal(encodePinTitle("  Work  "), "✏️ Work");
+  assert.equal(encodePinTitle("  A  B\t C\nD  "), "✏️ A B C D");
+  assert.equal(decodePinTitle("✏️ A  B\t C\nD"), "A B C D");
   assert.equal(encodePinTitle(""), "");
   assert.equal(encodePinTitle(null), "");
 });
