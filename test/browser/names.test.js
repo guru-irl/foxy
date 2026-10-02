@@ -114,6 +114,39 @@ for (const replacement of ["replaceChild", "document.open/write"]) {
   });
 }
 
+// Break caught: a bfcache restore revives a keeper that a later unname never reached.
+for (const persisted of [true, false]) {
+  test(`title keeper ${persisted ? "restores and forgets" : "keeps watching"} on ${persisted ? "persisted" : "non-persisted"} pagehide`, async () => {
+    const { keepPinTitle } = await import("../../extension/src/sync/names.js");
+    const frame = document.createElement("iframe");
+    const loaded = new Promise(resolve => frame.addEventListener("load", resolve, { once: true }));
+    frame.srcdoc = "<!doctype html><title>Original</title><body></body>";
+    fixture().append(frame);
+    await loaded;
+    const d = frame.contentDocument, win = frame.contentWindow;
+    const serialized = win.eval(`(${keepPinTitle.toString()})`);
+    try {
+      serialized("Work");
+      d.title = "Latest page title";
+      await turn();
+      assert.equal(d.title, "Work");
+      win.dispatchEvent(new win.PageTransitionEvent("pagehide", { persisted }));
+      assert.equal(d.title, persisted ? "Latest page title" : "Work");
+      d.title = "After pagehide";
+      await turn();
+      assert.equal(d.title, persisted ? "After pagehide" : "Work",
+        "persisted pagehide must stop the watcher; other pagehides need no cleanup");
+      if (persisted) {
+        assert.equal(serialized(null), undefined, "the old keeper must be forgotten");
+        serialized("Mail");
+        assert.equal(d.title, "Mail", "a still-named restored page can start a fresh keeper");
+      }
+      assert.equal(serialized(null), "After pagehide");
+      assert.equal(d.title, "After pagehide");
+    } finally { serialized(null); frame.remove(); }
+  });
+}
+
 test("title keeper handles title removal/addition and a pending page mutation when stopped", async () => {
   const { keepPinTitle } = await import("../../extension/src/sync/names.js");
   const old = document.title;

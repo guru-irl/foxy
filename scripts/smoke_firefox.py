@@ -361,6 +361,128 @@ def check_pin_names(client):
                 thread.join(timeout=5)
 
 
+def check_pin_history(client):
+    class Page(BaseHTTPRequestHandler):
+        def do_GET(self):
+            title = "A page" if self.path == "/a" else "B page"
+            body = f"""<!doctype html><title>{title}</title><body>
+                <a id="next" href="/b">Next page</a>
+                <script>addEventListener('pageshow', event => {{
+                    document.body.dataset.restored = String(event.persisted);
+                }});</script></body>""".encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Page) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        tab_id = None
+        try:
+            base = f"http://127.0.0.1:{server.server_port}"
+            # check_pin_names granted this host in the same throwaway extension.
+            tab_id = client.script("""
+                return (await browser.tabs.create({url: arguments[0], pinned: true, active: false})).id;
+            """, [base + "/a"])
+
+            def read():
+                return client.script("""
+                    const tabId = arguments[0], tab = await browser.tabs.get(tabId);
+                    const {foxySync} = await browser.storage.local.get('foxySync');
+                    const mapped = foxySync?.tabs?.[tabId];
+                    const bookmark = mapped ? (await browser.bookmarks.get(mapped.bookmarkId))[0] : null;
+                    const [page] = await browser.scripting.executeScript({target: {tabId, frameIds: [0]},
+                        func: () => ({title: document.title, restored: document.body.dataset.restored,
+                            keeper: !!globalThis.__foxyPinTitle})});
+                    return {url: tab.url, status: tab.status, tabTitle: tab.title,
+                        documentTitle: page.result.title, restored: page.result.restored,
+                        keeper: page.result.keeper, bookmarkTitle: bookmark?.title};
+                """, [tab_id])
+
+            def rename(name):
+                reply = client.script("""
+                    return await browser.runtime.sendMessage({type: 'foxy:rename-pin', tabId: arguments[0], name: arguments[1]});
+                """, [tab_id, name])
+                if reply != {"ok": True}:
+                    raise RuntimeError(f"history pin rename failed: {reply!r}")
+
+            def follow_link():
+                client.script("""
+                    await browser.scripting.executeScript({target: {tabId: arguments[0], frameIds: [0]},
+                        func: () => document.querySelector('#next').click()});
+                """, [tab_id])
+                poll("named B loaded", read, lambda s: s["url"] == base + "/b" and s["status"] == "complete"
+                     and s["keeper"] and pin_name_matches(s, "Work", "✏️ Work"))
+
+            def back():
+                # Register, collect and clean up in one realm/evaluation. Also watch
+                # bookmark titles so a transient bare-name write cannot pass unnoticed.
+                return client.script("""
+                    const tabId = arguments[0], events = [], titles = [];
+                    const {foxySync} = await browser.storage.local.get('foxySync');
+                    const bookmarkId = foxySync.tabs[tabId].bookmarkId;
+                    let listener, timer;
+                    const complete = new Promise((resolve, reject) => {
+                        timer = setTimeout(() => reject(new Error('Back did not complete')), 6000);
+                        listener = (id, change) => {
+                            if (id !== tabId) return;
+                            events.push(change);
+                            if (change.status === 'complete') resolve();
+                        };
+                    });
+                    const changed = (id, change) => {
+                        if (id === bookmarkId && change.title !== undefined) titles.push(change.title);
+                    };
+                    browser.tabs.onUpdated.addListener(listener);
+                    browser.bookmarks.onChanged.addListener(changed);
+                    try {
+                        await browser.scripting.executeScript({target: {tabId, frameIds: [0]}, func: () => history.back()});
+                        await complete;
+                        await browser.runtime.sendMessage({type: 'foxy:pins'});
+                        return {events, titles};
+                    } finally {
+                        clearTimeout(timer);
+                        browser.tabs.onUpdated.removeListener(listener);
+                        browser.bookmarks.onChanged.removeListener(changed);
+                    }
+                """, [tab_id])
+
+            poll("A loaded and mapped", read, lambda s: s["status"] == "complete"
+                 and pin_name_matches(s, "A page", "A page"))
+            rename("Work")
+            poll("named A", read, lambda s: s["keeper"] and pin_name_matches(s, "Work", "✏️ Work"))
+            follow_link()
+            rename(None)
+            poll("unnamed B", read, lambda s: not s["keeper"] and pin_name_matches(s, "B page", "B page"))
+            unnamed_back = back()
+            if "Work" in unnamed_back["titles"]:
+                raise RuntimeError(f"Back published the bare name: {unnamed_back!r}")
+            unnamed = poll("unnamed A restored from bfcache", read, lambda s: s["url"] == base + "/a"
+                           and s["status"] == "complete" and s["restored"] == "true" and not s["keeper"]
+                           and pin_name_matches(s, "A page", "A page"))
+            rename("Work")
+            poll("A named again", read, lambda s: s["keeper"] and pin_name_matches(s, "Work", "✏️ Work"))
+            follow_link()
+            named_back = back()
+            named = poll("named A restored and reapplied on complete", read, lambda s: s["url"] == base + "/a"
+                         and s["status"] == "complete" and s["restored"] == "true" and s["keeper"]
+                         and pin_name_matches(s, "Work", "✏️ Work"))
+            return "unname then Back stays unnamed; still-named Back reapplies on complete; " + json.dumps(
+                {"unnamedBack": unnamed_back, "unnamed": unnamed, "namedBack": named_back, "named": named}, ensure_ascii=False)
+        finally:
+            try:
+                if tab_id is not None:
+                    client.script("await browser.tabs.remove(arguments[0]);", [tab_id])
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+
+
 def check_named_inbound(client):
     bookmarks = client.script("""
         const {foxySync} = await browser.storage.local.get('foxySync');
@@ -465,6 +587,7 @@ def run_checks(client, root, scratch, results, base):
         return ", ".join(state["columns"])
     results.check("SMOKE column", smoke_column)
     results.check("pin names", lambda: check_pin_names(client))
+    results.check("pin history", lambda: check_pin_history(client))
     results.check("named inbound pins", lambda: check_named_inbound(client))
 
     def screenshot():

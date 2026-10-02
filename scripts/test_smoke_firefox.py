@@ -152,6 +152,7 @@ class SmokeSequenceTests(unittest.TestCase):
                 patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]), \
                 patch.object(smoke.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)), \
                 patch.object(smoke, "check_pin_names", return_value="isolated pin check", create=True), \
+                patch.object(smoke, "check_pin_history", return_value="isolated pin history check"), \
                 patch.object(smoke, "check_named_inbound", return_value="lazy named pins verified", create=True), \
                 contextlib.redirect_stdout(output):
             results = smoke.Results()
