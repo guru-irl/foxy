@@ -199,6 +199,36 @@ test("extension rebuild preserves a named pin page-title fallback when its keepe
   assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, "Page");
 });
 
+for (const path of ["inbound never-loaded", "rebuild without saved title"]) {
+  test(`unname uses the URL without loading when no page title is known: ${path}`, async () => {
+    const { ff, sync: initial } = await fixture({ title: "✏️ Work", tabs: [
+      { id: 1, windowId: 1, url: "about:home", active: true },
+    ] });
+    const [pin] = await ff.browser.tabs.query({ pinned: true });
+    let sync = initial;
+    if (path === "rebuild without saved title") {
+      const stored = await loadState(ff.browser);
+      stored.tabs = {};
+      await ff.browser.storage.local.set({ foxySync: stored });
+      await ff.browser.storage.session.clear();
+      sync = wire(ff);
+      await drain(ff, sync);
+    }
+    ff.calls.length = 0;
+    assert.deepEqual(await sync.onMessage({ type: "foxy:rename-pin", tabId: pin.id, name: null }), { ok: true });
+    assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, "https://example.com/a");
+    assert.equal((await loadState(ff.browser)).tabs[pin.id].title, "https://example.com/a");
+    assert.equal((await ff.browser.tabs.get(pin.id)).discarded, true);
+    assert.equal(ff.calls.some(c => ["tabs.create", "tabs.update", "scripting.executeScript"].includes(c.api)), false);
+    const get = ff.browser.tabs.get;
+    ff.browser.tabs.get = async id => ({ ...await get(id), ...(id === pin.id ? {
+      discarded: false, status: "complete", title: "Real page title on next load",
+    } : {}) });
+    await sync.handlers["tabs.onUpdated"](pin.id, { status: "complete" });
+    assert.equal((await ff.browser.bookmarks.get("pin"))[0].title, "Real page title on next load");
+  });
+}
+
 test("unname escapes a restored marker-like page title instead of naming it again", async () => {
   const { ff, sync } = await fixture({ title: "✏️ Work", origins: ["https://example.com/*"] });
   ff.browser.scripting.executeScript = async () => [{ frameId: 0, result: "  ✏️ Page title" }];

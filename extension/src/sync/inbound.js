@@ -196,7 +196,9 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
       }
     }
     const state = getState();
-    state.tabs[tab.id] = { bookmarkId: node.id, folderId, url: node.url, title: tab.title ?? "" };
+    // A lazy named pin has no page title yet; its label must not be the unname fallback.
+    const title = tab.pinned && decodePinTitle(node.title) !== null ? node.url : tab.title ?? "";
+    state.tabs[tab.id] = { bookmarkId: node.id, folderId, url: node.url, title };
     state.quietUntil[tab.id] = now() + quietMs;
     if (tab.pinned && !tab.discarded) {
       // Firefox cannot create a discarded pin directly. Discard failure is non-fatal.
