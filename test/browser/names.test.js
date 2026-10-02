@@ -147,6 +147,35 @@ for (const persisted of [true, false]) {
   });
 }
 
+test("title keeper restores the current page title after unname and rename in one page, with one pagehide listener", async () => {
+  // Review B5 m-1: a stale keeper's listener must not restore an older title.
+  // Review B5 m-2: unname/rename cycles must not pile up pagehide listeners.
+  const { keepPinTitle } = await import("../../extension/src/sync/names.js");
+  const frame = document.createElement("iframe");
+  const loaded = new Promise(resolve => frame.addEventListener("load", resolve, { once: true }));
+  frame.srcdoc = "<!doctype html><title>Original</title><body></body>";
+  fixture().append(frame);
+  await loaded;
+  const d = frame.contentDocument, win = frame.contentWindow;
+  let registrations = 0;
+  win.addEventListener = function (type, ...rest) {
+    if (type === "pagehide") registrations++;
+    return win.EventTarget.prototype.addEventListener.call(this, type, ...rest);
+  };
+  const serialized = win.eval(`(${keepPinTitle.toString()})`);
+  try {
+    serialized("Work");
+    serialized(null);
+    d.title = "Later";
+    serialized("Work");
+    await turn();
+    assert.equal(d.title, "Work");
+    win.dispatchEvent(new win.PageTransitionEvent("pagehide", { persisted: true }));
+    assert.equal(d.title, "Later", "the current keeper's page title, not the first keeper's");
+    assert.equal(registrations, 1);
+  } finally { serialized(null); frame.remove(); }
+});
+
 test("title keeper handles title removal/addition and a pending page mutation when stopped", async () => {
   const { keepPinTitle } = await import("../../extension/src/sync/names.js");
   const old = document.title;

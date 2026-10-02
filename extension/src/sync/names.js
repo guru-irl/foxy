@@ -23,13 +23,16 @@ export function keepPinTitle(name) {
     delete globalThis[key];
     return keeper?.pageTitle;
   }
-  if (!keeper) {
-    keeper = { pageTitle: document.title };
+  if (!keeper) keeper = { pageTitle: document.title };
+  if (!globalThis[`${key}Hide`]) {
+    globalThis[`${key}Hide`] = true;
     // Back must not revive a name that was removed while this page was cached.
+    // One listener per document, acting on whichever keeper is current.
     window.addEventListener("pagehide", event => {
-      if (!event.persisted || globalThis[key] !== keeper) return;
-      keeper.observer.disconnect();
-      if (document.title === keeper.name) document.title = keeper.pageTitle;
+      const current = globalThis[key];
+      if (!event.persisted || !current) return;
+      current.observer.disconnect();
+      if (document.title === current.name) document.title = current.pageTitle;
       delete globalThis[key];
     });
   }

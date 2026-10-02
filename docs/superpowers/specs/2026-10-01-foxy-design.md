@@ -528,8 +528,9 @@ logged with the "Foxy:" prefix and never retried in a loop.
   name it last displayed, so later events and moves leave the unnamed title
   alone while that name is still shown. A top-level document commit
   (`status: loading` together with a URL, including same-URL reloads in Firefox
-  157) clears this guard, unlike a same-document URL change or an unfinished
-  load, so even a real page title equal to the old name can replace the fallback.
+  157) clears this guard, unlike a same-document URL change after the page has
+  loaded or an unfinished load, so even a real page title equal to the old name
+  can replace the fallback.
   Rebuilds recover a still-unloaded pin's raw tab title as its guard when its
   normalised label matches the name, or retain its previous shown name by
   bookmark and URL if it was unnamed while this device was closed.
