@@ -1,4 +1,4 @@
-import { test, assert } from "./harness.js";
+import { test, assert, fixture } from "./harness.js";
 
 const turn = () => new Promise(resolve => setTimeout(resolve, 0));
 
@@ -79,6 +79,40 @@ test("title keeper ignores body mutations and reattaches when the head is replac
     window.MutationObserver = Observer;
   }
 });
+
+for (const replacement of ["replaceChild", "document.open/write"]) {
+  test(`title keeper reattaches after iframe root replacement by ${replacement}`, async () => {
+    const { keepPinTitle } = await import("../../extension/src/sync/names.js");
+    const frame = document.createElement("iframe");
+    const loaded = new Promise(resolve => frame.addEventListener("load", resolve, { once: true }));
+    frame.srcdoc = "<!doctype html><html><head><title>Original</title></head><body></body></html>";
+    fixture().append(frame);
+    await loaded;
+    const d = frame.contentDocument;
+    const serialized = frame.contentWindow.eval(`(${keepPinTitle.toString()})`);
+    try {
+      serialized("Work");
+      const html = "<head><title>Work</title></head><body></body>";
+      if (replacement === "replaceChild") {
+        const root = d.createElement("html");
+        root.innerHTML = html;
+        d.replaceChild(root, d.documentElement);
+      } else {
+        d.open(); d.write(`<!doctype html><html>${html}</html>`); d.close();
+      }
+      await turn();
+      assert.equal(d.title, "Work");
+      d.title = "Later page edit";
+      await turn();
+      assert.equal(d.title, "Work", "the new head must remain watched even when its initial title matches the name");
+      assert.equal(serialized(null), "Later page edit");
+      assert.equal(d.title, "Later page edit");
+      d.title = "Unwatched";
+      await turn();
+      assert.equal(d.title, "Unwatched");
+    } finally { serialized(null); frame.remove(); }
+  });
+}
 
 test("title keeper handles title removal/addition and a pending page mutation when stopped", async () => {
   const { keepPinTitle } = await import("../../extension/src/sync/names.js");

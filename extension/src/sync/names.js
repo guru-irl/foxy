@@ -26,8 +26,10 @@ export function keepPinTitle(name) {
   if (!keeper) keeper = { pageTitle: document.title };
   keeper.name = name;
   const watch = () => {
+    keeper.root = document.documentElement;
     keeper.head = document.head;
-    if (document.documentElement) keeper.observer.observe(document.documentElement, { childList: true });
+    keeper.observer.observe(document, { childList: true });
+    if (keeper.root) keeper.observer.observe(keeper.root, { childList: true });
     if (keeper.head) keeper.observer.observe(keeper.head, { subtree: true, childList: true, characterData: true });
   };
   const write = () => {
@@ -36,7 +38,7 @@ export function keepPinTitle(name) {
     watch();
   };
   keeper.observer ??= new MutationObserver(() => {
-    if (keeper.head !== document.head) {
+    if (keeper.root !== document.documentElement || keeper.head !== document.head) {
       keeper.observer.disconnect();
       watch();
     }
