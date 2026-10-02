@@ -25,13 +25,21 @@ export function keepPinTitle(name) {
   }
   if (!keeper) keeper = { pageTitle: document.title };
   keeper.name = name;
-  const watch = () => keeper.observer.observe(document, { subtree: true, childList: true, characterData: true });
+  const watch = () => {
+    keeper.head = document.head;
+    if (document.documentElement) keeper.observer.observe(document.documentElement, { childList: true });
+    if (keeper.head) keeper.observer.observe(keeper.head, { subtree: true, childList: true, characterData: true });
+  };
   const write = () => {
     keeper.observer.disconnect();
     document.title = keeper.name;
     watch();
   };
   keeper.observer ??= new MutationObserver(() => {
+    if (keeper.head !== document.head) {
+      keeper.observer.disconnect();
+      watch();
+    }
     if (document.title === keeper.name) return;
     keeper.pageTitle = document.title;
     write();

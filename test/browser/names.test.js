@@ -48,6 +48,38 @@ test("title keeper restores the latest page title after edits, replacement, rein
   } finally { serialized(null); document.title = old; }
 });
 
+test("title keeper ignores body mutations and reattaches when the head is replaced", async () => {
+  const { keepPinTitle } = await import("../../extension/src/sync/names.js");
+  const oldHead = document.head, oldTitle = document.title, Observer = window.MutationObserver;
+  const node = document.createElement("div");
+  let callbacks = 0;
+  window.MutationObserver = class extends Observer {
+    constructor(callback) { super((...args) => { callbacks++; callback(...args); }); }
+  };
+  try {
+    document.title = "Original";
+    keepPinTitle("Work");
+    document.body.append(node);
+    node.textContent = "Busy body";
+    await turn();
+    assert.equal(callbacks, 0, "body changes must not wake the keeper");
+    const head = document.createElement("head");
+    head.innerHTML = "<title>Work</title>";
+    oldHead.replaceWith(head);
+    await turn();
+    head.querySelector("title").textContent = "New head page title";
+    await turn();
+    assert.equal(document.title, "Work");
+    assert.equal(keepPinTitle(null), "New head page title");
+  } finally {
+    keepPinTitle(null);
+    if (document.head !== oldHead) document.head.replaceWith(oldHead);
+    document.title = oldTitle;
+    node.remove();
+    window.MutationObserver = Observer;
+  }
+});
+
 test("title keeper handles title removal/addition and a pending page mutation when stopped", async () => {
   const { keepPinTitle } = await import("../../extension/src/sync/names.js");
   const old = document.title;
