@@ -150,6 +150,7 @@ class SmokeSequenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="smoke-sequence-", dir=SCRATCH) as directory, \
                 patch.object(smoke.time, "monotonic", side_effect=lambda: clock[0]), \
                 patch.object(smoke.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)), \
+                patch.object(smoke, "check_pin_names", return_value="isolated pin check", create=True), \
                 contextlib.redirect_stdout(io.StringIO()):
             results = smoke.Results()
             smoke.run_checks(client, smoke.ROOT, Path(directory), results, base)
@@ -194,6 +195,16 @@ class SmokeSequenceTests(unittest.TestCase):
             with self.assertRaises(smoke.CheckFailed):
                 smoke.check_console(client, "moz-extension://smoke-test/", Path(directory), results)
         self.assertEqual(results.exit_code, 1)
+
+
+class PinNameTests(unittest.TestCase):
+    def test_pin_names_require_tab_document_and_bookmark_titles_to_match(self):
+        state = {"tabTitle": "Smoke pin", "documentTitle": "Smoke pin", "bookmarkTitle": "✏️ Smoke pin"}
+        self.assertTrue(smoke.pin_name_matches(state, "Smoke pin", "✏️ Smoke pin"))
+        for field in state:
+            with self.subTest(field=field):
+                self.assertFalse(smoke.pin_name_matches({**state, field: "Wrong"}, "Smoke pin", "✏️ Smoke pin"))
+        self.assertFalse(smoke.pin_name_matches({}, "Smoke pin", "✏️ Smoke pin"))
 
 
 class CleanupTests(unittest.TestCase):

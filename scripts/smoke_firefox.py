@@ -5,6 +5,7 @@ import argparse
 import base64
 from datetime import datetime, timezone
 import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 from pathlib import Path
 import re
@@ -13,6 +14,7 @@ import socket
 import subprocess
 import sys
 import time
+import threading
 
 ROOT = Path(__file__).resolve().parent.parent
 FIREFOX = "/Applications/Firefox.app/Contents/MacOS/firefox"
@@ -273,6 +275,92 @@ def pinned_title(root):
     return json.loads(match[1])
 
 
+PIN_STATE_SCRIPT = """
+    const tabId = arguments[0];
+    const tab = await browser.tabs.get(tabId);
+    const {foxySync} = await browser.storage.local.get('foxySync');
+    const mapped = foxySync?.tabs?.[tabId];
+    const bookmark = mapped ? (await browser.bookmarks.get(mapped.bookmarkId))[0] : null;
+    const [page] = await browser.scripting.executeScript({target: {tabId, frameIds: [0]},
+        func: () => ({title: document.title, latest: document.body.dataset.latestTitle})});
+    return {tabTitle: tab.title, documentTitle: page.result.title,
+            bookmarkTitle: bookmark?.title, latest: page.result.latest};
+"""
+
+
+def pin_name_matches(state, title, bookmark_title):
+    return (state.get("tabTitle") == title and state.get("documentTitle") == title
+            and state.get("bookmarkTitle") == bookmark_title)
+
+
+def check_pin_names(client):
+    class Page(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = b"""<!doctype html><title>Original page title</title><body>
+                <script>window.addEventListener('message', event => {
+                    if (event.data !== 'smoke-change-title') return;
+                    document.title = 'Latest page title';
+                    document.body.dataset.latestTitle = 'Latest page title';
+                });</script></body>"""
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_):
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Page) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        tab_id = None
+        try:
+            page_url = f"http://127.0.0.1:{server.server_port}/pin-names"
+            tab_id = client.script("""
+                return (await browser.tabs.create({url: arguments[0], pinned: true, active: false})).id;
+            """, [page_url])
+            poll("local pin loaded", lambda: client.script("return await browser.tabs.get(arguments[0]);", [tab_id]),
+                 lambda tab: tab["status"] == "complete" and tab["title"] == "Original page title")
+            # Verified in Firefox 157's ExtensionPermissions.sys.mjs. Pass the
+            # extension emitter so its live host access and onAdded listeners update.
+            client.script("""
+                const {ExtensionPermissions} = ChromeUtils.importESModule('resource://gre/modules/ExtensionPermissions.sys.mjs');
+                const policy = WebExtensionPolicy.getByID(arguments[0]);
+                await ExtensionPermissions.add(arguments[0], {
+                    permissions: [], origins: ['http://127.0.0.1/*'], data_collection: []
+                }, policy.extension);
+            """, [ADDON_ID], chrome=True)
+            reply = client.script("""
+                return await browser.runtime.sendMessage({type: 'foxy:rename-pin', tabId: arguments[0], name: 'Smoke pin'});
+            """, [tab_id])
+            if reply != {"ok": True}:
+                raise RuntimeError(f"rename failed: {reply!r}")
+            read = lambda: client.script(PIN_STATE_SCRIPT, [tab_id])
+            poll("pin name applied", read, lambda state: pin_name_matches(state, "Smoke pin", "✏️ Smoke pin"))
+            client.script("""
+                await browser.scripting.executeScript({target: {tabId: arguments[0], frameIds: [0]},
+                    func: () => window.postMessage('smoke-change-title', '*')});
+            """, [tab_id])
+            poll("page title reverted", read, lambda state: state.get("latest") == "Latest page title"
+                 and pin_name_matches(state, "Smoke pin", "✏️ Smoke pin"))
+            reply = client.script("""
+                return await browser.runtime.sendMessage({type: 'foxy:rename-pin', tabId: arguments[0], name: null});
+            """, [tab_id])
+            if reply != {"ok": True}:
+                raise RuntimeError(f"unname failed: {reply!r}")
+            poll("page title and bookmark restored", read,
+                 lambda state: pin_name_matches(state, "Latest page title", "Latest page title"))
+            return "name applied, page edits reverted, pencil bookmark saved, latest page title restored"
+        finally:
+            try:
+                if tab_id is not None:
+                    client.script("await browser.tabs.remove(arguments[0]);", [tab_id])
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+
+
 def run_checks(client, root, scratch, results, base):
     url = base + "newtab.html"
     client.command("Marionette:SetContext", {"value": "content"})
@@ -347,6 +435,7 @@ def run_checks(client, root, scratch, results, base):
                      lambda s: any(title.upper() == "SMOKE" for title in s["columns"]))
         return ", ".join(state["columns"])
     results.check("SMOKE column", smoke_column)
+    results.check("pin names", lambda: check_pin_names(client))
 
     def screenshot():
         client.command("Marionette:SetContext", {"value": "content"})
