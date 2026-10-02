@@ -1,32 +1,44 @@
 import { test, assert, fixture, nextFrame } from "./harness.js";
 import { renderBoard } from "./view.js";
-import { DEFAULT_SETTINGS } from "../../extension/src/settings/store.js";
+import { DEFAULT_SETTINGS, DEFAULT_DEVICE } from "../../extension/src/settings/store.js";
 
-async function clock(w = 3, h = 2) {
+async function clock(w = 3, h = 2, cellSize = "M") {
   const link = document.createElement("link"); link.rel = "stylesheet"; link.href = "/extension/newtab.css";
   await new Promise(resolve => { link.onload = resolve; document.head.append(link); });
   const node = document.createElement("div"); node.className = "board"; node.style.cssText = "width:1600px;height:700px";
   fixture().append(node);
   const { updateClock, renderTime } = await import("../../extension/src/main.js");
-  renderBoard(node, { columns: [], pinned: [], tabs: [], saved: [] }, {}, {}, { layout: [{ id: "clock", x: 0, y: 0, w, h }] });
+  renderBoard(node, { columns: [], pinned: [], tabs: [], saved: [] }, {}, {}, {
+    layout: [{ id: "clock", x: 0, y: 0, w, h }], device: { ...DEFAULT_DEVICE, cellSize },
+  });
   await document.fonts.ready; await nextFrame();
   return { node, time: node.querySelector(".clock-time"), date: node.querySelector(".clock-date"), updateClock, renderTime };
 }
 
-for (const [w, h] of [[3, 2], [8, 4]]) {
-  test(`clock tile scales to ${w}x${h} cells and time/date stay within its content`, async () => {
-    const { node, time, date, updateClock } = await clock(w, h);
+const sizes = ["S", "M", "L", "XL"].flatMap(cell => [[3, 2], [5, 2], [3, 3]].map(([w, h]) => [cell, w, h]));
+sizes.push(["M", 8, 4]);
+for (const [cell, w, h] of sizes) {
+  test(`clock tile ${cell} ${w}x${h}: time and longest date fit all padded content edges`, async () => {
+    const { node, time, date, updateClock } = await clock(w, h, cell);
     for (const format of ["24", "12"]) {
       for (const hour of [0, 1, 12, 23]) {
         updateClock(node, { ...DEFAULT_SETTINGS, timeFormat: format }, new Date(2026, 8, 30, hour, 59));
         const tile = time.closest(".tile"), bounds = tile.getBoundingClientRect();
-        const range = document.createRange(); range.selectNodeContents(time);
-        const text = range.getBoundingClientRect();
-        assert.ok(text.left >= bounds.left && text.right <= bounds.right, `time must fit: ${time.textContent}`);
-        assert.ok(text.bottom <= bounds.bottom);
-        assert.ok(date.getBoundingClientRect().bottom <= bounds.bottom);
-        assert.ok(parseFloat(getComputedStyle(time).fontSize) <= tile.clientHeight * 0.7);
-        assert.ok(parseFloat(getComputedStyle(time).fontSize) > 40, "time must scale, not remain a small fixed label");
+        const style = getComputedStyle(tile);
+        for (const side of ["Top", "Right", "Bottom", "Left"]) assert.equal(style[`padding${side}`], "16px");
+        assert.equal(date.textContent, "WEDNESDAY, 30 SEPTEMBER");
+        const content = { left: bounds.left + 16, right: bounds.right - 16, top: bounds.top + 16, bottom: bounds.bottom - 16 };
+        for (const element of [time, date]) {
+          const range = document.createRange(); range.selectNodeContents(element);
+          const text = range.getBoundingClientRect();
+          assert.ok(text.left >= content.left - 0.5 && text.right <= content.right + 0.5,
+            `${element.className} must fit horizontally: ${element.textContent}`);
+          // Range.top includes the font's unused ascent above the line box.
+          assert.ok(element.getBoundingClientRect().top >= content.top - 0.5 && text.bottom <= content.bottom + 0.5,
+            `${element.className} must fit vertically: ${element.textContent}`);
+        }
+        assert.ok(parseFloat(getComputedStyle(time).fontSize) <= (tile.clientHeight - 32) * 0.7 + 0.5);
+        assert.ok(parseFloat(getComputedStyle(time).fontSize) > 20, "time must scale, not remain a small fixed label");
       }
     }
     assert.equal(getComputedStyle(time.closest(".tile")).containerType, "size");
@@ -38,7 +50,7 @@ test("clock updates retain the formatted time and isolate its colon", async () =
   for (const value of ["12:24", "14:54", "02:04", "23:59", "1:05 PM", "12:05 AM"]) {
     renderTime(time, value);
     assert.equal(time.textContent, value);
-    assert.equal(time.dataset.lead, value[0]);
+    assert.equal(time.hasAttribute("data-lead"), false, "clock text needs no unused first-digit styling hook");
     const [hours, minutes] = value.split(":");
     assert.deepEqual([...time.children].map(child => child.textContent), [hours, ":", minutes]);
     assert.equal(time.querySelectorAll(".clock-colon").length, 1);

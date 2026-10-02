@@ -99,6 +99,13 @@ test("group titles are heavy, condensed, slanted capitals without extra letter s
   assert.equal(title["letter-spacing"], "0");
 });
 
+test("the 12px group dot keeps the sidebar's original glow", () => {
+  const dot = rule(".dot");
+  assert.equal(dot.width, "12px");
+  assert.equal(dot.height, "12px");
+  assert.equal(dot["box-shadow"], "0 0 6px color-mix(in oklab, var(--g2) 50%, transparent)");
+});
+
 test("no typography role overrides the default zero roundness or sets a slant axis", () => {
   for (const selector of ["body", ".clock-time", ".clock-date", ".column-header"]) {
     const settings = rule(selector)["font-variation-settings"] ?? "";

@@ -60,6 +60,33 @@ test("narrow fit is display-only and retains the raw saved layout", () => {
   assert.deepEqual(layout, original);
 });
 
+for (const [contentWidth, cols] of [[252, 1], [400, 2]]) {
+  test(`new tiles at width ${contentWidth} save full default sizes at the shown x/y`, () => {
+    const model = { ...board, columns: [group(1)], saved: [{ folderId: "closed" }] };
+    const view = buildView(model, options({ contentWidth, synced: DEFAULT_SETTINGS }));
+    assert.equal(view.cols, cols);
+    assert.deepEqual(view.newTiles, [
+      { id: "clock", x: 0, y: 0, w: 5, h: 2 },
+      { id: "pinned", x: 0, y: 2, w: 3, h: 4 },
+      { id: "group:a", x: 0, y: 6, w: 3, h: 4 },
+      { id: "saved", x: 0, y: 10, w: 3, h: 4 },
+    ]);
+    assert.deepEqual(view.tiles.map(({ x, y, w, h }) => [x, y, w, h]),
+      [[0, 0, cols, 2], [0, 2, cols, 4], [0, 6, cols, 4], [0, 10, cols, 4]]);
+    const widened = buildView(model, options({ layout: view.newTiles, synced: DEFAULT_SETTINGS, contentWidth: 1600 }));
+    assert.deepEqual(widened.tiles.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })), view.newTiles);
+    assert.deepEqual(widened.newTiles, []);
+  });
+}
+
+test("a newly mapped pending group also saves its full default size in a narrow window", () => {
+  const view = buildView({ ...board, columns: [group(2)] }, options({
+    contentWidth: 252, pending: new Map([[2, { x: 0, y: 7, w: 3, h: 4 }]]),
+  }));
+  assert.deepEqual(view.newTiles, [{ id: "group:b", x: 0, y: 7, w: 3, h: 4 }]);
+  assert.deepEqual(view.tiles.map(({ x, y, w, h }) => [x, y, w, h]), [[0, 7, 1, 4]]);
+});
+
 test("overlapping saved tiles are fitted without becoming new writes", () => {
   const layout = [{ id: "group:a", x: 0, y: 0, w: 3, h: 4 }, { id: "group:b", x: 0, y: 0, w: 3, h: 4 }];
   const view = buildView(board, options({ layout }));

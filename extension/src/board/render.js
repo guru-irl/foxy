@@ -46,7 +46,7 @@ function watchLayout(root) {
   updateScrollEdges(root);
 }
 // Text is always assigned as textContent, never parsed as markup.
-export function renderBoard(root, board, view, ui, handlers) {
+export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   if (ui.confirmFolderId == null) confirmations.delete(root);
   else if (confirmations.get(root)?.folderId !== ui.confirmFolderId) {
     confirmations.set(root, { folderId: ui.confirmFolderId, at: performance.now() });
@@ -77,9 +77,11 @@ export function renderBoard(root, board, view, ui, handlers) {
   const rail = fixedColumn(root, "tabs", "TABS", board.tabs, handlers);
   rail.classList.add("rail");
   rail.style.setProperty("--rail-cells", view.railCells);
-  rail.querySelector(".column-title").append(button("settings-button", "Settings"));
+  const header = el("header", "rail-header"), title = rail.querySelector(".column-title");
+  title.replaceWith(header);
+  header.append(title, button("settings-button", "Settings"));
   root.replaceChildren(grid, rail);
-  updateClock(root);
+  updateClock(root, settings);
   const previousBanner = banners.get(root);
   const missingCount = board.missing?.length ?? 0;
   if (missingCount && previousBanner?.dataset.count === String(missingCount)) {
@@ -479,7 +481,6 @@ export function renderTime(timeEl, time) {
   const hours = el("span", "clock-hours"), colon = el("span", "clock-colon"), minutes = el("span", "clock-minutes");
   hours.textContent = hour; colon.textContent = ":"; minutes.textContent = minute;
   timeEl.replaceChildren(hours, colon, minutes);
-  timeEl.dataset.lead = time[0];
   timeEl.setAttribute("aria-label", time);
   if (timeEl.localName === "time") timeEl.setAttribute("datetime", time);
 }

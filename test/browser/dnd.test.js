@@ -85,7 +85,8 @@ async function controller(set = setup()) {
   const { createController } = await import("../../extension/src/main.js");
   const control = createController(root, ff.browser);
   await control.refresh();
-  await flush(ff); // Drain the one-time reconcile completion before interaction assertions.
+  await flush(ff); // Drain the one-time reconcile and deferred first paint.
+  await flush(ff); // Deliver fake storage events from the initial tile writes.
   return { root, ff, control };
 }
 
@@ -277,6 +278,25 @@ test("delegation is attached once and uses the newest render handlers", async ()
   assert.deepEqual(latest, [true, [15, { zone: "group", groupId: 101, slot: 0, tabId: 15 }], false]);
   assert.deepEqual(calls.states, []); assert.deepEqual(calls.tabs, []);
 });
+test("Task 3 tab drops on the clock tile and empty grid cells do nothing (Task 4 updates empty cells)", async () => {
+  const { root, calls } = await draw();
+  const source = tab(root), dataTransfer = start(source);
+  try {
+    for (const target of [root.querySelector('.tile[data-kind="clock"]'), root.querySelector(".grid")]) {
+      const valid = root.querySelector('.rows[data-group-id="101"]');
+      dispatchDrag("dragover", valid, { dataTransfer, ...point(valid.querySelector(".row"), 0.5, 0) });
+      assert.ok(root.querySelector(".drop-line"), "start with valid feedback so rejection must clear it");
+      const over = dispatchDrag("dragover", target, { dataTransfer, ...point(target) });
+      assert.equal(over.defaultPrevented, false);
+      assert.equal(dataTransfer.dropEffect, "none");
+      assert.equal(root.querySelector(".drop-line, .drop-target"), null);
+      const drop = dispatchDrag("drop", target, { dataTransfer, ...point(target) });
+      assert.equal(drop.defaultPrevented, false);
+      assert.deepEqual(calls.tabs, []);
+    }
+  } finally { dispatchDrag("dragend", source, { dataTransfer }); }
+});
+
 test("unknown drag types and malformed IDs cannot trigger a move", async () => {
   const { root, calls } = await draw();
   const target = root.querySelector('.rows[data-zone="tabs"]'), dt = new DataTransfer();

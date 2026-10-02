@@ -229,7 +229,7 @@ for (const scheme of ["light", "dark"]) {
     const unnamed = row(root, "f2").querySelector(".row-label");
     assert.equal(getComputedStyle(unnamed).color, getComputedStyle(banner.querySelector(".banner-text")).color);
     assert.equal(getComputedStyle(row(root).querySelector(".dot")).width, "12px");
-    assert.equal(getComputedStyle(row(root).querySelector(".dot")).boxShadow, "none");
+    assert.ok(getComputedStyle(row(root).querySelector(".dot")).boxShadow !== "none");
     assert.equal(getComputedStyle(row(root).querySelector(".saved-count")).fontVariantNumeric, "tabular-nums");
     assert.equal(getComputedStyle(row(root).querySelector(".cant-reopen")).fontWeight, "700");
     assert.equal(getComputedStyle(row(root, "f3").querySelector(".saved-delete")).color,

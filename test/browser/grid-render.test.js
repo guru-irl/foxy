@@ -28,7 +28,10 @@ test("grid renders groups and widgets at their saved cells, rail has TABS and ge
   assert.equal(grid.style.getPropertyValue("--gap"), "16px");
   assert.equal(rail.style.getPropertyValue("--rail-cells"), "3");
   assert.equal(rail.querySelector("h2").textContent, "TABS");
-  assert.equal(rail.querySelector(".settings-button").getAttribute("aria-label"), "Settings");
+  const gear = rail.querySelector(".settings-button"), heading = rail.querySelector("h2");
+  assert.equal(gear.getAttribute("aria-label"), "Settings");
+  assert.equal(heading.contains(gear), false, "the heading's accessible name must be exactly TABS");
+  assert.equal(gear.parentElement, heading.parentElement, "gear and heading share the rail header");
   assert.equal(rail.getBoundingClientRect().width, 272);
   for (const tile of layout) {
     const el = [...grid.querySelectorAll(".tile")].find(el => el.dataset.tileId === tile.id);
@@ -171,6 +174,32 @@ for (const delay of [80, 650]) {
   });
 }
 
+for (const pins of ["pending", "reject"]) {
+  test(`first saved reply releases paint and writes independently of ${pins} pin names`, async () => {
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const warn = console.warn; console.warn = () => {};
+    try {
+      const { ff, node } = await controller({ layout: {
+        "tile:pinned": { x: 5, y: 0, w: 3, h: 4 }, "tile:group:open": { x: 0, y: 0, w: 3, h: 4 },
+      }, beforeStart(ff) {
+        const send = ff.browser.runtime.sendMessage;
+        ff.browser.runtime.sendMessage = async message => {
+          if (message.type !== "foxy:pins") return send(message);
+          if (pins === "reject") throw new Error("Pin names unavailable");
+          await gate; return { pins: {} };
+        };
+      } });
+      await new Promise(resolve => setTimeout(resolve, 80)); await flush(ff);
+      const tile = node.querySelector('[data-tile-id="group:open"]');
+      assert.ok(tile, "the saved reply, not the pin reply, releases first paint");
+      assert.equal(tile.style.gridRow, "1 / span 4");
+      assert.ok((await ff.browser.storage.sync.get(null))["tile:clock"], "an arrived saved reply allows new tile writes");
+      release(); await flush(ff);
+    } finally { release(); console.warn = warn; }
+  });
+}
+
 test("settings load and storage changes apply sizes, windows, visibility, density and alpha", async () => {
   const { ff, node } = await controller({ settings: { showClock: false, otherWindows: false } });
   assert.equal(node.querySelector('[data-kind="clock"]'), null);
@@ -302,6 +331,26 @@ test("clock settings apply live and visibility updates the tile without a board 
   } finally { globalThis.Date = DateClass; }
 });
 
+
+test("a controller render draws the clock once with the real settings", async () => {
+  const { ff, node } = await controller();
+  const changes = [], clocks = [];
+  const observer = new MutationObserver(records => changes.push(...records));
+  observer.observe(node, { subtree: true, childList: true });
+  const replace = node.replaceChildren.bind(node);
+  node.replaceChildren = (...args) => {
+    clocks.push(args[0].querySelector(".clock-time"));
+    replace(...args);
+  };
+  try {
+    await ff.browser.storage.sync.set({ settings: { timeFormat: "12", showDate: false } });
+    await flush(ff);
+    assert.equal(clocks.length, 1);
+    assert.equal(changes.filter(record => record.target === clocks[0]).length, 1, "no default-settings clock draw before the actual draw");
+    assert.equal(node.querySelector(".clock").dataset.format, "12");
+    assert.equal(node.querySelector(".clock-date").hidden, true);
+  } finally { observer.disconnect(); }
+});
 
 test("a storage change and bookmark update in one frame both publish without tab reads", async () => {
   const { ff, node } = await controller();

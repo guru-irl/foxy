@@ -133,6 +133,18 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       const responses = await Promise.race([
         Promise.all([api.runtime.sendMessage({ type: "foxy:saved" }).then(value => {
           arrived = true;
+          // Pin names are a companion read, not a first-paint dependency.
+          if (mine === savedGeneration && !hasSavedReply && !held()) {
+            if (Array.isArray(value?.saved) && Array.isArray(value?.missing)) {
+              savedReply = { ...value, pins: savedReply.pins };
+              hasValidSavedReply = true;
+            }
+            hasSavedReply = true;
+            firstPaintReady = true;
+            clearTimeout(firstPaintTimer);
+            firstPaintTimer = 0;
+            if (snapshot) publish();
+          }
           return value;
         }),
           api.runtime.sendMessage({ type: "foxy:pins" })]),
@@ -260,8 +272,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       root.style.setProperty("--card-alpha-dark", cardAlpha(gridState.synced.transparency, "dark"));
       root.style.setProperty("--card-alpha-light", cardAlpha(gridState.synced.transparency, "light"));
       root.style.setProperty("--row", gridState.device.density === "compact" ? "24px" : "32px");
-      renderBoard(root, board, view, ui, handlers);
-      updateClock(root, gridState.synced);
+      renderBoard(root, board, view, ui, handlers, gridState.synced);
       restoreView(root, saved);
       lastRenderedKey = key;
     }

@@ -5,6 +5,6 @@ import { renderBoard as render } from "../../extension/src/board/render.js";
 export function renderBoard(root, board, ui, handlers, options = {}) {
   const view = buildView(board, { layout: [], synced: DEFAULT_SETTINGS, device: DEFAULT_DEVICE,
     contentWidth: root.clientWidth, folders: {}, pending: new Map(), ...options });
-  render(root, board, view, ui, handlers);
+  render(root, board, view, ui, handlers, options.synced ?? DEFAULT_SETTINGS);
   return view;
 }

@@ -139,6 +139,58 @@ for (const sourceSelector of [".row"]) {
   });
 }
 
+for (const selector of [".grid", '.rail .rows[data-zone="tabs"]']) {
+  test(`tab drag continuously scrolls both vertical edges of ${selector} at 12px per frame`, async () => {
+    const { root } = await draw();
+    const area = root.querySelector(selector), source = root.querySelector(".row");
+    const dataTransfer = new DataTransfer();
+    dispatchDrag("dragstart", source, { dataTransfer });
+    const bounds = area.getBoundingClientRect(), x = bounds.left + 20;
+    const over = y => dispatchDrag("dragover", area, { dataTransfer, clientX: x, clientY: y });
+    try {
+      over(bounds.bottom - 49);
+      await nextFrame(); await nextFrame();
+      assert.equal(area.scrollTop, 0, "49px from the edge is outside the 48px threshold");
+      over(bounds.bottom - 47);
+      await nextFrame();
+      assert.equal(area.scrollTop, 12);
+      await nextFrame();
+      assert.equal(area.scrollTop, 24, "one dragover keeps scrolling on successive frames");
+      over(bounds.top + 1);
+      await nextFrame();
+      assert.equal(area.scrollTop, 12);
+      await nextFrame();
+      assert.equal(area.scrollTop, 0);
+      over(bounds.bottom - 1); await nextFrame();
+      dispatchDrag("dragend", source, { dataTransfer });
+      const stopped = area.scrollTop;
+      await nextFrame(); await nextFrame();
+      assert.equal(area.scrollTop, stopped, "dragend stops the frame loop");
+    } finally { dispatchDrag("dragend", source, { dataTransfer }); }
+  });
+
+  for (const stop of ["drop", "leave", "centre", "foreign"]) {
+    test(`${selector} edge-scroll stops on ${stop}`, async () => {
+      const { root } = await draw();
+      const area = root.querySelector(selector), source = root.querySelector(".row");
+      const dataTransfer = new DataTransfer();
+      dispatchDrag("dragstart", source, { dataTransfer });
+      const bounds = area.getBoundingClientRect(), x = bounds.left + 20, y = bounds.bottom - 1;
+      try {
+        dispatchDrag("dragover", area, { dataTransfer, clientX: x, clientY: y });
+        await nextFrame(); assert.ok(area.scrollTop > 0, "the scroll loop must start");
+        if (stop === "drop") dispatchDrag("drop", area, { dataTransfer, clientX: x, clientY: y });
+        else if (stop === "leave") dispatchDrag("dragleave", area, { dataTransfer, relatedTarget: document.body });
+        else dispatchDrag("dragover", area, { dataTransfer: stop === "foreign" ? new DataTransfer() : dataTransfer,
+          clientX: x, clientY: stop === "centre" ? (bounds.top + bounds.bottom) / 2 : y });
+        const stopped = area.scrollTop;
+        await nextFrame(); await nextFrame();
+        assert.equal(area.scrollTop, stopped);
+      } finally { dispatchDrag("dragend", source, { dataTransfer }); }
+    });
+  }
+}
+
 test("short lists and a fitting grid never acquire a fade", async () => {
   const { root } = await draw({ width: 1800, height: 600, groups: 1, count: 1 });
   for (const el of root.querySelectorAll(".grid, .rows")) edges(el, false, false);

@@ -1,4 +1,4 @@
-import { totalColumns, railLimits, addMissing, fit, clampRect } from "./layout.js";
+import { totalColumns, railLimits, addMissing, defaultSize, fit, clampRect } from "./layout.js";
 import { cellPx } from "../settings/store.js";
 
 /** Pure display geometry. Hidden and closed tiles keep their saved keys only. */
@@ -21,9 +21,10 @@ export function buildView(board, { layout, synced, device, contentWidth, folders
     const rect = pending.get(entry.group?.id);
     if (rect && !savedIds.has(entry.id)) visible.push(clampRect(entry.id, rect, cols));
   }
-  const placed = addMissing(visible, ids, cols, cell);
-  const newTiles = placed.filter(tile => !savedIds.has(tile.id) && !tile.id.startsWith("local:"));
   const metadata = new Map(entries.map(entry => [entry.id, entry]));
+  const placed = addMissing(visible, ids, cols, cell).map(tile => savedIds.has(tile.id) ? tile
+    : { ...tile, ...defaultSize(metadata.get(tile.id).kind, cell, 10000) });
+  const newTiles = placed.filter(tile => !savedIds.has(tile.id) && !tile.id.startsWith("local:"));
   return { cell, total, cols, railCells, saved: layout,
     tiles: fit(placed, cols).map(tile => ({ ...tile, ...metadata.get(tile.id) })), newTiles };
 }

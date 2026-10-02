@@ -1,4 +1,5 @@
 import { slotFromPointer, resolveTabTarget } from "./targets.js";
+import { scrollAtEdge } from "../grid/scroll.js";
 
 const TAB = "application/x-foxy-tab";
 const bindings = new WeakMap();
@@ -9,11 +10,36 @@ export function attachDnd(root, handlers, board) {
   if (existing) { existing.handlers = handlers; existing.board = board; return; }
   const state = { handlers, board, dragging: false, suppressClick: false, source: null };
   bindings.set(root, state);
-  let clickTimer = 0;
+  let clickTimer = 0, frame = 0, pointer = null;
 
   function clearFeedback() {
     root.querySelectorAll(".drop-line").forEach(line => line.remove());
     root.querySelectorAll(".drop-target").forEach(tile => tile.classList.remove("drop-target"));
+  }
+  function stopScroll() {
+    cancelAnimationFrame(frame);
+    frame = 0;
+    pointer = null;
+  }
+  function scrollStep() {
+    frame = 0;
+    if (!pointer || !root.isConnected) { stopScroll(); return; }
+    const { element, x, y } = pointer, old = element.scrollTop;
+    if (!element.isConnected || !scrollAtEdge(element, y)) { stopScroll(); return; }
+    if (element.scrollTop !== old) feedback(targetAt(document.elementFromPoint(x, y)), y);
+    frame = requestAnimationFrame(scrollStep);
+  }
+  function edgeScroll(event) {
+    const target = event.target;
+    const element = target instanceof Element && root.contains(target)
+      ? target.closest(".rail")?.querySelector(".rows") ?? target.closest(".grid") : null;
+    const bounds = element?.getBoundingClientRect();
+    const { clientX: x, clientY: y } = event;
+    if (!accepts(event.dataTransfer) || !bounds || x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom) {
+      stopScroll(); return;
+    }
+    pointer = { element, x, y };
+    if (!frame) frame = requestAnimationFrame(scrollStep);
   }
   function accepts(transfer) {
     // Payloads are protected until drop in Firefox. Never getData on dragover.
@@ -76,6 +102,7 @@ export function attachDnd(root, handlers, board) {
     state.handlers.onDragState?.(true);
   });
   root.addEventListener("dragover", event => {
+    edgeScroll(event);
     const target = accepts(event.dataTransfer) ? targetAt(event.target) : null;
     feedback(target, event.clientY);
     if (!target) { if (event.dataTransfer) event.dataTransfer.dropEffect = "none"; return; }
@@ -83,6 +110,7 @@ export function attachDnd(root, handlers, board) {
     event.dataTransfer.dropEffect = "move";
   });
   root.addEventListener("drop", event => {
+    stopScroll();
     const target = accepts(event.dataTransfer) ? targetAt(event.target) : null;
     clearFeedback();
     if (!target) return;
@@ -95,10 +123,12 @@ export function attachDnd(root, handlers, board) {
     state.handlers.onTabDrop?.(id, drop);
   });
   root.addEventListener("dragleave", event => {
+    if (pointer && !pointer.element.contains(event.relatedTarget)) stopScroll();
     const target = accepts(event.dataTransfer) ? targetAt(event.target) : null;
     if (!target?.contains(event.relatedTarget)) clearFeedback();
   });
   root.addEventListener("dragend", () => {
+    stopScroll();
     clearFeedback();
     root.querySelectorAll(".dragging").forEach(source => source.classList.remove("dragging"));
     if (!state.dragging) return;
