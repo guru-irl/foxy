@@ -522,6 +522,24 @@ test("mapping one pending tile ignores another pending tile's first-free positio
   } finally { endName(root); }
 });
 
+test("pending groups mapped together are saved in drop order rather than tab-strip order", async () => {
+  const { root, ff, control, ids, map } = await twoPendingDrops(dropLayout,
+    [{ x: 4, y: 6, w: 3, h: 4 }, { x: 5, y: 7, w: 3, h: 4 }]);
+  try {
+    await ff.browser.tabGroups.move(ids[1], { index: 1 }); await flush(ff); await control.refresh(); await flush(ff);
+    const groupOrder = [...root.querySelectorAll('.tile[data-kind="group"]')].map(tile => Number(tile.dataset.groupId));
+    assert.ok(groupOrder.indexOf(ids[1]) < groupOrder.indexOf(ids[0]), "tab-strip order is opposite to drop order");
+    ff.calls.length = 0;
+    map({ [ids[0]]: "first", [ids[1]]: "second" }); await flush(ff); await flush(ff);
+    const writes = ff.calls.filter(c => c.api === "storage.sync.set");
+    assert.equal(writes.length, 1);
+    assert.deepEqual(writes[0].args[0]["tile:group:first"], { x: 4, y: 11, w: 3, h: 4 });
+    assert.deepEqual(writes[0].args[0]["tile:group:second"], { x: 5, y: 7, w: 3, h: 4 });
+    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:first"]')), { x: 4, y: 11, w: 3, h: 4 });
+    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:second"]')), { x: 5, y: 7, w: 3, h: 4 });
+  } finally { endName(root); }
+});
+
 test("a fast folder mapping during the final tab read preserves the pending drop rectangle", async () => {
   let folders = { 101: "one", 102: "two", 201: "remote" };
   const { root, ff, control } = await controller(setup(), message => message.type === "foxy:reconcile" ? { ok: true }

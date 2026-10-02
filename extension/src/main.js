@@ -276,7 +276,9 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     const writable = save && gridState.writable && knowsFolders;
     let writes = [], prune = false;
     if (writable) {
-      const mapped = board.columns.filter(group => pendingTiles.has(group.id) && savedReply.folders[group.id]);
+      const groups = new Map(board.columns.map(group => [group.id, group]));
+      const mapped = [...pendingTiles.keys()].filter(id => groups.has(id) && savedReply.folders[id])
+        .map(id => groups.get(id));
       // Start from the shown layout, not saved off-screen/hidden rectangles or
       // pending display pushes. The new group takes priority over existing tiles.
       const beforeView = mapped.length ? buildView(board, { ...options, pending: new Map() }) : view;
