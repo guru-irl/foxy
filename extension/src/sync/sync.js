@@ -1,5 +1,5 @@
 import { handleMessage } from "../close.js";
-import { isOpenableUrl, isSyncableUrl, encodeFolderTitle, encodePinTitle, normalizePinName, encodePageTitle, ROOT_TITLE, isPinnedFolderTitle } from "./codec.js";
+import { isOpenableUrl, isSyncableUrl, encodeFolderTitle, encodePinTitle, decodePinTitle, normalizePinName, encodePageTitle, ROOT_TITLE, isPinnedFolderTitle } from "./codec.js";
 import { createQueue, loadState, saveState, groupOfFolder, probeMissingBookmark,
   recordRemoved, pruneRemovedIds, wasRemoved } from "./state.js";
 import { ensurePinnedFolder, readTree, mergeRoots, OTHER_BOOKMARKS } from "./tree.js";
@@ -632,7 +632,13 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
     if (entry?.folderId !== state.pinnedId) return { ok: false };
     const node = await getNode(entry.bookmarkId);
     if (node?.parentId !== state.pinnedId) return { ok: false };
-    const title = name === null ? (await names.apply(tabId, true)) ?? entry.title : encodePinTitle(name);
+    const restored = name === null ? await names.apply(tabId, true) : undefined;
+    const title = name === null ? restored ?? entry.title : encodePinTitle(name);
+    if (name === null) {
+      const oldName = decodePinTitle(node.title);
+      if (restored === undefined && oldName !== null) entry.shownName = oldName;
+      else if (restored !== undefined) delete entry.shownName;
+    }
     const bookmarkTitle = name === null ? encodePageTitle(title) : title;
     if (node.title !== bookmarkTitle) await api.bookmarks.update(node.id, { title: bookmarkTitle });
     if (name === null) {

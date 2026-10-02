@@ -110,6 +110,10 @@ export function createOutbound({
       folderId = folderOfGroup(state, tab.groupId);
     }
     const entry = state.tabs[tabId];
+    if (entry?.shownName && (!tab.pinned || tab.title !== entry.shownName)) {
+      delete entry.shownName;
+      await save();
+    }
     if (!folderId || !isSyncableUrl(tab.url, extensionBaseUrl)) {
       if (folderId && entry?.folderId === folderId) await cancelRemoval(tabId);
       else await scheduleRemoval(tabId);
@@ -166,17 +170,20 @@ export function createOutbound({
       await save();
     }
     const named = tab.pinned && folderId === state.pinnedId && decodePinTitle(bookmark.title) !== null;
+    // Unname may leave the old label on a discarded or inaccessible page.
+    // That label is not a page title, even though the bookmark is now unnamed.
+    const keepTitle = named || (entry.shownName !== undefined && title === entry.shownName);
     // Compare direction against lastSynced, not against the live bookmark.
     // If the actual bookmark already matches, advance bookkeeping without an echo.
     if (tab.status === "complete" && tab.url !== entry.url && !(state.quietUntil[tabId] > now())) {
-      if (bookmark.url !== tab.url || (!named && bookmark.title !== bookmarkTitle)) {
+      if (bookmark.url !== tab.url || (!keepTitle && bookmark.title !== bookmarkTitle)) {
         await bookmarkCall([entry.bookmarkId], () => api.bookmarks.update(entry.bookmarkId,
-          named ? { url: tab.url } : { url: tab.url, title: bookmarkTitle }));
+          keepTitle ? { url: tab.url } : { url: tab.url, title: bookmarkTitle }));
       }
       entry.url = tab.url;
-      if (!named) entry.title = title;
+      if (!keepTitle) entry.title = title;
       await save();
-    } else if (!named && tab.status === "complete" && tab.url === entry.url && title !== entry.title) {
+    } else if (!keepTitle && tab.status === "complete" && tab.url === entry.url && title !== entry.title) {
       if (bookmark.title !== bookmarkTitle) await bookmarkCall([entry.bookmarkId], () => api.bookmarks.update(entry.bookmarkId, { title: bookmarkTitle }));
       entry.title = title;
       await save();
@@ -209,9 +216,11 @@ export function createOutbound({
   function tabRemoved(tabId, removeInfo = {}) {
     try {
       const state = getState(), failed = state.failedCreates[tabId] !== undefined;
+      const shown = state.tabs[tabId]?.shownName !== undefined;
+      if (shown) delete state.tabs[tabId].shownName;
       if (failed) delete state.failedCreates[tabId];
       const saved = removeInfo.isWindowClosing ? cancelRemoval(tabId) : scheduleRemoval(tabId);
-      Promise.resolve(saved ?? (failed ? save() : undefined)).catch(warn);
+      Promise.resolve(saved ?? (failed || shown ? save() : undefined)).catch(warn);
     } catch (error) { warn(error); }
   }
 

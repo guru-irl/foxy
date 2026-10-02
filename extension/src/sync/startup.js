@@ -89,12 +89,16 @@ export async function rebuild({ api, state, outbound, inbound, names, lostIdenti
       const name = folder.id === state.pinnedId ? decodePinTitle(folder.bookmarks.find(node => node.id === pair.bookmarkId).title) : null;
       // Updates/reloads can leave the name as the label while replacing the keeper.
       // Retain only its page-title fallback by bookmark and URL, never a tab id.
-      const pageTitle = name && tab.title === name
-        ? (saved?.appliedName === name && saved.url === tab.url ? saved.title : tab.url)
-        : tab.title ?? "";
+      const lingering = old?.shownName ?? (saved?.url === tab.url ? saved.shownName : undefined);
+      const shownName = tab.pinned && tab.title === lingering ? lingering : undefined;
+      const pageTitle = shownName !== undefined ? old?.title ?? saved?.title ?? tab.url
+        : name && tab.title === name
+          ? (saved?.appliedName === name && saved.url === tab.url ? saved.title : tab.url)
+          : tab.title ?? "";
       state.tabs[tab.id] = { bookmarkId: pair.bookmarkId, folderId: folder.id,
         url: old?.url ?? tab.url, title: old?.title ?? pageTitle,
-        ...(old?.appliedName ? { appliedName: old.appliedName } : {}) };
+        ...(old?.appliedName ? { appliedName: old.appliedName } : {}),
+        ...(shownName !== undefined ? { shownName } : {}) };
       if (old) {
         if (previous.quietUntil[tab.id] !== undefined) state.quietUntil[tab.id] = previous.quietUntil[tab.id];
         const removal = previous.pendingRemovals[tab.id];
