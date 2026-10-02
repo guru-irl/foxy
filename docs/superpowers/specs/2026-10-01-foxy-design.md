@@ -35,6 +35,7 @@ userContent.css, user.js) and the fonts.
 | Durability | Groups and pins live in bookmarks: one shared set for all devices. |
 | Remote changes | Live, like Safari: other devices' changes apply to open groups here, except to the tab you are looking at, which waits until you switch away. |
 | Fonts | EB Garamond SemiBold for the clock; Google Sans Flex for the date and other text; monospace (Cascadia Mono) for URLs and code-like text. |
+| Pinned names (2026-10-02) | The sidebar shows short names for about 30 well-known sites, recognised by title; any pin can be renamed from the board, and the name follows the pin to every device (§14). |
 
 ## 3. Repository and packaging
 
@@ -338,7 +339,9 @@ page going to sleep.
 ## 9. Architecture
 
 - `extension/manifest.json`: MV3, name "Foxy", permissions `tabs`,
-  `tabGroups`, `bookmarks`, `storage`. Background event page (module).
+  `tabGroups`, `bookmarks`, `storage`, `scripting` (2.2.0); optional host
+  access `*://*/*`, requested per site for pin names (§14.2). Background
+  event page (module).
   New tab and home page overrides as before. Adding `bookmarks` shows a
   permission prompt once on update.
 - Page (`newtab.html`, `src/page/*`):
@@ -405,8 +408,139 @@ page going to sleep.
    rename, colour, close, column drag. Signed and installed (2.0.0).
 3. Shared groups and pins in bookmarks, SAVED column, restore banner.
    Signed and installed (2.1.0).
+4. Pinned names (§14): the theme's site list, and renaming pins from the
+   board. Foxy 2.2.0.
 
 ## 13. Not included
 
 Moving tabs with the keyboard; private windows; saving ungrouped tabs;
 changing web pages' or about: pages' fonts; Firefox's own saved groups.
+Page content is never changed, except the title of a renamed pin (§14.2).
+
+## 14. Pinned names (2026-10-02)
+
+Firefox 157 has no way to rename a tab. In the sidebar a tab's text is its
+page title (the tab's `label` attribute). userChrome.css sees only that
+label: tab icons are `data:` URIs (`Tabbrowser.setIcon` rejects remote
+URLs), so the address is not visible to it. Extensions cannot set a tab's
+label either; only the page's `document.title` changes it.
+
+### 14.1 Built-in site names (theme)
+
+- Pinned tabs in the vertical sidebar whose label matches a known site show
+  the site's short name instead of the title, exactly as YOUTUBE and GMAIL do
+  today (label shrunk to nothing, name drawn by `::before`, same font,
+  colour and nudge). Unmatched pins keep showing their title.
+- Only patterns that the site reliably puts in its titles. Checked against
+  the user's history on 2026-10-02 where available (marked ✓); the others
+  follow the sites' published title formats and are unverified.
+
+| Name | Label patterns |
+|---|---|
+| YOUTUBE ✓ | ends `YouTube` |
+| GMAIL ✓ | ends `Gmail` |
+| DISCORD ✓ | starts `Discord`, ends `Discord`, contains `Discord \|` (unread counts come first: `(495) Discord \| #rspack \| TanStack`) |
+| AZURE ✓ | ends `Microsoft Azure` |
+| DEVOPS ✓ | ends `Azure DevOps`, ` - Repos`, ` - Pipelines`, ` - Boards`, ` - Test Plans`, ` - Artifacts` (Azure DevOps titles end with the hub, not the product) |
+| COPILOT | contains `Microsoft 365 Copilot` or `M365 Copilot` (the M365 one, not consumer Copilot) |
+| GITHUB ✓ | ends `GitHub` (only some GitHub pages; most end with `· owner/repo`) |
+| SLACK | ends `Slack` |
+| TEAMS | ends `Microsoft Teams` |
+| OUTLOOK | ends `Outlook` |
+| CALENDAR | contains `Google Calendar` |
+| DRIVE | ends `Google Drive` |
+| DOCS | ends `Google Docs` |
+| SHEETS | ends `Google Sheets` |
+| SLIDES | ends `Google Slides` |
+| MEET | starts `Meet -` or contains `Google Meet` |
+| WHATSAPP | ends `WhatsApp` |
+| TELEGRAM | starts `Telegram` |
+| X | ends `/ X` |
+| REDDIT | ends `Reddit` or contains ` : r/` |
+| LINKEDIN | ends `LinkedIn` |
+| CHATGPT | is `ChatGPT` |
+| CLAUDE | ends `Claude` |
+| FIGMA | ends `Figma` |
+| JIRA | ends `Jira` |
+| CONFLUENCE | ends `Confluence` |
+| NOTION | ends `Notion` |
+| SPOTIFY | starts `Spotify` |
+| NETFLIX | ends `Netflix` |
+| TWITCH | ends `Twitch` |
+| INSTAGRAM | ends `Instagram` |
+| FACEBOOK | ends `Facebook` |
+| AMAZON | starts `Amazon` |
+
+- Matching is case-sensitive on the label (CSS attribute selectors). A label
+  that matches two entries uses the later rule; entries are ordered so the
+  more specific name wins (DEVOPS after AZURE, CALENDAR/DRIVE/DOCS/SHEETS/
+  SLIDES/MEET after GMAIL).
+- A renamed pin (§14.2) has its name as its label, so it is shown as named;
+  it matches a list entry only if the name itself does.
+
+### 14.2 Renaming a pin (Foxy 2.2.0)
+
+**Where the name lives.** In the pin's bookmark in `📌 Pinned`, so it
+syncs to every device and survives restarts and failed restores. A named
+pin's bookmark title is `✏️ <name>`; any other title is an unnamed pin
+(its title follows the page as today). Decoding accepts `✏` with or without
+U+FE0F, trims, and treats an empty name as unnamed. Renaming the bookmark in
+the Bookmarks UI to or from that form names or unnames the pin too.
+
+**How it shows.** The tab's page title is set to the name and kept there by a
+script Foxy injects into that tab (`scripting.executeScript`, top frame,
+isolated world). The script:
+- remembers the page's own latest title, sets `document.title` to the name,
+  and watches the document for title changes (`<title>` added, replaced or
+  edited), putting the name back each time, before Firefox reads the title
+  for the tab label where possible;
+- is idempotent: injecting it again updates the name and keeps one watcher;
+- given no name, stops watching and restores the page's latest own title.
+
+The background applies a pin's name (or its removal) when: the pin is
+renamed from the board; its bookmark title changes (another device, or the
+Bookmarks UI); its tab finishes loading (`status: complete`); the session
+is rebuilt at startup; host permission is granted (`permissions.onAdded`).
+It skips tabs that are discarded or still loading (they get it on
+`complete`), and tabs on origins without permission. Injection failures
+(restricted pages such as addons.mozilla.org, about: pages, closed tabs) are
+logged with the "Foxy:" prefix and never retried in a loop.
+
+**Sync rules.**
+- Outbound never writes the title of a named pin's bookmark; URL changes
+  still update its URL. Unnamed pins are unchanged from §8.3.
+- Inbound pins opened from a named bookmark use the name, not the raw
+  bookmark title, as the unloaded tab's title.
+- Unpinning a tab removes its bookmark as today, so the name goes with it.
+- Two devices renaming the same pin: Firefox Sync's bookmark merge decides.
+
+**Permission.** `scripting` is a required permission; host access is
+optional (`optional_host_permissions: ["*://*/*"]`) and requested per site
+(`<scheme>://<host>/*`, http and https only) when a pin is renamed there.
+Firefox only allows the request from a user action, so the board calls
+`permissions.request` synchronously in the Enter or click handler, then
+sends the rename regardless of the answer. The name is saved either way.
+Permissions are per device: on a device without access to a named pin's
+current site, the board shows ALLOW on that pin's row; clicking it requests
+access, and the name then applies through `permissions.onAdded`.
+
+**Board.**
+- Every PINNED row (this window and other windows) has a rename button: a
+  pencil drawn in CSS from an inline SVG mask, beside ×, shown on hover and
+  focus like ×. F2 on a focused pinned row also starts the rename.
+- The editor replaces the row's label in place, with the same behaviour as
+  the group name editor (Enter saves, Escape cancels, blur saves; the row is
+  not draggable while editing). It starts with the pin's name, or its title
+  when unnamed, selected. Saving an empty name removes the name.
+- A named pin's row shows its name even where the title is not applied yet
+  (no permission, unloaded tab).
+- The page asks the background for pin names with `foxy:pins` →
+  `{ pins: { [tabId]: { name, origin, allowed } } }` (named pins only) and
+  renames with `foxy:rename-pin { tabId, name }` → `{ ok }`, where `name` is
+  a string or null.
+
+**Trade-offs (accepted by the user on 2026-10-02).** The name replaces the
+page's title everywhere Firefox shows it: the tab, the window title, history
+and the pin's bookmark. Unread counts in the title ("(495)") are no longer
+visible. A pinned tab whose title no longer changes also no longer gets
+Firefox's "title changed" attention mark.
