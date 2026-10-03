@@ -261,7 +261,7 @@ for (const [scope, key, before, after] of [["sync", "showDate", false, true], ["
     } finally { area.get = get; area.set = set; console.warn = warn; }
   });
 }
-test("a failed queued toggle restores the value shown before that click", async () => {
+test("two failed toggle clicks end showing the stored value", async () => {
   const { ff, node, pane } = await setup(); node.querySelector(".settings-button").click();
   const set = ff.browser.storage.sync.set, warn = console.warn, warnings = [];
   ff.browser.storage.sync.set = async () => { throw new Error("write unavailable"); }; console.warn = (...args) => warnings.push(args);
@@ -270,7 +270,7 @@ test("a failed queued toggle restores the value shown before that click", async 
     button.click(); assert.equal(button.getAttribute("aria-checked"), "false");
     button.click(); assert.equal(button.getAttribute("aria-checked"), "true");
     await flush(ff);
-    assert.equal(button.getAttribute("aria-checked"), "false");
+    assert.equal(button.getAttribute("aria-checked"), "true", "stored showDate is still true");
     assert.equal(node.querySelector(".clock-date").hidden, false, "rollback changes no board state");
     assert.ok(warnings.some(args => String(args[0]).startsWith("Foxy:")));
   } finally { ff.browser.storage.sync.set = set; console.warn = warn; }
@@ -414,4 +414,22 @@ test("the open pane floats like a card: inset by the board margin with the tile 
     for (const side of ["top", "right", "bottom"]) assert.equal(style[side], "24px", side);
     assert.equal(style.borderRadius, "12px");
   } finally { pane.hidden = true; }
+});
+
+test("a failed toggle save followed by a successful one shows the saved value", async () => {
+  const { ff, node, pane } = await setup(); node.querySelector(".settings-button").click();
+  const set = ff.browser.storage.sync.set, warn = console.warn;
+  let fail = true;
+  ff.browser.storage.sync.set = async (...args) => {
+    if (fail) { fail = false; throw new Error("write unavailable"); }
+    return set(...args);
+  };
+  console.warn = () => {};
+  try {
+    const button = toggle(pane, "showDate");
+    button.click(); button.click(); button.click();
+    await flush(ff);
+    assert.equal((await ff.browser.storage.sync.get("settings")).settings.showDate, false);
+    assert.equal(button.getAttribute("aria-checked"), "false");
+  } finally { ff.browser.storage.sync.set = set; console.warn = warn; }
 });

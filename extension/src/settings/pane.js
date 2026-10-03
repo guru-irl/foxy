@@ -31,18 +31,24 @@ export async function resetLayout(api) {
 export function renderSettings(container, state, handlers) {
   let pane = panes.get(container);
   if (!pane) {
-    pane = { state, handlers, controls: [], confirmed: false, timer: 0 };
+    pane = { state, handlers, controls: [], confirmed: false, timer: 0, saving: new Map() };
     panes.set(container, pane);
     const scroll = el("div", "settings-scroll"); scroll.tabIndex = -1;
     container.replaceChildren(scroll);
-    const change = async (scope, key, value, before = pane.state[scope][key]) => {
+    // pane.state holds stored values only (from storage or a successful save).
+    // After a failure the control shows the stored value again, but only once
+    // no later save for the same key is still in flight.
+    const change = async (scope, key, value) => {
+      const id = `${scope}:${key}`;
+      pane.saving.set(id, (pane.saving.get(id) ?? 0) + 1);
       try {
         const stored = await pane.handlers.onChange(scope, key, value);
         if (stored) renderSettings(container, { ...pane.state, ...stored }, pane.handlers);
       } catch (error) {
         console.warn("Foxy: could not change setting", error);
-        pane.state = { ...pane.state, [scope]: { ...pane.state[scope], [key]: before } };
-        update();
+        if (pane.saving.get(id) === 1) update();
+      } finally {
+        pane.saving.set(id, pane.saving.get(id) - 1);
       }
     };
     function section(title) {
@@ -82,7 +88,7 @@ export function renderSettings(container, state, handlers) {
       node.addEventListener("click", () => {
         const before = node.getAttribute("aria-checked") === "true";
         node.setAttribute("aria-checked", String(!before));
-        change("synced", key, !before, before);
+        change("synced", key, !before);
       }); row.append(node);
       pane.controls.push(() => node.setAttribute("aria-checked", String(pane.state.synced[key])));
     }
