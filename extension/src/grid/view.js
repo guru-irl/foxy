@@ -1,9 +1,9 @@
-import { totalColumns, railLimits, addMissing, defaultSize, fit } from "./layout.js";
+import { fitCell, railLimits, addMissing, defaultSize, fit } from "./layout.js";
 import { cellPx } from "../settings/store.js";
 
 /** Pure display geometry. Hidden and closed tiles keep their saved keys only. */
 export function buildView(board, { layout, synced, device, contentWidth, folders = {} }) {
-  const cell = cellPx(device), total = totalColumns(contentWidth, cell);
+  const { cell, total } = fitCell(contentWidth, cellPx(device));
   const limits = railLimits(total);
   const railCells = Math.max(limits.min, Math.min(limits.max, synced.railCells));
   const cols = Math.max(1, total - railCells);

@@ -9,6 +9,11 @@ export function totalColumns(contentWidth, cell) {
   return Math.max(1, Math.floor((contentWidth + GAP) / (cell + GAP)));
 }
 
+export function fitCell(pageWidth, preset) {
+  const total = totalColumns(pageWidth, preset);
+  return { total, cell: (pageWidth + GAP) / total - GAP };
+}
+
 export function railLimits(total) {
   return { min: 2, max: Math.max(2, Math.floor(total / 2)) };
 }
