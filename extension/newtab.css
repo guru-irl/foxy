@@ -524,6 +524,8 @@ button.dot {
   transition: left 200ms ease-out, top 200ms ease-out, width 200ms ease-out, height 200ms ease-out, transform 200ms ease-out;
 }
 
+.grid .tile { z-index: 1; }
+
 .grid .tile.dragging,
 .grid .tile.sliding {
   z-index: 3;
@@ -549,7 +551,7 @@ button.dot {
 
 .grid-corners {
   position: absolute;
-  z-index: 1;
+  z-index: 0;
   pointer-events: none;
   left: 0;
   top: 0;

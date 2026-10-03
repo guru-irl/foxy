@@ -630,6 +630,43 @@ test("neighbours slide only on target changes and rapid reversals keep the last 
   } finally { escape(); await flush(ff); }
 });
 
+// Dots normally ignore pointer events. Enable hit testing only for this probe
+// so elementFromPoint checks their paint order, not just pointer-events:none.
+test("corner dots stay behind clock, pinned, saved and group tiles during a gesture", async () => {
+  const layout = {
+    "tile:clock": { x: 0, y: 0, w: 3, h: 2 },
+    "tile:pinned": { x: 3, y: 0, w: 2, h: 2 },
+    "tile:saved": { x: 5, y: 0, w: 2, h: 2 },
+    "tile:group:a": { x: 0, y: 2, w: 3, h: 4 },
+    "tile:group:b": { x: 3, y: 2, w: 3, h: 4 },
+  };
+  const { ff, root } = await setup({ layout, listener: message => message.type === "foxy:reconcile"
+    ? { ok: true } : message.type === "foxy:saved"
+      ? { folders: { 1: "a", 2: "b" }, saved: [{ folderId: "closed", title: "Closed" }], missing: [] } : undefined });
+  const grid = root.querySelector(".grid"), dots = grid.querySelector(".grid-corners");
+  const start = down(header(root)); pointer("pointermove", document, shifted(start, 12, 0));
+  try {
+    assert.ok(grid.classList.contains("gesturing"));
+    await new Promise(resolve => setTimeout(resolve, 150));
+    assert.equal(getComputedStyle(dots).opacity, "1");
+    dots.style.pointerEvents = "auto";
+    const origin = grid.getBoundingClientRect();
+    for (const id of ["clock", "pinned", "saved", "group:b"]) {
+      const node = tile(root, id), saved = layout[`tile:${id}`];
+      // 88px is the first 96px-pitch gap intersection within these multi-cell cards.
+      const hit = document.elementFromPoint(origin.left + saved.x * 96 + 88,
+        origin.top + saved.y * 96 + 88);
+      assert.ok(hit === node || node.contains(hit), `${id}: the tile covers its internal corner dot`);
+      assert.equal(getComputedStyle(node).zIndex, "1", `${id}: tile layer`);
+    }
+    assert.equal(getComputedStyle(dots).zIndex, "0", "dots stay below all tiles");
+    assert.equal(getComputedStyle(grid.querySelector(".drop-outline")).zIndex, "2");
+    assert.equal(getComputedStyle(tile(root)).zIndex, "3", "dragged tile stays above the target");
+    assert.equal(document.elementFromPoint(origin.left + 7 * 96 + 88, origin.top + 2 * 96 + 88), dots,
+      "the dots layer still paints in empty space");
+  } finally { dots.style.pointerEvents = ""; escape(); await flush(ff); }
+});
+
 test("cell-corner dots fade only for tile gestures, centred in gap intersections", async () => {
   const { ff, root } = await setup(), grid = root.querySelector(".grid");
   const dots = grid.querySelector(".grid-corners"); assert.ok(dots);
