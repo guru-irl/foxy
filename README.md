@@ -8,14 +8,14 @@ A private Firefox add-on and browser theme.
 
 **Platforms:** desktop Firefox 140+ on macOS, Windows and Linux, not Android. The theme supports glass blur on macOS only.
 
-Version 3.1.0. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-10-03-foxy-grid-design.md`.
+Version 3.1.1. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-10-03-foxy-grid-design.md`.
 
 ## Board
 
 - **Tiles:** groups, PINNED, SAVED and a clock on a scrolling grid that fills the page edge to edge, with scrolling tab lists.
 - **TABS rail:** ungrouped tabs stay on the right, with their own scroll. The Settings gear has its own cell below it.
 - **Move and resize:** drag tile headers or corner handles. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
-- **Narrow windows:** overflowing tiles appear below. Saved places stay unchanged until you move them.
+- **Narrow windows:** empty columns close first, then tiles shift left; a tile wraps below only when its row cannot fit. Resizing saves nothing; moving a tile there saves what you see.
 - **Windows:** this window comes first; others are labelled. Tile places do not change tab order.
 - **Open a tab:** click it. A pin from another window moves here unless that setting is off.
 - **Move tabs:** drag to a group, TABS or PINNED. Drop on empty grid space to create and name a group.
