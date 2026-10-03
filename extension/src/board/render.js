@@ -92,6 +92,9 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
     grid.append(node);
   }
   positionTiles(grid, view.tiles);
+  const corners = el("div", "grid-corners");
+  corners.setAttribute("aria-hidden", "true");
+  grid.append(corners);
   const rail = fixedColumn(root, "tabs", "TABS", board.tabs, handlers);
   rail.classList.add("rail");
   rail.style.setProperty("--rail-cells", view.railCells);

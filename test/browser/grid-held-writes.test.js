@@ -3,8 +3,11 @@ import { createBoardFirefox } from "./controller.js";
 import { createController } from "../../extension/src/main.js";
 
 let css;
-async function frames() { for (let i = 0; i < 5; i++) await nextFrame(); }
-async function flush(ff) { for (let i = 0; i < 5; i++) { await ff.settle(); await nextFrame(); } }
+async function frames() {
+  if (document.querySelector(".grid.settling")) await new Promise(resolve => setTimeout(resolve, 330));
+  for (let i = 0; i < 5; i++) await nextFrame();
+}
+async function flush(ff) { await frames(); for (let i = 0; i < 5; i++) { await ff.settle(); await nextFrame(); } }
 const tile = node => node.querySelector('[data-tile-id="clock"]');
 const rect = node => ({ x: Number(node.style.getPropertyValue("--x")), y: Number(node.style.getPropertyValue("--y")),
   w: Number(node.style.getPropertyValue("--w")), h: Number(node.style.getPropertyValue("--h")) });
