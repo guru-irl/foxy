@@ -1,6 +1,7 @@
 import { test, assert, fixture, nextFrame, withPseudoState } from "./harness.js";
 import { createBoardFirefox } from "./controller.js";
 import { createController } from "../../extension/src/main.js";
+import { narrowGroups, narrowFolders, narrowLayout } from "./fixtures/narrow-layout.js";
 
 let css;
 async function flush(ff) {
@@ -304,7 +305,7 @@ for (const kind of ["move", "resize", "rail"]) {
   }
 }
 
-test("narrow fit writes nothing, move uses shown tiles and saves only moved or pushed rectangles", async () => {
+test("narrow fit writes nothing, a move saves shown rectangles including fitted neighbours", async () => {
   const layout = { "tile:group:a": { x: 7, y: 0, w: 3, h: 4 }, "tile:group:b": { x: 0, y: 4, w: 5, h: 4 },
     "tile:group:c": { x: 8, y: 10, w: 5, h: 4 } };
   const { ff, root } = await setup({ layout, folders: { 1: "a", 2: "b", 3: "c" }, settings: { showClock: false, showPinned: false },
@@ -314,13 +315,50 @@ test("narrow fit writes nothing, move uses shown tiles and saves only moved or p
   assert.deepEqual(rect(tile(root, "group:c")), { x: 0, y: 10, w: 3, h: 4 }); assert.deepEqual(writes(ff), []);
   const source = header(root), start = down(source); pointer("pointermove", document, shifted(start, 0, 192));
   pointer("pointerup", document, shifted(start, 0, 192)); await flush(ff);
-  assert.deepEqual(writes(ff), [{ "tile:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:group:b": { x: 0, y: 6, w: 3, h: 4 } }]);
-  assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:c"], layout["tile:group:c"]);
+  assert.deepEqual(writes(ff), [{ "tile:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:group:b": { x: 0, y: 6, w: 3, h: 4 },
+    "tile:group:c": { x: 0, y: 10, w: 3, h: 4 } }]);
+  assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:c"], { x: 0, y: 10, w: 3, h: 4 });
   root.style.width = "1232px"; window.dispatchEvent(new Event("resize")); await flush(ff);
   assert.deepEqual(rect(tile(root)), { x: 0, y: 2, w: 3, h: 4 });
 });
 
-test("four-column preview equals release without writing tiles moved only by fit", async () => {
+test("gap-closed narrow drag saves the shown arrangement and keeps preview equal to release", async () => {
+  const { ff, root } = await setup({ width: 2096, layout: narrowLayout, folders: narrowFolders,
+    extraGroups: narrowGroups.slice(2) });
+  const shown = () => Object.fromEntries([...root.querySelectorAll(".tile")].map(node => [node.dataset.tileId, rect(node)]));
+  assert.equal(root.querySelector(".grid").style.getPropertyValue("--cols"), "19");
+  assert.deepEqual(rect(tile(root)), { x: 9, y: 0, w: 5, h: 3 });
+  assert.deepEqual(rect(tile(root, "group:b")), { x: 14, y: 0, w: 5, h: 3 });
+  const start = down(header(root)), target = shifted(start, 0, 288);
+  try {
+    pointer("pointermove", document, target);
+    const preview = shown();
+    assert.deepEqual(preview["group:a"], { x: 9, y: 3, w: 5, h: 3 });
+    assert.deepEqual(preview["group:c"], { x: 9, y: 6, w: 5, h: 3 });
+    assert.deepEqual(preview["group:e"], { x: 9, y: 9, w: 5, h: 3 });
+    for (const id of ["b", "d", "f"]) {
+      const saved = narrowLayout[`tile:group:${id}`];
+      assert.deepEqual(preview[`group:${id}`], { ...saved, x: 14 });
+    }
+    assert.deepEqual(writes(ff), []);
+    pointer("pointerup", document, target); await flush(ff);
+    assert.deepEqual(shown(), preview);
+    assert.deepEqual(writes(ff), [{
+      "tile:group:a": { x: 9, y: 3, w: 5, h: 3 },
+      "tile:group:b": { x: 14, y: 0, w: 5, h: 3 },
+      "tile:group:c": { x: 9, y: 6, w: 5, h: 3 },
+      "tile:group:d": { x: 14, y: 3, w: 5, h: 3 },
+      "tile:group:e": { x: 9, y: 9, w: 5, h: 3 },
+      "tile:group:f": { x: 14, y: 6, w: 5, h: 3 },
+    }]);
+    const stored = await ff.browser.storage.sync.get(null);
+    for (const id of ["clock", "pinned"]) {
+      assert.deepEqual(stored[`tile:${id}`], narrowLayout[`tile:${id}`]);
+    }
+  } finally { escape(); await flush(ff); }
+});
+
+test("four-column gesture saves fitted neighbours and keeps every previewed rectangle", async () => {
   const { ff, root } = await setup({ width: 656 });
   const ids = ["group:a", "group:b", "pinned", "clock"];
   const shown = () => Object.fromEntries(ids.map(id => [id, rect(tile(root, id))]));
@@ -335,14 +373,16 @@ test("four-column preview equals release without writing tiles moved only by fit
     const preview = shown();
     assert.deepEqual(preview, {
       "group:a": { x: 0, y: 14, w: 3, h: 4 }, "group:b": { x: 0, y: 4, w: 3, h: 4 },
-      pinned: { x: 0, y: 0, w: 3, h: 4 }, clock: { x: 0, y: 8, w: 4, h: 2 },
-    }, "preview must fit the saved layout with just the changed tiles applied");
+      pinned: { x: 0, y: 8, w: 3, h: 4 }, clock: { x: 0, y: 12, w: 4, h: 2 },
+    }, "preview keeps the shown neighbours rather than refitting their old saved places");
     assert.deepEqual(writes(ff), []);
     pointer("pointerup", document, target); await flush(ff);
     assert.deepEqual(shown(), preview, "release must preserve every previewed rectangle");
-    assert.deepEqual(writes(ff), [{ "tile:group:a": { x: 0, y: 14, w: 3, h: 4 } }]);
+    assert.deepEqual(writes(ff), [{ "tile:group:a": { x: 0, y: 14, w: 3, h: 4 },
+      "tile:pinned": { x: 0, y: 8, w: 3, h: 4 }, "tile:clock": { x: 0, y: 12, w: 4, h: 2 } }]);
     const stored = await ff.browser.storage.sync.get(null);
-    for (const id of ["group:b", "pinned", "clock"]) assert.deepEqual(stored[`tile:${id}`], initial[`tile:${id}`]);
+    assert.deepEqual(stored["tile:group:b"], initial["tile:group:b"]);
+    for (const id of ["pinned", "clock"]) assert.deepEqual(stored[`tile:${id}`], preview[id]);
   } finally { escape(); await flush(ff); }
 });
 
@@ -399,7 +439,7 @@ test("four-column unmapped drag previews pending pushes where they land without 
     const preview = shown();
     assert.deepEqual(preview, {
       "local:1": { x: 0, y: 5, w: 3, h: 4 }, "group:b": { x: 0, y: 9, w: 3, h: 4 },
-      pinned: { x: 0, y: 0, w: 3, h: 4 }, clock: { x: 0, y: 13, w: 4, h: 2 },
+      pinned: { x: 1, y: 0, w: 3, h: 4 }, clock: { x: 0, y: 13, w: 4, h: 2 },
     });
     assert.deepEqual(writes(ff), []);
     pointer("pointerup", document, target); await flush(ff);

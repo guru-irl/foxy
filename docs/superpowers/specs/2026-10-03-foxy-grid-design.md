@@ -22,7 +22,7 @@ a fixed rail on the right. A settings pane makes the board configurable.
 | Scrolling | The grid area scrolls vertically; rows are unbounded. |
 | Collisions | Push down, gaps allowed, live preview. No upward packing. |
 | Layout scope | Synced across devices (`storage.sync`), one key per tile. |
-| Narrow screens | Empty columns close first, then tiles shift left as needed; tiles wrap below only when a row cannot fit (§12). Saved positions do not change unless you move that tile. |
+| Narrow screens | Empty columns close first, then tiles shift left as needed; tiles wrap below only when a row cannot fit (§12). Resizing saves nothing; a move there saves the arrangement shown (§12). |
 | Settings | Gear button in the TABS rail header opens a pane. The same pane is the add-on's options page. |
 | Version | Foxy 3.0.0. |
 
@@ -117,7 +117,7 @@ preset: S 2, M 3, L 4, XL 5.
   - `settings` → the synced settings object (§7).
 - `storage.local`: `deviceSettings` → the device settings object (§7).
 - A commit writes only tiles whose rectangle changed (the moved tile and any
-  pushed tiles). Edits to different tiles on two devices both survive; the
+  pushed tiles; in a narrowed window also tiles the fit moved, §12). Edits to different tiles on two devices both survive; the
   same tile is last writer wins.
 - `storage.onChanged` (area `sync`) re-renders the board; held during drags.
 - Group tiles need the group's folder GUID. The `foxy:saved` reply gains
@@ -246,7 +246,8 @@ of §2 to §5 and §7 where they differ.
   the tile were released at the current target: tiles in the way move aside,
   and move back when the target changes. This layout is recomputed only when
   the target changes.
-- **Release:** the layout is saved at once (only moved and pushed tiles),
+- **Release:** the layout is saved at once (moved and pushed tiles; §12 in
+  narrowed windows; nothing if the release changes nothing on screen),
   and the tile slides from where it is into the outline.
   **Cancel** (Escape and the other cancel paths): the tile slides back to its
   start and the other tiles slide back.
@@ -262,7 +263,14 @@ Version: Foxy 3.1.0.
 User feedback on 3.1.0: shrinking the window by one column sent tiles to the
 far left even though closing an empty gap would have kept the layout. This
 replaces the display fit rule in §3 (and the "Narrow screens" row in §2).
-Saved positions still never change unless you move a tile.
+Resizing the window never saves anything. Moving or resizing a tile, or
+dropping a tab on the grid, in a window where the fit moved tiles saves
+the arrangement you see: every visible tile whose shown place differs
+from its saved place is written as shown, together with the moved and
+pushed tiles. A release that changes nothing on screen writes nothing.
+The tile then always lands in its outline, and the saved layout never
+overlaps. (Display places cannot be converted back to saved
+ones in general: steps 4 and 5 are not reversible.)
 
 `fit(tiles, cols)` (display only, visible tiles):
 

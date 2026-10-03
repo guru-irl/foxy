@@ -94,20 +94,60 @@ export function firstFree(tiles, size, cols, fromY = 0) {
   }
 }
 
-// Display only. First pass, in reading order: a tile stays where it is saved
-// if it is inside the columns and clear of the tiles kept before it. Second
-// pass, in reading order: every other tile is shown at the first free spot at
-// or below its own row, width capped at the columns.
+function sharesRow(a, b) {
+  return a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+// Display only: separate saved overlaps, cap widths, close empty columns,
+// then push left just enough. Wrap only tiles whose rows cannot fit.
 export function fit(tiles, cols) {
   cols = columns(cols);
   const result = tiles.map(tile => ({ ...tile }));
-  const kept = [], rest = [];
-  for (const tile of [...result].sort(readingOrder)) {
-    const stays = tile.x + tile.w <= cols && !kept.some(other => overlaps(tile, other));
-    (stays ? kept : rest).push(tile);
+  const ordered = [...result].sort(readingOrder), rest = new Set();
+  let kept = [];
+  for (const tile of ordered) {
+    if (kept.some(other => overlaps(tile, other))) rest.add(tile);
+    else kept.push(tile);
   }
-  for (const tile of rest) {
-    tile.w = Math.min(tile.w, cols);
+  for (const tile of result) tile.w = Math.min(tile.w, cols);
+
+  const leftToRight = [...kept].sort((a, b) => a.x - b.x || readingOrder(a, b));
+  const gaps = [];
+  let edge = 0;
+  for (const tile of leftToRight) {
+    if (tile.x > edge) gaps.push({ start: edge, end: tile.x });
+    edge = Math.max(edge, tile.x + tile.w);
+  }
+  // Removing an empty run at once is equivalent to closing its columns
+  // rightmost first, without scanning potentially large saved coordinates.
+  for (const gap of gaps.reverse()) {
+    if (edge <= cols) break;
+    const shift = Math.min(gap.end - gap.start, edge - cols);
+    for (const tile of kept) if (tile.x >= gap.end) tile.x -= shift;
+    edge -= shift;
+  }
+
+  if (edge > cols) {
+    const ends = new Map();
+    kept = [];
+    for (const tile of leftToRight) {
+      let left = 0;
+      for (const other of kept) if (sharesRow(tile, other)) left = Math.max(left, ends.get(other));
+      if (left + tile.w > cols) rest.add(tile);
+      else { kept.push(tile); ends.set(tile, left + tile.w); }
+    }
+    for (let i = kept.length - 1; i >= 0; i--) {
+      const tile = kept[i];
+      let limit = cols;
+      for (let j = i + 1; j < kept.length; j++) {
+        if (sharesRow(tile, kept[j])) limit = Math.min(limit, kept[j].x);
+      }
+      tile.x = Math.min(tile.x, limit - tile.w);
+    }
+  }
+  // Use saved reading order for both kinds of set-aside tile.
+  for (const tile of ordered) {
+    if (!rest.has(tile)) continue;
     Object.assign(tile, firstFree(kept, tile, cols, tile.y));
     kept.push(tile);
   }
@@ -132,4 +172,14 @@ export function changedTiles(before, after) {
     const old = previous.get(tile.id);
     return !old || ["x", "y", "w", "h"].some(key => old[key] !== tile[key]);
   });
+}
+
+// Writes for a committed move or resize (§12). A release that changes nothing
+// on screen writes nothing. Otherwise every shown tile whose place differs
+// from its saved place is written as shown, so the saved layout matches what
+// the user saw; shown tiles with no saved place count as saved where shown.
+export function gestureWrites(shown, saved, placed) {
+  if (!changedTiles(shown, placed).length) return [];
+  const byId = new Map(saved.map(tile => [tile.id, tile]));
+  return changedTiles(shown.map(tile => byId.get(tile.id) ?? tile), placed);
 }

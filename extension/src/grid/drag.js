@@ -1,4 +1,4 @@
-import { GAP, place, clampRect, changedTiles, railLimits, minSize } from "./layout.js";
+import { GAP, place, clampRect, gestureWrites, railLimits, minSize } from "./layout.js";
 import { scrollAtEdge } from "./scroll.js";
 
 /** onPreview receives changed rectangles; the controller builds display geometry
@@ -62,7 +62,7 @@ export function attachGridDrag(root, { view, canCommit, onPreview, onCommit, onC
     drag.target = target;
     for (const key of ["x", "y", "w", "h"]) drag.outline.style.setProperty(`--${key}`, target[key]);
     const placed = place(before.tiles, tile.id, target, before.cols);
-    drag.changed = changedTiles(before.tiles, placed);
+    drag.changed = gestureWrites(before.tiles, before.saved, placed);
     // The controller builds previews through the same placement path as release.
     onPreview(drag.changed);
   }
