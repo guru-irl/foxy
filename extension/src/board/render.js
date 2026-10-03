@@ -13,6 +13,7 @@ const layouts = new WeakMap();
 
 // Rendering and gesture previews use the same cell rectangles and scroll extent.
 export function positionTiles(grid, tiles) {
+  // The corner dots layer covers all occupied rows, including off-screen tiles.
   grid.style.setProperty("--rows", Math.max(0, ...tiles.map(tile => tile.y + tile.h)));
   const shown = new Map(tiles.map(tile => [tile.id, tile]));
   for (const node of grid.querySelectorAll(":scope > .tile")) {

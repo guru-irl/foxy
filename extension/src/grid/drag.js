@@ -19,6 +19,7 @@ export function attachGridDrag(root, { view, canCommit, onPreview, onCommit, onC
     root.setAttribute("data-grid-dragging", "");
     if (drag.kind === "rail") return;
     drag.grid.classList.add("gesturing");
+    drag.grid.addEventListener("scroll", preview, { passive: true });
     drag.node.classList.add("dragging");
     const step = drag.before.cell + GAP, tile = drag.tile;
     for (const [key, value] of Object.entries({ left: tile.x * step, top: tile.y * step,
@@ -98,21 +99,11 @@ export function attachGridDrag(root, { view, canCommit, onPreview, onCommit, onC
 
   async function settle(ended, commit) {
     const { grid, node } = ended;
-    node.classList.add("dragging");
-    // Freeze the current free rectangle before switching back to cell geometry.
-    const bounds = node.getBoundingClientRect(), origin = grid.getBoundingClientRect();
-    node.style.left = `${bounds.left - origin.left + grid.scrollLeft}px`;
-    node.style.top = `${bounds.top - origin.top + grid.scrollTop}px`;
-    node.style.width = `${bounds.width}px`;
-    node.style.height = `${bounds.height}px`;
-    node.style.transform = "none";
-    node.getBoundingClientRect();
     if (!commit) onPreview([]);
-    grid.classList.add("settling");
     node.classList.add("sliding");
     node.classList.remove("dragging");
     for (const key of geometry) node.style.removeProperty(key);
-    if (!detached && root.isConnected && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (!detached && root.isConnected) {
       await waitForSlides(grid);
     }
     grid.classList.remove("settling");
@@ -123,6 +114,7 @@ export function attachGridDrag(root, { view, canCommit, onPreview, onCommit, onC
   async function finish(commit) {
     if (!drag) return;
     const ended = drag;
+    ended.grid.removeEventListener("scroll", preview);
     drag = null;
     ending = true;
     cancelAnimationFrame(frame); frame = 0;
@@ -139,12 +131,6 @@ export function attachGridDrag(root, { view, canCommit, onPreview, onCommit, onC
       if (ended.active) {
         if (commit && ended.tile?.group) commit = await canCommit(ended.tile);
         commit &&= !detached;
-        if (ended.kind !== "rail") await settle(ended, commit);
-        if (commit && ended.tile?.group && !detached && !await canCommit(ended.tile)) {
-          commit = false;
-          await settle(ended, false);
-        }
-        commit &&= !detached;
         if (commit) {
           if (ended.kind === "rail") {
             if (ended.cells !== ended.before.railCells) onRail(ended.cells, true);
@@ -153,6 +139,8 @@ export function attachGridDrag(root, { view, canCommit, onPreview, onCommit, onC
           if (ended.kind === "rail") onRail(ended.before.railCells, false);
           onCancel();
         }
+        // Save at release; only held board renders wait for the visual slide.
+        if (ended.kind !== "rail") await settle(ended, commit);
       }
     } finally { ending = false; onState?.(false, ended.tile?.id); }
   }

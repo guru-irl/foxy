@@ -440,6 +440,7 @@ button.dot {
 
 .grid {
   position: relative;
+  isolation: isolate;
   flex: none;
   width: calc(var(--cols) * var(--pitch) - var(--gap));
   height: 100%;

@@ -14,7 +14,7 @@ const initial = {
   "tile:pinned": { x: 5, y: 0, w: 3, h: 4 },
   "tile:clock": { x: 5, y: 4, w: 5, h: 2 },
 };
-async function setup({ layout = initial, width = 1232, settings = {}, folders = { 1: "a", 2: "b" }, extraGroups = [], listener } = {}) {
+async function setup({ layout = initial, width = 1232, settings = {}, folders = { 1: "a", 2: "b" }, extraGroups = [], listener, withPane = false } = {}) {
   css ??= new Promise(resolve => {
     const link = document.createElement("link"); link.rel = "stylesheet"; link.href = "/extension/newtab.css";
     link.onload = resolve; document.head.append(link);
@@ -28,10 +28,17 @@ async function setup({ layout = initial, width = 1232, settings = {}, folders = 
       : message.type === "foxy:saved" ? { saved: [], missing: [], folders } : undefined));
   await ff.browser.storage.sync.set({ ...layout, settings }); await ff.settle();
   const root = document.createElement("div"); root.className = "board";
-  root.style.cssText = `width:${width}px;height:600px`; fixture().append(root);
+  root.style.cssText = `width:${width}px;height:600px`;
+  let pane;
+  if (withPane) {
+    const host = document.createElement("div"); host.className = "page";
+    host.style.cssText = `width:${width}px;height:600px`;
+    pane = document.createElement("aside"); pane.className = "settings-pane"; pane.hidden = true;
+    host.append(root, pane); fixture().append(host);
+  } else fixture().append(root);
   const control = createController(root, ff.browser);
   await control.refresh(); await flush(ff); ff.calls.length = 0;
-  return { ff, root, control };
+  return { ff, root, control, pane };
 }
 const tile = (root, id = "group:a") => [...root.querySelectorAll(".tile")].find(node => node.dataset.tileId === id);
 const header = root => tile(root).querySelector(".column-header");
@@ -498,6 +505,9 @@ for (const kind of ["move", "rail"]) {
       pointer("pointerup", document, target); await writeStarted;
       releaseRead(); await nextFrame(); releaseWrite(); await writeFinished;
       // Do not settle the fake: its storage.onChanged event is still queued.
+      // The move write now starts before the slide, so allow its render hold
+      // to end before requiring the stale snapshot's replacement read.
+      if (kind === "move") await new Promise(resolve => setTimeout(resolve, 330));
       for (let i = 0; i < 8; i++) await nextFrame();
       assert.equal(kind === "move" ? rect(tile(root)).y : Number(root.querySelector(".rail").style.getPropertyValue("--rail-cells")), kind === "move" ? 2 : 5);
       assert.equal(writes(ff).length, 1); assert.ok(reads >= 2, "a snapshot spanning our write must be re-read");
@@ -578,6 +588,92 @@ for (const kind of ["move", "resize"]) {
 const close = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 0.1,
   `${message}: expected ${expected}, got ${actual}`);
 const box = node => node.getBoundingClientRect();
+
+// Removing activate's pinned start geometry makes the tile jump by two cells.
+test("Q1 free follow keeps its start offset across a target change", async () => {
+  const { ff, root } = await setup();
+  const node = tile(root), before = box(node), start = down(header(root));
+  try {
+    pointer("pointermove", document, shifted(start, 37, 173));
+    close(box(node).left - before.left, 37, "free x after target change");
+    close(box(node).top - before.top, 173, "free y after target change");
+    assert.equal(rect(root.querySelector(".drop-outline")).y, 2);
+  } finally { escape(); await flush(ff); }
+});
+
+// Unchanged setProperty calls create no MutationObserver record. Count calls
+// at the real CSS boundary to catch removal of preview's same-target guard.
+test("Q2 same target does not rebuild preview", async () => {
+  const { ff, root } = await setup();
+  const start = down(header(root)), original = CSSStyleDeclaration.prototype.setProperty;
+  let calls = 0;
+  try {
+    pointer("pointermove", document, shifted(start, 0, 192));
+    CSSStyleDeclaration.prototype.setProperty = function (name, ...rest) {
+      if (name === "--x") calls++;
+      return original.call(this, name, ...rest);
+    };
+    for (let i = 0; i < 10; i++) pointer("pointermove", document, shifted(start, 5 + i, 200));
+    assert.equal(calls, 0, "same-target moves must not rebuild tile geometry");
+  } finally { CSSStyleDeclaration.prototype.setProperty = original; escape(); await flush(ff); }
+});
+
+// Removing positionTiles' --rows leaves a zero-height dots layer.
+test("Q3 dots layer covers the viewport and occupied rows during a gesture", async () => {
+  const { ff, root } = await setup({ layout: { ...initial, "tile:clock": { x: 5, y: 20, w: 5, h: 2 } } });
+  const grid = root.querySelector(".grid"), dots = grid.querySelector(".grid-corners");
+  const start = down(header(root));
+  try {
+    pointer("pointermove", document, shifted(start, 37, 173));
+    assert.ok(grid.classList.contains("gesturing"));
+    const height = box(dots).height;
+    assert.ok(height >= grid.clientHeight, `dots layer height ${height} must cover viewport ${grid.clientHeight}`);
+    assert.ok(height >= 2096, `dots layer height ${height} must cover 22 rows at 96px pitch minus 16px gap`);
+  } finally { escape(); await flush(ff); }
+});
+
+// Missing a gesture scroll listener leaves both free geometry and target stale.
+for (const kind of ["move", "resize"]) {
+  test(`scroll during ${kind} keeps the free edge under the pointer and updates the outline`, async () => {
+    const { ff, root } = await setup({ layout: { ...initial, "tile:clock": { x: 5, y: 20, w: 5, h: 2 } } });
+    const grid = root.querySelector(".grid"), node = tile(root);
+    const start = down(kind === "move" ? header(root) : node.querySelector(".tile-resize"));
+    try {
+      pointer("pointermove", document, shifted(start, 37, 100));
+      const before = box(node);
+      grid.scrollTop = 200; grid.dispatchEvent(new Event("scroll"));
+      await nextFrame(); await nextFrame();
+      const after = box(node), outline = root.querySelector(".drop-outline");
+      close(kind === "move" ? after.top : after.bottom, kind === "move" ? before.top : before.bottom,
+        "free pointer edge after scroll");
+      close(after.left, before.left, "free x after scroll");
+      assert.deepEqual(rect(outline), kind === "move" ? { x: 0, y: 3, w: 3, h: 4 } : { x: 0, y: 0, w: 3, h: 7 });
+      close(kind === "move" ? box(outline).top : box(outline).bottom,
+        box(grid).top + (kind === "move" ? 88 : 456), "outline follows scrolled content cell");
+      assert.deepEqual(writes(ff), []);
+    } finally { escape(); await flush(ff); }
+    // A later scroll on the old container must not call preview for a finished drag.
+    grid.dispatchEvent(new Event("scroll"));
+  });
+}
+
+// Without grid isolation, the dragged tile's z-index escapes above the pane.
+test("a dragged tile stays below the open settings pane where they overlap", async () => {
+  const { ff, root, pane } = await setup({ withPane: true });
+  root.querySelector(".settings-cell").click();
+  assert.equal(pane.hidden, false);
+  await new Promise(resolve => setTimeout(resolve, 220));
+  const grid = root.querySelector(".grid"), start = down(header(root));
+  try {
+    pointer("pointermove", document, shifted(start, 800, 21));
+    assert.ok(tile(root).classList.contains("dragging"));
+    const x = box(grid).right - 20, y = box(grid).top + 100;
+    assert.ok(x > box(pane).left && y < box(pane).bottom, "probe lies inside the pane");
+    assert.ok(x > box(tile(root)).left && y > box(tile(root)).top, "dragged tile overlaps the probe");
+    const hit = document.elementFromPoint(x, y);
+    assert.ok(hit === pane || pane.contains(hit), `pane must cover dragged content, got ${hit?.className}`);
+  } finally { escape(); await flush(ff); }
+});
 
 // Snapping the captured tile instead of just its target loses these exact deltas.
 test("free move follows 37px by 21px while the neutral outline stays snapped", async () => {
@@ -691,7 +787,7 @@ test("cell-corner dots fade only for tile gestures, centred in gap intersections
 
 for (const kind of ["move", "resize"]) {
   for (const end of ["release", "cancel"]) {
-    test(`${kind} ${end} slides before writes and held remote renders are released`, async () => {
+    test(`${kind} ${end} holds remote renders through the slide but release saves at once`, async () => {
       const { ff, root, control } = await setup();
       const node = tile(root), neighbour = tile(root, "group:b"), original = box(node);
       const source = kind === "move" ? header(root) : node.querySelector(".tile-resize"), start = down(source);
@@ -701,11 +797,13 @@ for (const kind of ["move", "resize"]) {
       await flush(ff); ff.calls.length = 0;
       const pinned = tile(root, "pinned");
       if (end === "release") pointer("pointerup", document, shifted(start, 37, 173)); else escape();
-      await Promise.resolve(); await Promise.resolve();
+      for (let i = 0; i < 6; i++) await Promise.resolve();
       assert.equal(control.ui.gridDragging, true, "hold extends through settlement");
       assert.equal(tile(root), node, "captured node is retained while sliding");
       assert.equal(tile(root, "pinned"), pinned); assert.equal(rect(pinned).y, 0);
-      assert.deepEqual(writes(ff), [], "saving follows the slide");
+      assert.deepEqual(writes(ff), end === "cancel" ? [] : [{ "tile:group:a": kind === "move"
+        ? { x: 0, y: 2, w: 3, h: 4 } : { x: 0, y: 0, w: 3, h: 6 },
+        "tile:group:b": { x: 0, y: 6, w: 3, h: 4 } }], "release saves before the visual slide ends");
       const beforeSlide = box(node);
       assert.equal(getComputedStyle(node).zIndex, "3", "settling tile stays above the outline and neighbours");
       await new Promise(resolve => setTimeout(resolve, 80));
@@ -724,6 +822,29 @@ for (const kind of ["move", "resize"]) {
     });
   }
 }
+
+// Releasing onState before the slide ends replaces the captured node and jumps
+// to a board update that arrives after pointerup, not just one held before it.
+test("a board update arriving during the release slide stays held until landing", async () => {
+  const { ff, root, control } = await setup();
+  const node = tile(root), pinned = tile(root, "pinned"), start = down(header(root));
+  const target = shifted(start, 37, 173);
+  pointer("pointermove", document, target);
+  const landing = box(root.querySelector(".drop-outline"));
+  pointer("pointerup", document, target); await nextFrame();
+  const dropWrites = [{ "tile:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:group:b": { x: 0, y: 6, w: 3, h: 4 } }];
+  assert.deepEqual(writes(ff), dropWrites, "release saved before the incoming update");
+  const remote = { "tile:pinned": { x: 5, y: 20, w: 3, h: 4 } };
+  await ff.browser.storage.sync.set(remote); await ff.settle();
+  assert.equal(control.ui.gridDragging, true);
+  assert.equal(tile(root), node, "the sliding node must not be replaced");
+  assert.equal(tile(root, "pinned"), pinned); assert.equal(rect(pinned).y, 0, "incoming update is held");
+  await flush(ff);
+  assert.equal(control.ui.gridDragging, false); assert.equal(rect(tile(root, "pinned")).y, 20);
+  close(box(tile(root)).left, landing.left, "landing x after held render");
+  close(box(tile(root)).top, landing.top, "landing y after held render");
+  assert.deepEqual(writes(ff), [...dropWrites, remote], "no duplicate drop or unrelated tile write");
+});
 
 test("free resize follows the pointer in pixels and clamps to minimum and available width", async () => {
   const { ff, root } = await setup(), node = tile(root), original = box(node);
@@ -763,20 +884,19 @@ test("settlement has a timeout when transitionend is missing and ignores unrelat
   pointer("pointerup", document, shifted(start, 37, 173));
   node.dispatchEvent(new TransitionEvent("transitionend", { bubbles: true, propertyName: "opacity" }));
   await new Promise(resolve => setTimeout(resolve, 250));
-  assert.equal(control.ui.gridDragging, true); assert.deepEqual(writes(ff), []);
+  assert.equal(control.ui.gridDragging, true); assert.equal(writes(ff).length, 1, "saving does not wait for the fallback");
   await flush(ff); assert.equal(control.ui.gridDragging, false); assert.equal(writes(ff).length, 1);
 });
 
 // Firefox's media preference is browser-owned. Enable its real media rules in
-// the stylesheet and supply the matching preference at the JS boundary.
+// the stylesheet; the absence of CSS transitions must also skip the slide wait.
 test("reduced motion makes neighbour and release positions immediate without a hold delay", async () => {
   const { ff, root, control } = await setup();
   const rules = [...document.styleSheets].filter(sheet => sheet.href?.endsWith("/extension/newtab.css"))
     .flatMap(sheet => [...sheet.cssRules]).filter(rule => rule.conditionText === "(prefers-reduced-motion: reduce)");
-  const conditions = rules.map(rule => rule.media.mediaText), media = window.matchMedia;
+  const conditions = rules.map(rule => rule.media.mediaText);
   try {
     rules.forEach(rule => { rule.media.mediaText = "all"; });
-    window.matchMedia = query => query === "(prefers-reduced-motion: reduce)" ? { matches: true } : media(query);
     const node = tile(root), start = down(header(root));
     pointer("pointermove", document, shifted(start, 37, 173));
     assert.equal(getComputedStyle(tile(root, "group:b")).transitionDuration, "0s");
@@ -786,7 +906,7 @@ test("reduced motion makes neighbour and release positions immediate without a h
     for (let i = 0; i < 5; i++) await Promise.resolve();
     close(box(tile(root)).left, target.left, "immediate landing x"); close(box(tile(root)).top, target.top, "immediate landing y");
     assert.equal(control.ui.gridDragging, false); await flush(ff); assert.equal(writes(ff).length, 1);
-  } finally { window.matchMedia = media; rules.forEach((rule, i) => { rule.media.mediaText = conditions[i]; }); escape(); await flush(ff); }
+  } finally { rules.forEach((rule, i) => { rule.media.mediaText = conditions[i]; }); escape(); await flush(ff); }
 });
 
 
@@ -799,16 +919,15 @@ test("real geometry transitionend releases settlement before the fallback, unrel
   node.dispatchEvent(new TransitionEvent("transitionend", { bubbles: true, propertyName: "opacity" }));
   source.dispatchEvent(new TransitionEvent("transitionend", { bubbles: true, propertyName: "top" }));
   assert.equal(control.ui.gridDragging, true, "only pending tile geometry transitions can end the hold");
-  assert.deepEqual(writes(ff), []);
+  assert.equal(writes(ff).length, 1, "release already saved while geometry transitions are pending");
   await new Promise(resolve => setTimeout(resolve, 240));
   assert.equal(control.ui.gridDragging, false, "real transitionend must finish without waiting for 300ms");
   await flush(ff); assert.equal(writes(ff).length, 1);
 });
 
 
-// Saving is delayed by the new slide, so the existing closed-group write gate
-// must also cover a group that disappears between pointerup and settlement.
-test("a group closed during its release slide cannot save itself or its preview pushes", async () => {
+// A visual slide cannot revoke a drop accepted by the release-time group gate.
+test("a group closed during its release slide keeps the accepted drop and pushes", async () => {
   const { ff, root, control } = await setup();
   const start = down(header(root)), target = shifted(start, 37, 173);
   pointer("pointermove", document, target); pointer("pointerup", document, target);
@@ -818,6 +937,49 @@ test("a group closed during its release slide cannot save itself or its preview 
   assert.ok(tile(root), "group removal stays held during settlement");
   await new Promise(resolve => setTimeout(resolve, 650)); await flush(ff);
   assert.equal(control.ui.gridDragging, false); assert.equal(tile(root), undefined);
-  assert.deepEqual(rect(tile(root, "group:b")), initial["tile:group:b"]);
-  assert.deepEqual(writes(ff), [], "no closed-group or pushed-neighbour writes");
+  assert.deepEqual(rect(tile(root, "group:b")), { x: 0, y: 6, w: 3, h: 4 });
+  assert.deepEqual(writes(ff), [{ "tile:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:group:b": { x: 0, y: 6, w: 3, h: 4 } }]);
+  assert.equal(ff.calls.filter(call => call.api === "tabGroups.get").length, 1, "the group gate runs only at release");
+});
+
+// Delaying onCommit until settlement loses these releases to the unload gate.
+for (const id of ["group:a", "clock"]) {
+  for (const kind of ["move", "resize"]) {
+    test(`pagehide right after ${id} ${kind} release preserves the gesture write`, async () => {
+      const { ff, root, control } = await setup(), node = tile(root, id);
+      const source = node.querySelector(kind === "resize" ? ".tile-resize" : id === "clock" ? ".tile-header" : ".column-header");
+      const start = down(source), target = shifted(start, 37, 173);
+      pointer("pointermove", document, target); pointer("pointerup", document, target);
+      // Group releases have the same asynchronous existence check as 3.0.0.
+      // Non-group pagehide is synchronous with pointerup, before any microtask.
+      if (id === "group:a") for (let i = 0; i < 6; i++) await Promise.resolve();
+      assert.equal(control.ui.gridDragging, true, "pagehide precedes the end of the visual slide");
+      window.dispatchEvent(new Event("pagehide"));
+      await flush(ff);
+      const wanted = id === "clock" ? { "tile:clock": kind === "move"
+        ? { x: 5, y: 6, w: 5, h: 2 } : { x: 5, y: 4, w: 5, h: 4 } }
+        : { "tile:group:a": kind === "move" ? { x: 0, y: 2, w: 3, h: 4 } : { x: 0, y: 0, w: 3, h: 6 },
+          "tile:group:b": { x: 0, y: 6, w: 3, h: 4 } };
+      assert.deepEqual(writes(ff), [wanted], "accepted drop saves exactly once, with 3.0.0 tile rectangles");
+      const stored = await ff.browser.storage.sync.get(Object.keys(wanted));
+      assert.deepEqual(stored, wanted);
+      assert.equal(control.ui.gridDragging, false);
+    });
+  }
+}
+
+// Unload before the release-time existence check resolves still cancels a drop.
+test("pagehide during the release group check prevents the gesture write", async () => {
+  const { ff, root, control } = await setup(), get = ff.browser.tabGroups.get;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  ff.browser.tabGroups.get = async id => { await gate; return get(id); };
+  try {
+    const start = down(header(root)), target = shifted(start, 37, 173);
+    pointer("pointermove", document, target); pointer("pointerup", document, target);
+    window.dispatchEvent(new Event("pagehide"));
+    release(); await flush(ff);
+    assert.deepEqual(writes(ff), []);
+    assert.equal(control.ui.gridDragging, false);
+  } finally { release(); ff.browser.tabGroups.get = get; }
 });

@@ -246,8 +246,8 @@ of §2 to §5 and §7 where they differ.
   the tile were released at the current target: tiles in the way move aside,
   and move back when the target changes. This layout is recomputed only when
   the target changes.
-- **Release:** the tile slides from where it is into the outline, then the
-  layout is saved as before (only moved and pushed tiles are written).
+- **Release:** the layout is saved at once (only moved and pushed tiles),
+  and the tile slides from where it is into the outline.
   **Cancel** (Escape and the other cancel paths): the tile slides back to its
   start and the other tiles slide back.
 - **Resize:** the tile's size follows the pointer freely (not below its
