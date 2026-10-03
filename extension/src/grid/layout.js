@@ -173,3 +173,13 @@ export function changedTiles(before, after) {
     return !old || ["x", "y", "w", "h"].some(key => old[key] !== tile[key]);
   });
 }
+
+// Writes for a committed move or resize (§12). A release that changes nothing
+// on screen writes nothing. Otherwise every shown tile whose place differs
+// from its saved place is written as shown, so the saved layout matches what
+// the user saw; shown tiles with no saved place count as saved where shown.
+export function gestureWrites(shown, saved, placed) {
+  if (!changedTiles(shown, placed).length) return [];
+  const byId = new Map(saved.map(tile => [tile.id, tile]));
+  return changedTiles(shown.map(tile => byId.get(tile.id) ?? tile), placed);
+}

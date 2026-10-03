@@ -81,6 +81,44 @@ for (const kind of ["move", "resize"]) {
   });
 }
 
+// A release in place used to save the whole fitted arrangement (§12: only real changes save it).
+for (const [name, cls, moves] of [
+  ["move out one row and back", ".column-header", [[0, 96], [0, 0]]],
+  ["resize out one row and back", ".tile-resize", [[0, 96], [0, 0]]],
+  ["6 px jiggle on the header", ".column-header", [[6, 0]]],
+]) {
+  test(`19-column ${name} releases in place and writes nothing`, async () => {
+    const { ff, root } = await setup(2096);
+    const before = shown(root);
+    const source = tile(root, "group:f").querySelector(cls), bounds = source.getBoundingClientRect();
+    const start = { clientX: bounds.left + bounds.width / 2, clientY: bounds.top + bounds.height / 2 };
+    let at = start;
+    pointer("pointerdown", source, start);
+    for (const [dx, dy] of moves) {
+      at = { clientX: start.clientX + dx, clientY: start.clientY + dy };
+      pointer("pointermove", document, at);
+    }
+    pointer("pointerup", document, at); await flush(ff);
+    assert.deepEqual(writes(ff), []);
+    assert.deepEqual(shown(root), before);
+  });
+}
+
+test("12-column header jiggle then widening shows the saved wide layout again", async () => {
+  const { ff, root } = await setup(2192);
+  const wide = shown(root);
+  root.style.width = "1424px"; window.dispatchEvent(new Event("resize")); await flush(ff);
+  assert.equal(root.querySelector(".grid").style.getPropertyValue("--cols"), "12");
+  const source = tile(root, "group:f").querySelector(".column-header"), bounds = source.getBoundingClientRect();
+  const start = { clientX: bounds.left + bounds.width / 2, clientY: bounds.top + bounds.height / 2 };
+  const at = { clientX: start.clientX + 6, clientY: start.clientY };
+  pointer("pointerdown", source, start); pointer("pointermove", document, at);
+  pointer("pointerup", document, at); await flush(ff);
+  root.style.width = "2192px"; window.dispatchEvent(new Event("resize")); await flush(ff);
+  assert.deepEqual(writes(ff), []);
+  assert.deepEqual(shown(root), wide);
+});
+
 // A drop at x=14/10 used to shift to x=13/5 when its bookmark mapping arrived.
 for (const [cols, width, x] of [[19, 2096, 14], [15, 1712, 10]]) {
   test(`${cols}-column tab drop at (${x},9) keeps its shown place after folder mapping`, async () => {
