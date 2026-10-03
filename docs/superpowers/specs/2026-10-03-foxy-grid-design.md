@@ -201,3 +201,57 @@ preset: S 2, M 3, L 4, XL 5.
 Keyboard moving and resizing of tiles; tiles for single tabs; per-window
 layouts; theme settings (the theme is read by Firefox at startup and an
 add-on cannot change it).
+
+## 11. Foxy 3.1.0: edge to edge, Android-style drag, gear cell
+
+User feedback on 3.0.0 (2026-10-03). These rules replace the matching parts
+of §2 to §5 and §7 where they differ.
+
+### 11.1 Edge to edge
+
+- The board fills the page like a normal web page: no outer margins on any
+  side. The theme draws the page as a card with 12 px corners; tiles also
+  have 12 px corners, so corner tiles fit it exactly.
+- Cells stretch so whole columns fill the width exactly:
+  `total = totalColumns(pageWidth, preset)`,
+  `cell = (pageWidth + 16) / total - 16` (fractional px allowed). Cells stay
+  square (row pitch equals column pitch). The cell size setting is the
+  target size; the real cell is at least that and less than one pitch more.
+- Gaps between tiles stay 16 px. The grid scrolls vertically from the very
+  top to the very bottom of the page.
+
+### 11.2 Gear cell
+
+- The gear is no longer in the TABS header. It sits in its own 1 × 1 card in
+  the bottom right cell of the page.
+- The TABS rail keeps its width and runs from the top of the page down to
+  one gap above the gear cell. The space left of the gear cell is empty.
+- The settings pane runs from the top of the page to one gap above the gear
+  cell, at the right edge, 360 px wide, 12 px corners. The gear stays
+  visible and toggles the pane.
+
+### 11.3 Moving and resizing tiles
+
+- **During a move** the tile follows the pointer freely (no snapping), above
+  the other tiles.
+- **Target:** the snapped rectangle under the tile (the §5 snapping and
+  `clampRect` rules), shown as an outline: a 2 px neutral line with a faint
+  fill and 12 px corners. The user asked for this outline; it is the only
+  outline on the board.
+- **Corner dots:** while a move or resize is in progress, a small neutral dot
+  marks every cell corner of the grid. They fade in when the gesture starts
+  and out when it ends.
+- **Other tiles** slide (about 200 ms) to the layout the board would show if
+  the tile were released at the current target: tiles in the way move aside,
+  and move back when the target changes. This layout is recomputed only when
+  the target changes.
+- **Release:** the tile slides from where it is into the outline, then the
+  layout is saved as before (only moved and pushed tiles are written).
+  **Cancel** (Escape and the other cancel paths): the tile slides back to its
+  start and the other tiles slide back.
+- **Resize:** the tile's size follows the pointer freely (not below its
+  minimum size), with the same outline, dots, sliding and release rules.
+- The TABS rail edge keeps snapping in whole cells.
+- With reduced motion, nothing slides; positions change at once.
+
+Version: Foxy 3.1.0.
