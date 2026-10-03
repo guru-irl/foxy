@@ -69,9 +69,15 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     pendingTiles.clear();
     heldWrites.clear();
   });
-  // A minimum-width board can overflow; its page remains the cell-size target.
   const page = root.parentElement?.matches(".page") ? root.parentElement : root;
-  const pageWidth = () => page.getBoundingClientRect().width;
+  // Measure the available width, not the below-three-column overflow floor.
+  const pageWidth = () => {
+    const minimum = page.style.minWidth;
+    page.style.minWidth = "0px";
+    const width = page.getBoundingClientRect().width;
+    page.style.minWidth = minimum;
+    return width;
+  };
   const gear = () => root.querySelector(".settings-cell");
   function setPaneOpen(open) {
     if (!settingsPane) return;
@@ -408,6 +414,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       restoreView(root, saved);
       lastRenderedKey = key;
     }
+    if (page !== root) page.style.minWidth = root.style.getPropertyValue("--board-min-width");
     if (settingsPane) {
       settingsPane.style.setProperty("--cell", `${view.cell}px`);
       settingsPane.style.setProperty("--board-width", root.style.getPropertyValue("--board-width"));

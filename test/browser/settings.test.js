@@ -548,9 +548,9 @@ for (const width of [401, 301]) {
   });
 }
 
-async function newtab(ff, width) {
+async function newtab(ff, width, height = 720) {
   const frame = document.createElement("iframe");
-  frame.style.cssText = `position:fixed;top:0;left:0;width:${width}px;height:720px;border:0;z-index:10`;
+  frame.style.cssText = `position:fixed;top:0;left:0;width:${width}px;height:${height}px;border:0;z-index:10`;
   fixture().append(frame);
   const html = await (await fetch("/extension/newtab.html")).text();
   frame.contentWindow.browser = ff.browser;
@@ -561,6 +561,97 @@ async function newtab(ff, width) {
   return frame;
 }
 
+// The controller must persist target-setting defaults, not viewport-dependent
+// stretched defaults, when the same group is first mapped on a new device.
+test("new groups save the same XL default size at 1600 and 1000 px", async () => {
+  const sizes = [];
+  for (const width of [1600, 1000]) {
+    const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], selfTabId: 99,
+      groups: [{ id: 1, windowId: 1, title: "New group" }],
+      tabs: [{ id: 10, windowId: 1, groupId: 1 }, { id: 99, windowId: 1 }] },
+      message => message.type === "foxy:reconcile" ? { ok: true } : message.type === "foxy:saved"
+        ? { folders: { 1: "one" }, saved: [], missing: [] } : undefined);
+    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "XL" } });
+    const frame = await newtab(ff, width);
+    try {
+      const stored = await ff.browser.storage.sync.get("tile:group:one");
+      const group = stored["tile:group:one"];
+      assert.ok(group, "a mapped group has a saved placement");
+      sizes.push([group.w, group.h]);
+    } finally { frame.remove(); }
+  }
+  assert.deepEqual(sizes, [[2, 3], [2, 3]]);
+});
+
+async function missingNewtab(width, height) {
+  const { ff } = await setup(), send = ff.browser.runtime.sendMessage;
+  ff.browser.runtime.sendMessage = async message => {
+    const reply = await send(message);
+    return message.type === "foxy:saved" ? { ...reply, missing: [{ folderId: "missing" }] } : reply;
+  };
+  return newtab(ff, width, height);
+}
+
+// The rail's border-box padding has a floor even when its height resolves to zero.
+test("a 700 by 140 newtab with a missing banner scrolls to an intact gear below the rail", async () => {
+  const frame = await missingNewtab(700, 140), doc = frame.contentDocument, win = frame.contentWindow;
+  try {
+    assert.ok(doc.querySelector(".banner"));
+    const rail = doc.querySelector(".rail").getBoundingClientRect();
+    const gear = doc.querySelector(".settings-cell"), box = gear.getBoundingClientRect();
+    const cell = parseFloat(win.getComputedStyle(gear).width);
+    assert.ok(rail.height >= 0, "rail height cannot be negative");
+    assert.ok(Math.abs(rail.bottom + 16 - box.top) < 0.5,
+      `rail must stop one gap above the gear: ${rail.bottom} vs ${box.top}`);
+    assert.ok(Math.abs(box.height - cell) < 0.5, "gear keeps its full square cell");
+    assert.ok(doc.scrollingElement.scrollHeight > doc.scrollingElement.clientHeight,
+      "a short window scrolls vertically instead of shrinking the gear area");
+    gear.scrollIntoView({ block: "end", inline: "nearest" });
+    await nextFrame(); await nextFrame();
+    const visible = gear.getBoundingClientRect();
+    assert.ok(visible.top >= -0.5 && visible.bottom <= win.innerHeight + 0.5,
+      `the full gear is visible after scrolling: ${visible.top}..${visible.bottom}, viewport ${win.innerHeight}, scroll ${win.scrollY}/${win.scrollMaxY}`);
+    const hit = doc.elementFromPoint((visible.left + visible.right) / 2, (visible.top + visible.bottom) / 2);
+    assert.ok(hit === gear || gear.contains(hit), "the visible gear is reachable");
+  } finally { frame.remove(); }
+});
+
+// A wide banner must use the board width rather than reserving removed margins.
+test("a long missing-groups banner can fill the edge-to-edge board width", async () => {
+  const frame = await missingNewtab(700, 720), doc = frame.contentDocument;
+  try {
+    const banner = doc.querySelector(".banner");
+    banner.querySelector(".banner-text").textContent = "Missing group ".repeat(100);
+    const box = banner.getBoundingClientRect(), board = doc.querySelector(".board").getBoundingClientRect();
+    assert.ok(Math.abs(box.width - board.width) < 0.5,
+      `banner uses the board width: ${box.width} vs ${board.width}`);
+  } finally { frame.remove(); }
+});
+
+// An absolute pane translated beyond the page must not add classic scrollbars
+// or cause the resulting ResizeObserver feedback loop on first open.
+for (const width of [1600, 401]) {
+  test(`real newtab pane slide at ${width}px has no document overflow or window errors`, async () => {
+    const { ff } = await setup(), frame = await newtab(ff, width);
+    const doc = frame.contentDocument, win = frame.contentWindow, errors = [], samples = [];
+    const onError = event => errors.push(event.message);
+    win.addEventListener("error", onError);
+    try {
+      await flush(ff);
+      doc.querySelector(".settings-cell").click();
+      for (let i = 0; i < 24; i++) {
+        await nextFrame();
+        const scroll = doc.scrollingElement;
+        samples.push([scroll.scrollWidth - scroll.clientWidth, win.scrollMaxX,
+          scroll.scrollHeight - scroll.clientHeight]);
+      }
+      assert.ok(samples.every(sample => sample.every(value => value === 0)),
+        `slide must not overflow: ${JSON.stringify(samples)}; errors: ${JSON.stringify(errors)}`);
+      assert.deepEqual(errors, [], "opening the real pane must not log a window error");
+    } finally { win.removeEventListener("error", onError); frame.remove(); }
+  });
+}
+
 // Accepted minimum-column ruling: the board may overflow horizontally, but
 // it must not centre tiles off the left edge or strand its gear/pane controls.
 for (const width of [175, 240]) {
@@ -569,7 +660,8 @@ for (const width of [175, 240]) {
     const frame = await newtab(ff, width), doc = frame.contentDocument, win = frame.contentWindow;
     const root = doc.querySelector(".board"), grid = root.querySelector(".grid"), rail = root.querySelector(".rail"), gear = root.querySelector(".settings-cell"), pane = doc.querySelector(".settings-pane");
     const box = root.getBoundingClientRect(), page = doc.querySelector(".page").getBoundingClientRect();
-    assert.ok(box.width > page.width, "minimum columns widen the board, not the cell target");
+    assert.ok(page.width > win.innerWidth, "minimum columns widen the page without changing the cell target");
+    assert.ok(Math.abs(box.width - page.width) < 0.5, "board fills the widened page");
     assert.ok(Math.abs(box.left - page.left) < 0.5, "overflow starts at the left edge");
     assert.ok(Math.abs(grid.getBoundingClientRect().right + 16 - rail.getBoundingClientRect().left) < 0.5);
     assert.ok(gear.getBoundingClientRect().left >= grid.getBoundingClientRect().right + 16 - 0.5);

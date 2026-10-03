@@ -63,6 +63,7 @@ body {
   position: relative;
   box-sizing: border-box;
   height: 100vh;
+  overflow-x: clip;
   display: flex;
   flex-direction: column;
 }
@@ -261,7 +262,7 @@ body {
   align-items: center;
   align-self: center;
   flex: none;
-  max-width: calc(100% - 48px);
+  max-width: 100%;
   box-sizing: border-box;
   margin-bottom: 16px;
   padding: 8px 16px;
@@ -432,8 +433,7 @@ button.dot {
   display: flex;
   justify-content: flex-start;
   flex: 1;
-  min-height: 0;
-  min-width: var(--board-min-width, 0px);
+  min-height: calc(var(--cell) + 2 * var(--gap) + 2 * var(--column-padding));
   position: relative;
   gap: var(--gap);
 }
@@ -448,15 +448,6 @@ button.dot {
   overflow-x: hidden;
   /* Classic scrollbars must not take width from the whole-cell tracks. */
   scrollbar-width: none;
-}
-
-/* Absolute tiles do not set the flow height. Keep exactly the occupied rows,
-   including gaps, so the final row can reach the bottom of the viewport. */
-.grid::after {
-  content: "";
-  display: block;
-  height: max(0px, calc(var(--rows) * var(--pitch) - var(--gap)));
-  pointer-events: none;
 }
 
 .rail {

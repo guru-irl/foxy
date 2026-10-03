@@ -217,6 +217,7 @@ of §2 to §5 and §7 where they differ.
   `cell = (pageWidth + 16) / total - 16` (fractional px allowed). Cells stay
   square (row pitch equals column pitch). The cell size setting is the
   target size; the real cell is at least that and less than one pitch more.
+  Default tile sizes (§3) use the cell size setting, not the stretched cell.
 - Gaps between tiles stay 16 px. The grid scrolls vertically from the very
   top to the very bottom of the page.
 
