@@ -178,7 +178,7 @@ test("place adds a new tile and clamps it to the minimum and column count", () =
   ]);
 });
 
-test("fit leaves fitting tiles and moves overflow to the first free spot at or below its row", () => {
+test("fit caps widths and moves overflow left only as far as needed", () => {
   const original = [
     { id: "pinned", x: 0, y: 0, w: 3, h: 4 },
     { id: "group:a", x: 8, y: 0, w: 4, h: 2 },
@@ -188,7 +188,7 @@ test("fit leaves fitting tiles and moves overflow to the first free spot at or b
   const after = fit(before, 10);
   assert.deepEqual(after, [
     original[0],
-    { id: "group:a", x: 3, y: 0, w: 4, h: 2 },
+    { id: "group:a", x: 6, y: 0, w: 4, h: 2 },
     { id: "saved", x: 0, y: 6, w: 10, h: 2 },
   ]);
   assert.deepEqual(before, original);
@@ -222,6 +222,104 @@ test("fit caps wide tiles and resolves a long narrow-screen overflow chain", () 
   }
   assertNoOverlaps(after);
   assert.deepEqual(fit([], 1), []);
+});
+
+const userLayout = [
+  { id: "clock", x: 0, y: 0, w: 4, h: 2 },
+  { id: "pinned", x: 0, y: 2, w: 4, h: 6 },
+  { id: "group:dev-server", x: 10, y: 0, w: 5, h: 3 },
+  { id: "group:coverage", x: 15, y: 0, w: 5, h: 3 },
+  { id: "group:oce", x: 10, y: 3, w: 5, h: 3 },
+  { id: "group:to-be-reviewed", x: 15, y: 3, w: 5, h: 3 },
+  { id: "group:left-bottom", x: 10, y: 6, w: 5, h: 3 },
+  { id: "group:harness", x: 15, y: 6, w: 5, h: 3 },
+];
+
+// Old first-free wrapping swaps neighbours even when an empty column can close.
+for (const lost of [1, 5]) {
+  test(`fit closes the user's gap at ${lost} fewer columns without swapping neighbours`, () => {
+    const before = freezeTiles(structuredClone(userLayout));
+    const after = fit(before, 20 - lost);
+    assert.deepEqual(after, userLayout.map(tile => ({ ...tile, x: tile.x >= 10 ? tile.x - lost : tile.x })));
+    assert.deepEqual(before, userLayout);
+    assertNoOverlaps(after);
+  });
+}
+
+test("fit removes only the needed empty columns, rightmost gap first", () => {
+  const before = freezeTiles([
+    { id: "left", x: 0, y: 0, w: 2, h: 2 },
+    { id: "middle", x: 4, y: 0, w: 2, h: 2 },
+    { id: "right", x: 9, y: 0, w: 2, h: 2 },
+  ]);
+  assert.deepEqual(fit(before, 10), [before[0], before[1], { ...before[2], x: 8 }]);
+  assert.deepEqual(fit(before, 7), [before[0], { ...before[1], x: 3 }, { ...before[2], x: 5 }]);
+  assert.deepEqual(fit(before, 11), before, "a fitting layout keeps every gap");
+});
+
+test("fit pushes only tiles in the way left by the minimum when no column is empty", () => {
+  const before = freezeTiles([
+    { id: "short", x: 0, y: 0, w: 2, h: 2 },
+    { id: "middle", x: 3, y: 0, w: 3, h: 2 },
+    { id: "right", x: 7, y: 0, w: 3, h: 2 },
+    { id: "full-other-row", x: 0, y: 3, w: 10, h: 2 },
+  ]);
+  assert.deepEqual(fit(before, 8), [before[0], { ...before[1], x: 2 }, { ...before[2], x: 5 },
+    { ...before[3], w: 8 }]);
+});
+
+test("fit wraps the trailing tile, not the left tiles, when a row cannot fit", () => {
+  const before = freezeTiles([
+    { id: "right", x: 5, y: 0, w: 3, h: 2 },
+    { id: "left", x: 0, y: 0, w: 3, h: 2 },
+    { id: "middle", x: 3, y: 0, w: 2, h: 2 },
+  ]);
+  assert.deepEqual(fit(before, 6), [{ ...before[0], x: 0, y: 2 }, before[1], before[2]]);
+  const staggered = freezeTiles([
+    { id: "right-tall", x: 6, y: 0, w: 3, h: 4 },
+    { id: "left-lower", x: 3, y: 2, w: 3, h: 2 },
+  ]);
+  assert.deepEqual(fit(staggered, 5), [
+    { ...staggered[0], x: 0, y: 4 }, { ...staggered[1], x: 0 },
+  ], "the rightmost tile wraps even when it starts above its left neighbour");
+});
+
+test("fit drops an impossible tile's constraints before considering tiles further right", () => {
+  const before = freezeTiles([
+    { id: "left", x: 0, y: 0, w: 4, h: 2 },
+    { id: "tall", x: 4, y: 0, w: 3, h: 4 },
+    { id: "lower-right", x: 7, y: 2, w: 2, h: 2 },
+  ]);
+  assert.deepEqual(fit(before, 6), [before[0], { ...before[1], x: 0, y: 2 }, { ...before[2], x: 4 }]);
+});
+
+test("fit separates saved overlaps before capping widths, even outside the columns", () => {
+  const before = freezeTiles([
+    { id: "later", x: 9, y: 0, w: 1, h: 2 },
+    { id: "earlier", x: 8, y: 0, w: 4, h: 2 },
+  ]);
+  assert.deepEqual(fit(before, 10), [{ ...before[0], x: 0 }, { ...before[1], x: 6 }]);
+  assert.deepEqual(fit(before, 3), [{ ...before[0], x: 0, y: 2 }, { ...before[1], x: 0, w: 3 }]);
+});
+
+test("fit keeps random layouts inside the columns and non-overlapping without mutation", () => {
+  let seed = 0x311f17;
+  const random = max => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed % max; };
+  for (let sample = 0; sample < 500; sample++) {
+    const cols = 1 + random(20);
+    const input = Array.from({ length: random(20) }, (_, i) => ({
+      id: `tile:${i}`, x: random(40), y: random(20), w: 1 + random(24), h: 1 + random(6),
+    }));
+    const before = freezeTiles(structuredClone(input)), after = fit(before, cols);
+    assert.deepEqual(before, input);
+    assert.deepEqual(after.map(tile => tile.id), input.map(tile => tile.id));
+    assertNoOverlaps(after);
+    for (const tile of after) {
+      assert.ok(tile.x >= 0 && tile.x + tile.w <= cols, `sample ${sample}, cols ${cols}: ${JSON.stringify(tile)}`);
+      assert.equal(tile.h, input.find(original => original.id === tile.id).h);
+    }
+    assert.deepEqual(fit(before, cols), after, "fit is deterministic");
+  }
 });
 
 test("firstFree scans rows then columns and respects its starting row", () => {

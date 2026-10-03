@@ -1,6 +1,7 @@
 import { test, assert, fixture, nextFrame, dispatchDrag } from "./harness.js";
 import { createBoardFirefox } from "./controller.js";
 import { renderBoard } from "./view.js";
+import { narrowGroups, narrowFolders, narrowLayout } from "./fixtures/narrow-layout.js";
 
 let css;
 async function root() {
@@ -274,6 +275,38 @@ test("width changes coalesce to one frame, fit without writes, and widening rest
   assert.deepEqual(rectStyle(node.querySelector('[data-group-id="1"]')), ["7", "6", "3", "4"]);
 });
 
+
+// First-free overflow wrapping or resize writes break the reported arrangement.
+test("the user's arrangement survives one- and five-cell narrowing and restores on widening without writes", async () => {
+  const ff = createBoardFirefox({ windows: [{ id: 1 }], selfTabId: 99, groups: narrowGroups,
+    tabs: [...narrowGroups.map(group => ({ id: group.id + 10, windowId: 1, groupId: group.id })),
+      { id: 90, windowId: 1, pinned: true }, { id: 99, windowId: 1 }] },
+    message => message.type === "foxy:reconcile" ? { ok: true }
+      : message.type === "foxy:saved" ? { folders: narrowFolders, saved: [], missing: [] } : undefined);
+  await ff.browser.storage.sync.set(narrowLayout); await ff.settle();
+  const node = await root(); node.style.width = "2192px"; // 23 total, 20 grid columns.
+  const { createController } = await import("../../extension/src/main.js");
+  const control = createController(node, ff.browser); await control.refresh(); await flush(ff);
+  const stored = await ff.browser.storage.sync.get(null); ff.calls.length = 0;
+  const check = lost => {
+    assert.equal(node.querySelector(".grid").style.getPropertyValue("--cols"), String(20 - lost));
+    const origin = node.querySelector(".grid").getBoundingClientRect();
+    for (const [key, saved] of Object.entries(narrowLayout)) {
+      const tile = node.querySelector(`[data-tile-id="${key.slice(5)}"]`);
+      const x = saved.x >= 10 ? saved.x - lost : saved.x;
+      assert.deepEqual(rectStyle(tile), [x, saved.y, saved.w, saved.h].map(String));
+      near(tile.getBoundingClientRect().left - origin.left, x * 96, `${key} left`);
+      near(tile.getBoundingClientRect().top - origin.top, saved.y * 96, `${key} top`);
+    }
+  };
+  check(0);
+  for (const lost of [1, 5, 0]) {
+    node.style.width = `${(23 - lost) * 96 - 16}px`;
+    window.dispatchEvent(new Event("resize")); await flush(ff); check(lost);
+    assert.deepEqual(await ff.browser.storage.sync.get(null), stored);
+    assert.equal(ff.calls.filter(c => /storage\.(sync|local)\.(set|remove|clear)/.test(c.api)).length, 0);
+  }
+});
 
 test("failed storage reads keep the shown layout and settings, write nothing, and recover on a later event", async () => {
   const { ff, node, control } = await controller({ layout: { "tile:group:open": { x: 7, y: 6, w: 3, h: 4 } } });
