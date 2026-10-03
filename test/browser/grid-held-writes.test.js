@@ -6,8 +6,8 @@ let css;
 async function frames() { for (let i = 0; i < 5; i++) await nextFrame(); }
 async function flush(ff) { for (let i = 0; i < 5; i++) { await ff.settle(); await nextFrame(); } }
 const tile = node => node.querySelector('[data-tile-id="clock"]');
-const rect = node => ({ x: Number(node.style.gridColumnStart) - 1, y: Number(node.style.gridRowStart) - 1,
-  w: Number(node.style.gridColumnEnd.replace("span ", "")), h: Number(node.style.gridRowEnd.replace("span ", "")) });
+const rect = node => ({ x: Number(node.style.getPropertyValue("--x")), y: Number(node.style.getPropertyValue("--y")),
+  w: Number(node.style.getPropertyValue("--w")), h: Number(node.style.getPropertyValue("--h")) });
 const writes = ff => ff.calls.filter(call => call.api === "storage.sync.set").map(call => call.args[0]);
 function pointer(type, target, coords) {
   target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1,
@@ -35,7 +35,8 @@ async function setup() {
       : message.type === "foxy:saved" ? gate.then(() => ({ saved: [], missing: [], folders: { 1: "a" } })) : undefined);
   await ff.browser.storage.sync.set({ "tile:clock": { x: 0, y: 0, w: 5, h: 2 } });
   const host = document.createElement("div"), node = document.createElement("div"), pane = document.createElement("aside");
-  node.className = "board"; node.style.cssText = "width:1232px;height:600px";
+  host.className = "page"; host.style.cssText = "width:1232px;height:600px";
+  node.className = "board";
   pane.className = "settings-pane"; pane.hidden = true; host.append(node, pane); fixture().append(host);
   createController(node, ff.browser).refresh();
   const deadline = performance.now() + 2000;
@@ -96,7 +97,7 @@ test("reset before the reply clears held moves and saves fresh default placement
   const { ff, node, pane, release } = await setup();
   try {
     drag(node); await frames();
-    node.querySelector(".settings-button").click();
+    node.querySelector(".settings-cell").click();
     const reset = pane.querySelector(".settings-reset"); reset.click();
     await new Promise(resolve => setTimeout(resolve, 410)); reset.click(); await frames();
     assert.deepEqual(await ff.browser.storage.sync.get("tile:clock"), {});

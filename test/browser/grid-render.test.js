@@ -16,7 +16,12 @@ const rows = [{ id: 10, title: "Member", windowId: 1 }];
 const board = { columns: [{ id: 1, title: "Group", current: true, windowId: 1, color: "gray", rows }],
   pinned: [], tabs: [], saved: [{ folderId: "closed", title: "Saved", color: "grey", count: 1, cantReopen: [] }], missing: [], windowOrder: [1] };
 
-test("grid renders groups and widgets at their saved cells, rail has TABS and gear", async () => {
+function rectStyle(node) {
+  return ["x", "y", "w", "h"].map(key => node.style.getPropertyValue(`--${key}`));
+}
+function near(actual, expected, label) { assert.ok(Math.abs(actual - expected) <= 0.5, `${label}: ${actual} vs ${expected}`); }
+
+test("grid renders groups and widgets at absolute cells, gear is a separate card", async () => {
   const node = await root();
   const layout = [{ id: "clock", x: 0, y: 0, w: 5, h: 2 }, { id: "pinned", x: 5, y: 0, w: 3, h: 4 },
     { id: "group:open", x: 0, y: 2, w: 3, h: 4 }, { id: "saved", x: 3, y: 4, w: 3, h: 4 }];
@@ -26,18 +31,27 @@ test("grid renders groups and widgets at their saved cells, rail has TABS and ge
   assert.equal(grid.style.getPropertyValue("--cols"), "10");
   assert.equal(grid.style.getPropertyValue("--cell"), "80px");
   assert.equal(grid.style.getPropertyValue("--gap"), "16px");
+  assert.equal(grid.style.getPropertyValue("--pitch"), "96px");
   assert.equal(rail.style.getPropertyValue("--rail-cells"), "3");
   assert.equal(rail.querySelector("h2").textContent, "TABS");
-  const gear = rail.querySelector(".settings-button"), heading = rail.querySelector("h2");
+  const gear = node.querySelector(".settings-cell"), heading = rail.querySelector("h2");
   assert.equal(gear.getAttribute("aria-label"), "Settings");
   assert.equal(heading.contains(gear), false, "the heading's accessible name must be exactly TABS");
-  assert.equal(gear.parentElement, heading.parentElement, "gear and heading share the rail header");
+  assert.equal(gear.parentElement, node, "gear is outside the rail");
+  const gearBox = gear.getBoundingClientRect(), railBox = rail.getBoundingClientRect(), boardBox = node.getBoundingClientRect();
+  near(gearBox.width, 80, "gear width"); near(gearBox.height, 80, "gear height");
+  near(gearBox.right, boardBox.right, "gear right"); near(gearBox.bottom, boardBox.bottom, "gear bottom");
+  near(railBox.top, boardBox.top, "rail top"); near(railBox.bottom + 16, gearBox.top, "rail/gear gap");
   assert.equal(rail.getBoundingClientRect().width, 272);
   for (const tile of layout) {
     const el = [...grid.querySelectorAll(".tile")].find(el => el.dataset.tileId === tile.id);
     assert.ok(el, tile.id); assert.equal(el.dataset.kind, tile.id.startsWith("group:") ? "group" : tile.id);
-    assert.equal(el.style.gridColumn, `${tile.x + 1} / span ${tile.w}`);
-    assert.equal(el.style.gridRow, `${tile.y + 1} / span ${tile.h}`);
+    assert.deepEqual(rectStyle(el), [tile.x, tile.y, tile.w, tile.h].map(String));
+    assert.equal(el.style.gridColumn, ""); assert.equal(el.style.gridRow, "");
+    assert.equal(getComputedStyle(el).position, "absolute");
+    const box = el.getBoundingClientRect(), origin = grid.getBoundingClientRect();
+    near(box.left - origin.left, tile.x * 96, "tile left");
+    near(box.top - origin.top, tile.y * 96, "tile top");
     assert.equal(el.getBoundingClientRect().width, tile.w * 96 - 16);
     assert.equal(el.getBoundingClientRect().height, tile.h * 96 - 16);
   }
@@ -138,7 +152,7 @@ for (const delay of [80, 650]) {
     const node = await root(), paints = [];
     const replace = node.replaceChildren.bind(node);
     node.replaceChildren = (...args) => {
-      paints.push([...args[0].querySelectorAll(".tile")].map(t => [t.dataset.tileId, t.style.gridColumn, t.style.gridRow]));
+      paints.push([...args[0].querySelectorAll(".tile")].map(t => [t.dataset.tileId, ...rectStyle(t)]));
       replace(...args);
     };
     ff.calls.length = 0;
@@ -163,11 +177,11 @@ for (const delay of [80, 650]) {
       assert.deepEqual(earlyWrites, [], "nothing may be written before a saved reply arrives");
       if (delay < 500) {
         assert.ok(paints.length > 0);
-        assert.ok(paints.every(tiles => tiles.some(t => t[0] === "group:open" && t[1] === "1 / span 3" && t[2] === "1 / span 4")), "quick replies must never paint a default group place");
+        assert.ok(paints.every(tiles => tiles.some(t => t[0] === "group:open" && t[1] === "0" && t[2] === "0" && t[3] === "3" && t[4] === "4")), "quick replies must never paint a default group place");
       }
       const stored = await ff.browser.storage.sync.get(null);
       assert.deepEqual(stored["tile:clock"], { x: 0, y: 4, w: 5, h: 2 }, "new clock must avoid the group's saved cells");
-      assert.equal(node.querySelector('[data-tile-id="group:open"]').style.gridRow, "1 / span 4");
+      assert.deepEqual(rectStyle(node.querySelector('[data-tile-id="group:open"]')), ["0", "0", "3", "4"]);
     } finally {
       clearTimeout(timer); release({ folders: { 1: "open" }, saved: [], missing: [] });
     }
@@ -193,7 +207,7 @@ for (const pins of ["pending", "reject"]) {
       await new Promise(resolve => setTimeout(resolve, 80)); await flush(ff);
       const tile = node.querySelector('[data-tile-id="group:open"]');
       assert.ok(tile, "the saved reply, not the pin reply, releases first paint");
-      assert.equal(tile.style.gridRow, "1 / span 4");
+      assert.deepEqual(rectStyle(tile), ["0", "0", "3", "4"]);
       assert.ok((await ff.browser.storage.sync.get(null))["tile:clock"], "an arrived saved reply allows new tile writes");
       release(); await flush(ff);
     } finally { release(); console.warn = warn; }
@@ -209,7 +223,7 @@ test("settings load and storage changes apply sizes, windows, visibility, densit
   await ff.browser.storage.sync.set({ settings: { railCells: 100, showPinned: false, showSaved: false, transparency: "high", otherWindows: true } });
   await ff.browser.storage.local.set({ deviceSettings: { cellSize: "S", density: "compact" } });
   await flush(ff);
-  assert.equal(node.querySelector(".grid").style.getPropertyValue("--cell"), "48px");
+  assert.equal(node.querySelector(".grid").style.getPropertyValue("--cell"), `${1248 / 19 - 16}px`);
   assert.equal(node.querySelector(".rail").style.getPropertyValue("--rail-cells"), "9");
   assert.equal(node.querySelector('[data-kind="pinned"], [data-kind="saved"]'), null);
   assert.ok(node.querySelector('[data-kind="clock"]'));
@@ -238,7 +252,7 @@ for (const hold of ["drag", "editor"]) {
     else node.querySelector(".name-editor").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await flush(ff);
     assert.equal(node.querySelector('[data-kind="clock"]'), null);
-    assert.equal(node.querySelector('[data-group-id="1"]').style.gridRow, "11 / span 3");
+    assert.deepEqual(rectStyle(node.querySelector('[data-group-id="1"]')), ["0", "10", "4", "3"]);
     assert.equal(node.querySelector(".row").getBoundingClientRect().height, 24);
   });
 }
@@ -253,12 +267,11 @@ test("width changes coalesce to one frame, fit without writes, and widening rest
   await flush(ff);
   assert.equal(renders, 1);
   assert.equal(node.querySelector(".grid").style.getPropertyValue("--cols"), "3");
-  assert.equal(node.querySelector('[data-group-id="1"]').style.gridColumn, "1 / span 3");
+  assert.deepEqual(rectStyle(node.querySelector('[data-group-id="1"]')).filter((_, i) => i !== 1), ["0", "3", "4"]);
   assert.deepEqual(await ff.browser.storage.sync.get(null), stored);
   assert.equal(ff.calls.filter(c => c.api === "storage.sync.set" || c.api === "storage.sync.remove").length, 0);
   node.style.width = "1232px"; window.dispatchEvent(new Event("resize")); await flush(ff);
-  assert.equal(node.querySelector('[data-group-id="1"]').style.gridColumn, "8 / span 3");
-  assert.equal(node.querySelector('[data-group-id="1"]').style.gridRow, "7 / span 4");
+  assert.deepEqual(rectStyle(node.querySelector('[data-group-id="1"]')), ["7", "6", "3", "4"]);
 });
 
 
@@ -280,7 +293,7 @@ test("failed storage reads keep the shown layout and settings, write nothing, an
     ff.fire("storage.onChanged", { settings: { newValue: { showClock: false } } }, "sync");
     await flush(ff);
     assert.equal(node.querySelector('[data-kind="clock"]'), null);
-    assert.equal(node.querySelector('[data-group-id="1"]').style.gridRow, "11 / span 3");
+    assert.deepEqual(rectStyle(node.querySelector('[data-group-id="1"]')), ["0", "10", "4", "3"]);
   } finally { ff.browser.storage.sync.get = get; console.warn = warn; }
 });
 
@@ -371,12 +384,37 @@ test("a storage change and bookmark update in one frame both publish without tab
   } finally { ff.browser.runtime.sendMessage = send; }
 });
 
-test("the page has the same space above the grid as below it", async () => {
+test("the board fills the page and fractional columns meet the right edge", async () => {
   await root();
-  const page = document.createElement("main"); page.className = "page"; fixture().append(page);
-  const style = getComputedStyle(page);
-  assert.equal(style.paddingTop, "24px");
-  assert.equal(style.paddingBottom, "24px");
+  const page = document.createElement("main"); page.className = "page"; page.style.width = "1237.5px";
+  const node = document.createElement("div"); node.className = "board";
+  page.append(node); fixture().append(page);
+  renderBoard(node, board, {}, {}, { layout: [{ id: "group:open", x: 0, y: 0, w: 10, h: 4 }], folders: { 1: "open" },
+    synced: { showClock: false, showPinned: false, showSaved: false, railCells: 3, otherWindows: true } });
+  const pageBox = page.getBoundingClientRect(), box = node.getBoundingClientRect();
+  for (const side of ["top", "right", "bottom", "left"]) near(box[side], pageBox[side], `board ${side}`);
+  const grid = node.querySelector(".grid"), tile = grid.querySelector(".tile"), rail = node.querySelector(".rail");
+  const cell = 1253.5 / 13 - 16, pitch = 1253.5 / 13;
+  near(parseFloat(getComputedStyle(grid).getPropertyValue("--cell")), cell, "stretched cell");
+  near(tile.getBoundingClientRect().width, 10 * pitch - 16, "fractional tile width");
+  near(tile.getBoundingClientRect().height, 4 * pitch - 16, "square cell height");
+  near(tile.getBoundingClientRect().right + 16 + rail.getBoundingClientRect().width, pageBox.right, "all columns end at page right");
+  near(grid.getBoundingClientRect().top, pageBox.top, "grid top");
+  near(grid.getBoundingClientRect().bottom, pageBox.bottom, "grid bottom");
+  assert.equal(tile.style.gridColumn, ""); assert.equal(tile.style.gridRow, "");
+});
+
+test("fractional neighbours keep a 16 px gap and the last row remains scrollable", async () => {
+  const node = await root(); node.style.width = "1237.5px";
+  renderBoard(node, board, {}, {}, { layout: [
+    { id: "clock", x: 0, y: 0, w: 3, h: 2 }, { id: "pinned", x: 3, y: 0, w: 3, h: 2 },
+    { id: "group:open", x: 0, y: 12, w: 10, h: 2 }], folders: { 1: "open" },
+    synced: { showClock: true, showPinned: true, showSaved: false, railCells: 3, otherWindows: true } });
+  const grid = node.querySelector(".grid"), clock = node.querySelector(".clock").getBoundingClientRect(), pinned = node.querySelector('[data-kind="pinned"]').getBoundingClientRect();
+  near(pinned.left - clock.right, 16, "horizontal gap");
+  near(grid.scrollHeight, 14 * (1253.5 / 13) - 16, "row extent");
+  grid.scrollTop = grid.scrollHeight;
+  near(node.querySelector('[data-kind="group"]').getBoundingClientRect().bottom, grid.getBoundingClientRect().bottom, "last tile bottom");
 });
 
 test("a failed saved-groups reply writes no tiles, since group places are unknown", async () => {

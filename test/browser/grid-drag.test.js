@@ -34,8 +34,8 @@ async function setup({ layout = initial, width = 1232, settings = {}, folders = 
 }
 const tile = (root, id = "group:a") => [...root.querySelectorAll(".tile")].find(node => node.dataset.tileId === id);
 const header = root => tile(root).querySelector(".column-header");
-const rect = node => ({ x: Number(node.style.gridColumnStart) - 1, y: Number(node.style.gridRowStart) - 1,
-  w: Number(node.style.gridColumnEnd.replace("span ", "")), h: Number(node.style.gridRowEnd.replace("span ", "")) });
+const rect = node => ({ x: Number(node.style.getPropertyValue("--x")), y: Number(node.style.getPropertyValue("--y")),
+  w: Number(node.style.getPropertyValue("--w")), h: Number(node.style.getPropertyValue("--h")) });
 const writes = ff => ff.calls.filter(call => call.api === "storage.sync.set").map(call => call.args[0]);
 function point(node, x = 0.5, y = 0.5) {
   const bounds = node.getBoundingClientRect();
@@ -545,3 +545,30 @@ test("failed or malformed saved replies gate drag writes too", async () => {
     assert.deepEqual(writes(ff), []);
   } finally { console.warn = warn; }
 });
+
+// Deltas straddle half the stretched pitch (48.2115px), not half the preset
+// pitch (48px). Moving and resizing must agree with the fractional cells.
+for (const kind of ["move", "resize"]) {
+  test(`${kind} snaps against fractional pitch and commits the shown rectangle only`, async () => {
+    const { ff, root, control } = await setup({ width: 1237.5,
+      settings: { showClock: false, showPinned: false }, layout: {
+        "tile:group:a": { x: 0, y: 0, w: 3, h: 4 }, "tile:group:b": { x: 0, y: 4, w: 3, h: 4 },
+      } });
+    assert.ok(Math.abs(control.view.cell - (1253.5 / 13 - 16)) < 0.00001, "controller keeps the fractional page width");
+    const source = kind === "move" ? header(root) : tile(root).querySelector(".tile-resize"), start = down(source);
+    try {
+      pointer("pointermove", document, shifted(start, 48.1, 0));
+      assert.deepEqual(rect(tile(root)), { x: 0, y: 0, w: 3, h: 4 }, "still below the stretched half-pitch");
+      pointer("pointermove", document, shifted(start, 48.3, 0));
+      const expected = kind === "move" ? { x: 1, y: 0, w: 3, h: 4 } : { x: 0, y: 0, w: 4, h: 4 };
+      assert.deepEqual(rect(tile(root)), expected);
+      const box = tile(root).getBoundingClientRect(), origin = root.querySelector(".grid").getBoundingClientRect();
+      assert.ok(Math.abs(box.left - origin.left - expected.x * (1253.5 / 13)) < 0.5);
+      assert.ok(Math.abs(box.width - (expected.w * (1253.5 / 13) - 16)) < 0.5);
+      assert.deepEqual(writes(ff), []);
+      pointer("pointerup", document, shifted(start, 48.3, 0)); await flush(ff);
+      assert.deepEqual(rect(tile(root)), expected);
+      assert.deepEqual(writes(ff), [{ "tile:group:a": expected }]);
+    } finally { escape(); await flush(ff); }
+  });
+}

@@ -37,7 +37,7 @@ async function root() {
   await document.fonts.ready;
   const node = document.createElement("div");
   node.className = "board";
-  node.style.width = "1600px";
+  node.style.width = "1520px";
   node.style.height = "600px";
   fixture().append(node);
   return node;

@@ -223,7 +223,7 @@ BOARD_SCRIPT = """
 """
 
 SETTINGS_SCRIPT = """
-    const gear = document.querySelector('#board .rail .settings-button');
+    const gear = document.querySelector('#board > .settings-cell');
     if (!gear) throw new Error('settings gear missing');
     gear.click();
     const pane = document.querySelector('.settings-pane');

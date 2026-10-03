@@ -1,6 +1,6 @@
 import { msUntilNextMinute } from "./model.js";
 import { buildBoard } from "./board/model.js";
-import { renderBoard, updateScrollEdges, updateClock } from "./board/render.js";
+import { renderBoard, updateScrollEdges, updateClock, positionTiles } from "./board/render.js";
 import { resolveTabTarget } from "./board/targets.js";
 import { openTab, closeTabs, closeGroup, bringGroupHere, renameGroup, recolorGroup,
   dropTab } from "./board/moves.js";
@@ -69,7 +69,10 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     pendingTiles.clear();
     heldWrites.clear();
   });
-  const gear = () => root.querySelector(".settings-button");
+  // A minimum-width board can overflow; its page remains the cell-size target.
+  const page = root.parentElement?.matches(".page") ? root.parentElement : root;
+  const pageWidth = () => page.getBoundingClientRect().width;
+  const gear = () => root.querySelector(".settings-cell");
   function setPaneOpen(open) {
     if (!settingsPane) return;
     settingsPane.hidden = !open;
@@ -78,7 +81,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     else gear()?.focus({ preventScroll: true });
   }
   root.addEventListener("click", event => {
-    if (event.target.closest(".settings-button")) setPaneOpen(settingsPane?.hidden);
+    if (event.target.closest(".settings-cell")) setPaneOpen(settingsPane?.hidden);
   });
   window.addEventListener("keydown", event => {
     if (!event.defaultPrevented && event.key === "Escape" && root.isConnected && settingsPane && !settingsPane.hidden) {
@@ -347,7 +350,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     for (const id of deferredGroups.keys()) {
       if (gridState.layout.some(tile => tile.id === `group:${savedReply.folders?.[id]}`)) clearDeferredGroup(id);
     }
-    const options = { ...gridState, contentWidth: root.clientWidth,
+    const options = { ...gridState, contentWidth: pageWidth(),
       folders: savedReply.folders ?? {} };
     view = buildGridView(options);
     const knowsFolders = hasValidSavedReply && validFoldersReply(savedReply);
@@ -405,8 +408,12 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       restoreView(root, saved);
       lastRenderedKey = key;
     }
-    if (settingsPane) renderSettings(settingsPane, { synced: gridState.synced, device: gridState.device,
-      railMax: railLimits(view.total).max }, paneHandlers);
+    if (settingsPane) {
+      settingsPane.style.setProperty("--cell", `${view.cell}px`);
+      settingsPane.style.setProperty("--board-width", root.style.getPropertyValue("--board-width"));
+      renderSettings(settingsPane, { synced: gridState.synced, device: gridState.device,
+        railMax: railLimits(view.total).max }, paneHandlers);
+    }
     if (writes.length || prune) {
       const keep = new Set([...Object.values(savedReply.folders ?? {}),
         ...board.saved.map(group => group.folderId), ...board.missing.map(group => group.folderId)]);
@@ -600,12 +607,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     view.tiles = tiles.map(tile => ({ ...metadata.get(tile.id), ...tile }));
     root.querySelector(".grid").style.setProperty("--cols", view.cols);
     root.querySelector(".rail").style.setProperty("--rail-cells", view.railCells);
-    const shown = new Map(view.tiles.map(tile => [tile.id, tile]));
-    for (const node of root.querySelectorAll(".tile")) {
-      const tile = shown.get(node.dataset.tileId);
-      node.style.gridColumn = `${tile.x + 1} / span ${tile.w}`;
-      node.style.gridRow = `${tile.y + 1} / span ${tile.h}`;
-    }
+    positionTiles(root.querySelector(".grid"), view.tiles);
     updateScrollEdges(root);
   }
 
@@ -637,7 +639,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     },
     onPreview: changed => {
       const { pending, layout } = tileChangeState(changed);
-      const preview = buildGridView({ ...gridState, layout, contentWidth: root.clientWidth,
+      const preview = buildGridView({ ...gridState, layout, contentWidth: pageWidth(),
         folders: savedReply.folders ?? {} }, pending);
       displayPending(preview, pending);
       previewTiles(preview.tiles);
@@ -659,7 +661,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     },
     onRail: (cells, commit) => {
       view = buildGridView({ ...gridState, synced: { ...gridState.synced, railCells: cells },
-        contentWidth: root.clientWidth, folders: savedReply.folders ?? {} });
+        contentWidth: pageWidth(), folders: savedReply.folders ?? {} });
       displayPending(view);
       previewTiles(view.tiles);
       if (!commit) return;
@@ -752,7 +754,7 @@ function captureView(root) {
         rowsKey: rowsKey(list), index: [...list.querySelectorAll(".row")].indexOf(row) };
     } else if (active.matches(".rows")) focus = { rowsKey: rowsKey(active) };
     else if (active.matches(".grid")) focus = { grid: true };
-    else if (active.matches(".settings-button")) focus = { gear: true };
+    else if (active.matches(".settings-cell")) focus = { gear: true };
     else if (group) focus = { groupId: group.dataset.groupId, className: active.className,
       index: [...root.querySelectorAll(".column[data-group-id]")].indexOf(group) };
   }
@@ -765,7 +767,7 @@ function restoreView(root, { focus, top, tops }) {
   if (focus && !editor) {
     let active;
     const list = [...root.querySelectorAll(".rows")].find(list => rowsKey(list) === focus.rowsKey);
-    if (focus.gear) active = root.querySelector(".settings-button");
+    if (focus.gear) active = root.querySelector(".settings-cell");
     else if (focus.grid) active = root.querySelector(".grid");
     else if (focus.tabId === undefined && focus.rowsKey !== undefined) active = list;
     else {
