@@ -17,7 +17,7 @@ async function draw({ saved = entries(), missing = [], ui = {}, handlers = {} } 
   await css; await document.fonts.ready;
   const page = document.createElement("main"); page.className = "page";
   const root = document.createElement("div"); root.className = "board"; root.style.height = "400px";
-  page.style.width = "1600px";
+  page.style.width = "1520px";
   page.append(root); fixture().append(page);
   const board = buildBoard({ windows: [{ id: 1, type: "normal" }], currentWindowId: 1,
     groups: [{ id: 10, windowId: 1, title: "Open group", color: "blue" }],
@@ -37,7 +37,8 @@ test("SAVED is absent with empty lists and a grid tile with entries", async () =
   const { root } = await draw();
   assert.deepEqual([...root.querySelectorAll(".tile")].map(el => el.dataset.kind), ["clock", "pinned", "group", "saved"]);
   assert.equal(root.querySelector('.tile[data-kind="saved"] h2').textContent, "SAVED");
-  assert.equal(root.lastElementChild.dataset.zone, "tabs");
+  assert.equal(root.querySelector(".rail").dataset.zone, "tabs");
+  assert.ok(root.lastElementChild.classList.contains("settings-cell"));
 });
 
 // Normalizing titles/API colour in the model, parsing labels or dropping metadata fails here.

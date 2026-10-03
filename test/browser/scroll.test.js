@@ -58,7 +58,7 @@ for (const selector of ['.rows[data-zone="pinned"]', '.rows[data-zone="tabs"]', 
     await scroll(rows, "scrollTop", 0); edges(rows, false, true);
     root.style.height = "1000px";
     const tile = rows.closest(".tile");
-    if (tile) tile.style.gridRow = "1 / span 12";
+    if (tile) tile.style.setProperty("--h", "12");
     await nextFrame(); await nextFrame(); edges(rows, false, false);
   });
 }
@@ -141,7 +141,7 @@ for (const sourceSelector of [".row"]) {
 
 for (const selector of [".grid", '.rail .rows[data-zone="tabs"]']) {
   test(`tab drag continuously scrolls both vertical edges of ${selector} at 12px per frame`, async () => {
-    const { root } = await draw();
+    const { root } = await draw({ height: 360 });
     const area = root.querySelector(selector), source = root.querySelector(".row");
     const dataTransfer = new DataTransfer();
     dispatchDrag("dragstart", source, { dataTransfer });
@@ -171,7 +171,7 @@ for (const selector of [".grid", '.rail .rows[data-zone="tabs"]']) {
 
   for (const stop of ["drop", "leave", "centre", "foreign"]) {
     test(`${selector} edge-scroll stops on ${stop}`, async () => {
-      const { root } = await draw();
+      const { root } = await draw({ height: 360 });
       const area = root.querySelector(selector), source = root.querySelector(".row");
       const dataTransfer = new DataTransfer();
       dispatchDrag("dragstart", source, { dataTransfer });

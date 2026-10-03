@@ -5,6 +5,32 @@ import {
   overlaps, clampRect, place, fit, firstFree, addMissing, changedTiles,
 } from "../extension/src/grid/layout.js";
 
+import * as geometry from "../extension/src/grid/layout.js";
+
+for (const [width, preset, want] of [
+  [2560, 80, { total: 26, cell: 2576 / 26 - 16 }],
+  [30, 80, { total: 1, cell: 30 }],
+  [0, 80, { total: 1, cell: 0 }],
+  [176, 80, { total: 2, cell: 80 }],
+  [1237.5, 80, { total: 13, cell: 1253.5 / 13 - 16 }],
+]) {
+  test(`fitCell(${width}, ${preset}) fills the width with whole columns`, () => {
+    assert.equal(typeof geometry.fitCell, "function");
+    assert.deepEqual(geometry.fitCell(width, preset), want);
+  });
+}
+
+test("stretched cells never shrink below the target with multiple columns", () => {
+  assert.equal(typeof geometry.fitCell, "function");
+  for (const preset of [40, 48, 80, 112, 144, 240]) {
+    for (const width of [400, 700, 1237.5, 2560]) {
+      const { total, cell } = geometry.fitCell(width, preset);
+      if (total > 1) assert.ok(cell >= preset);
+      assert.ok(Math.abs(total * (cell + 16) - 16 - width) < 1e-9);
+    }
+  }
+});
+
 function assertNoOverlaps(tiles) {
   for (let i = 0; i < tiles.length; i++) {
     for (let j = i + 1; j < tiles.length; j++) {

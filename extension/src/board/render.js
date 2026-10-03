@@ -11,6 +11,35 @@ const confirmations = new WeakMap();
 
 const layouts = new WeakMap();
 
+// Rendering and gesture previews use the same cell rectangles and scroll extent.
+export function positionTiles(grid, tiles) {
+  // The corner dots layer covers all occupied rows, including off-screen tiles.
+  grid.style.setProperty("--rows", Math.max(0, ...tiles.map(tile => tile.y + tile.h)));
+  const shown = new Map(tiles.map(tile => [tile.id, tile]));
+  for (const node of grid.querySelectorAll(":scope > .tile")) {
+    const tile = shown.get(node.dataset.tileId);
+    for (const key of ["x", "y", "w", "h"]) node.style.setProperty(`--${key}`, tile[key]);
+  }
+  if (grid.classList.contains("gesturing")) {
+    const dots = grid.querySelector(".grid-corners"), pitch = parseFloat(grid.style.getPropertyValue("--pitch"));
+    const cols = Number(grid.style.getPropertyValue("--cols"));
+    const height = Math.max(grid.clientHeight, Math.max(0, ...tiles.map(tile => tile.y + tile.h)) * pitch - 16);
+    const dragged = grid.querySelector(".tile.dragging")?.dataset.tileId;
+    const resting = tiles.filter(tile => tile.id !== dragged), circles = [];
+    for (let j = 1; j * pitch - 8 < height; j++) {
+      for (let i = 1; i < cols; i++) {
+        if (resting.some(tile => tile.x < i && i < tile.x + tile.w && tile.y < j && j < tile.y + tile.h)) continue;
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("cx", i * pitch - 8);
+        circle.setAttribute("cy", j * pitch - 8);
+        circle.setAttribute("r", "1.5");
+        circles.push(circle);
+      }
+    }
+    dots.replaceChildren(...circles);
+  }
+}
+
 function readEdge(node) {
   const position = node.scrollTop;
   const extent = node.scrollHeight - node.clientHeight;
@@ -58,11 +87,17 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   root.setAttribute("role", "region");
   root.style.setProperty("--cell", `${view.cell}px`);
   root.style.setProperty("--gap", "16px");
+  root.style.setProperty("--pitch", `${view.cell + 16}px`);
+  const width = `${(view.cols + view.railCells) * (view.cell + 16) - 16}px`;
+  root.style.setProperty("--board-width", width);
+  root.style.setProperty("--board-min-width", view.total < 3 ? width : "0px");
   const grid = el("div", "grid");
   grid.tabIndex = -1;
   grid.style.setProperty("--cols", view.cols);
   grid.style.setProperty("--cell", `${view.cell}px`);
+  grid.style.setProperty("--cell-target", `${view.targetCell}px`);
   grid.style.setProperty("--gap", "16px");
+  grid.style.setProperty("--pitch", `${view.cell + 16}px`);
   for (const tile of view.tiles) {
     const node = tile.kind === "group" ? groupColumn(root, tile.group, handlers)
       : tile.kind === "pinned" ? fixedColumn(root, "pinned", "PINNED", board.pinned, handlers)
@@ -70,22 +105,24 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
     node.classList.add("tile");
     node.dataset.tileId = tile.id;
     node.dataset.kind = tile.kind;
-    node.style.gridColumn = `${tile.x + 1} / span ${tile.w}`;
-    node.style.gridRow = `${tile.y + 1} / span ${tile.h}`;
     const handle = button("tile-resize", `Resize ${tile.kind === "group" ? tile.group.title.trim() || "Unnamed" : tile.kind}`);
     handle.tabIndex = -1;
     handle.setAttribute("aria-hidden", "true");
     node.append(handle);
     grid.append(node);
   }
+  positionTiles(grid, view.tiles);
+  const corners = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  corners.setAttribute("class", "grid-corners");
+  corners.setAttribute("aria-hidden", "true");
+  grid.append(corners);
   const rail = fixedColumn(root, "tabs", "TABS", board.tabs, handlers);
   rail.classList.add("rail");
   rail.style.setProperty("--rail-cells", view.railCells);
-  const header = el("header", "rail-header"), title = rail.querySelector(".column-title");
-  title.replaceWith(header);
-  header.append(title, button("settings-button", "Settings"));
   rail.append(el("div", "rail-resize"));
-  root.replaceChildren(grid, rail);
+  const gear = button("settings-cell", "Settings");
+  gear.setAttribute("aria-expanded", "false");
+  root.replaceChildren(grid, rail, gear);
   updateClock(root, settings);
   const previousBanner = banners.get(root);
   const missingCount = board.missing?.length ?? 0;

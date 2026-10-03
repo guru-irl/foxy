@@ -68,7 +68,41 @@ test("narrow fit is display-only and retains the raw saved layout", () => {
   assert.deepEqual(layout, original);
 });
 
-for (const [contentWidth, cols] of [[252, 1], [400, 2]]) {
+test("fractional cells fill the page and narrow fit leaves saved rectangles unchanged", () => {
+  const layout = [{ id: "group:a", x: 7, y: 0, w: 3, h: 4 }, { id: "group:b", x: 0, y: 0, w: 3, h: 4 }];
+  const view = buildView(board, options({ layout, contentWidth: 701, synced: { ...DEFAULT_SETTINGS, showClock: false, showPinned: false, railCells: 2 } }));
+  assert.deepEqual([view.total, view.cols, view.railCells], [7, 5, 2]);
+  assert.equal(view.cell, 717 / 7 - 16);
+  assert.deepEqual(view.tiles.map(t => [t.x, t.y, t.w]), [[0, 4, 3], [0, 0, 3]]);
+  assert.deepEqual(view.saved, layout);
+  assert.deepEqual(view.newTiles, []);
+});
+
+test("new defaults use the cell setting and save their full size before display fit", () => {
+  const view = buildView(board, options({ contentWidth: 252, synced: DEFAULT_SETTINGS }));
+  assert.equal(view.cell, 118);
+  assert.deepEqual(view.newTiles.map(({ id, x, y, w, h }) => [id, x, y, w, h]), [
+    ["clock", 0, 0, 5, 2], ["pinned", 0, 2, 3, 4], ["group:a", 0, 6, 3, 4], ["group:b", 0, 10, 3, 4],
+  ]);
+  assert.ok(view.tiles.every(t => t.w === 1));
+});
+
+// Stretching cells must affect display geometry, not a new tile's stored size.
+for (const [device, expected] of [
+  [{ ...DEFAULT_DEVICE, cellSize: "XL" }, [["clock", 3, 2], ["pinned", 2, 3], ["group:a", 2, 3], ["saved", 2, 3]]],
+  [{ ...DEFAULT_DEVICE, cellSize: "custom", customCell: 90 }, [["clock", 5, 2], ["pinned", 3, 4], ["group:a", 3, 4], ["saved", 3, 4]]],
+]) {
+  for (const contentWidth of [1600, 1000]) {
+    test(`${device.cellSize} defaults at width ${contentWidth} use the setting for every kind`, () => {
+      const model = { ...board, columns: [group(1)], saved: [{ folderId: "closed" }] };
+      const view = buildView(model, options({ contentWidth, synced: DEFAULT_SETTINGS, device }));
+      assert.deepEqual(view.newTiles.map(({ id, w, h }) => [id, w, h]), expected);
+      assert.ok(view.cell > (device.cellSize === "XL" ? 144 : 90), "the real cell is stretched");
+    });
+  }
+}
+
+for (const [contentWidth, cols] of [[272, 1], [400, 2]]) {
   test(`new tiles at width ${contentWidth} save full default sizes at the shown x/y`, () => {
     const model = { ...board, columns: [group(1)], saved: [{ folderId: "closed" }] };
     const view = buildView(model, options({ contentWidth, synced: DEFAULT_SETTINGS }));

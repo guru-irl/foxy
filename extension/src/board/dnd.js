@@ -54,9 +54,9 @@ export function attachDnd(root, handlers, board) {
       if (!grid) return null;
       const { col, row } = cellPlacement(grid, x, y);
       tile = [...grid.querySelectorAll(":scope > .tile")].find(tile => {
-        const left = Number(tile.style.gridColumnStart) - 1, top = Number(tile.style.gridRowStart) - 1;
-        const width = Number(tile.style.gridColumnEnd.replace("span ", ""));
-        const height = Number(tile.style.gridRowEnd.replace("span ", ""));
+        const left = Number(tile.style.getPropertyValue("--x")), top = Number(tile.style.getPropertyValue("--y"));
+        const width = Number(tile.style.getPropertyValue("--w"));
+        const height = Number(tile.style.getPropertyValue("--h"));
         return col >= left && col < left + width && row >= top && row < top + height;
       });
       if (!tile) return grid;
@@ -72,7 +72,8 @@ export function attachDnd(root, handlers, board) {
     const left = parseFloat(style.paddingLeft) || 0, top = parseFloat(style.paddingTop) || 0;
     const col = Math.max(0, Math.min(cols - 1, Math.floor((x - bounds.left - left + grid.scrollLeft) / (cell + GAP))));
     const row = Math.max(0, Math.floor((y - bounds.top - top + grid.scrollTop) / (cell + GAP)));
-    const { id, ...rect } = clampRect("group:new", { x: col, y: row, ...defaultSize("group", cell, cols) }, cols);
+    const targetCell = parseFloat(style.getPropertyValue("--cell-target"));
+    const { id, ...rect } = clampRect("group:new", { x: col, y: row, ...defaultSize("group", targetCell, cols) }, cols);
     return { rect, cell, left, top, col, row };
   }
   function dropZone(target) {

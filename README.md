@@ -8,13 +8,13 @@ A private Firefox add-on and browser theme.
 
 **Platforms:** desktop Firefox 140+ on macOS, Windows and Linux, not Android. The theme supports glass blur on macOS only.
 
-Version 3.0.0. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-10-03-foxy-grid-design.md`.
+Version 3.1.0. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-10-03-foxy-grid-design.md`.
 
 ## Board
 
-- **Tiles:** groups, PINNED, SAVED and a clock on a scrolling grid, with scrolling tab lists.
-- **TABS rail:** ungrouped tabs stay on the right, with their own scroll and the Settings gear.
-- **Move and resize:** drag tile headers or corner handles. Tiles snap to cells and push overlaps down. Escape cancels. Drag the rail edge to resize it.
+- **Tiles:** groups, PINNED, SAVED and a clock on a scrolling grid that fills the page edge to edge, with scrolling tab lists.
+- **TABS rail:** ungrouped tabs stay on the right, with their own scroll. The Settings gear has its own cell below it.
+- **Move and resize:** drag tile headers or corner handles. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
 - **Narrow windows:** overflowing tiles appear below. Saved places stay unchanged until you move them.
 - **Windows:** this window comes first; others are labelled. Tile places do not change tab order.
 - **Open a tab:** click it. A pin from another window moves here unless that setting is off.
@@ -26,12 +26,12 @@ Version 3.0.0. Distributed as an unlisted add-on. Design: `docs/superpowers/spec
 
 ## Settings
 
-Open the gear in TABS. Changes apply immediately; Escape or the gear closes the pane.
+Open the gear in the bottom right corner. Changes apply immediately; Escape or the gear closes the pane.
 The same settings are in about:addons, Foxy, Options.
 
 | Setting | Values | Scope |
 |---|---|---|
-| Cell size | S 48, M 80, L 112, XL 144; custom 40 to 240 px | Per device |
+| Cell size | S 48, M 80, L 112, XL 144; custom 40 to 240 px (cells stretch a little to fill the width) | Per device |
 | TABS rail width | 2 cells to half the available width; default 3 | Synced |
 | Show clock, pinned, saved | On or off for each | Synced |
 | Reset layout | Click twice within 3 seconds; clears all saved tile places | Synced |

@@ -14,7 +14,7 @@ const setup = () => ({
     { id: 23, windowId: 2 }].map(tab => ({ ...tab, lastAccessed: 100 / tab.windowId })),
 });
 let css;
-async function makeRoot(width = 1600) {
+async function makeRoot(width = 1520) {
   css ??= new Promise(resolve => {
     const link = document.createElement("link");
     link.rel = "stylesheet"; link.href = "/extension/newtab.css"; link.onload = resolve;
@@ -26,7 +26,7 @@ async function makeRoot(width = 1600) {
   fixture().append(root);
   return root;
 }
-async function draw(set = setup(), width = 1600) {
+async function draw(set = setup(), width = 1520) {
   const ff = createFirefox(set), root = await makeRoot(width);
   const board = buildBoard({ windows: await ff.browser.windows.getAll(), tabs: await ff.browser.tabs.query({}),
     groups: await ff.browser.tabGroups.query({}), currentWindowId: 1, selfTabId: 99 });
@@ -310,7 +310,7 @@ for (const [label, col, row, offset, scrollTop, expected] of [
     const { root, calls } = await draw();
     const grid = root.querySelector(".grid");
     if (scrollTop) {
-      const spacer = document.createElement("div"); spacer.style.gridRow = "12";
+      const spacer = document.createElement("div"); spacer.style.cssText = "height:1136px;pointer-events:none";
       grid.append(spacer); grid.scrollTop = scrollTop;
     }
     const source = tab(root), dataTransfer = start(source);
@@ -413,7 +413,7 @@ test("scrolled grid drop lands the group tile in the content cell under the poin
   const { root, ff } = await controller();
   const source = tab(root), dataTransfer = start(source), grid = root.querySelector(".grid");
   grid.style.padding = "8px 12px";
-  const spacer = document.createElement("div"); spacer.style.gridRow = "16"; grid.append(spacer);
+  const spacer = document.createElement("div"); spacer.style.cssText = "height:1520px;pointer-events:none"; grid.append(spacer);
   grid.scrollTop = 384;
   const bounds = grid.getBoundingClientRect();
   const coords = { clientX: bounds.left + 12 + 9 * 96 + 20,
@@ -453,8 +453,8 @@ async function pendingDrop(initial = { saved: [], missing: [], folders: { 101: "
   return { root, ff, control, groupId, setReply: value => { reply = value; } };
 }
 function rectOf(tile) {
-  return { x: Number(tile.style.gridColumnStart) - 1, y: Number(tile.style.gridRowStart) - 1,
-    w: Number(tile.style.gridColumnEnd.replace("span ", "")), h: Number(tile.style.gridRowEnd.replace("span ", "")) };
+  return { x: Number(tile.style.getPropertyValue("--x")), y: Number(tile.style.getPropertyValue("--y")),
+    w: Number(tile.style.getPropertyValue("--w")), h: Number(tile.style.getPropertyValue("--h")) };
 }
 function endName(root) {
   root.querySelector(".name-editor")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -1053,3 +1053,76 @@ test("a failed key check for a post-paint group retries on a later render instea
     assert.deepEqual((await get(null))["tile:group:external"], { x: 6, y: 4, w: 3, h: 4 });
   } finally { console.warn = warn; if (root) { endName(root); root.remove(); } timer.restore(); }
 });
+
+// Using the stretched cell for defaults loses a row except at the exact XL pitch.
+for (const [width, pitch] of [[1000, 1016 / 6], [1366, 1382 / 8], [1584, 160], [1600, 161.6]]) {
+  test(`XL tab drop at ${width}px previews and saves the setting's 2 by 3 default`, async () => {
+    let reply = { folders: {}, saved: [], missing: [] };
+    const set = { windows: [{ id: 1, focused: true }], selfTabId: 99, groups: [],
+      tabs: [{ id: 15, windowId: 1 }, { id: 99, windowId: 1 }] };
+    const { root, ff, control } = await controller(set, message => message.type === "foxy:reconcile"
+      ? { ok: true } : message.type === "foxy:saved" ? reply : undefined,
+      { settings: { showClock: false, showPinned: false, showSaved: false } });
+    root.style.width = `${width}px`;
+    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "XL" } });
+    await control.refresh(); await flush(ff); await flush(ff);
+    const grid = root.querySelector(".grid"), bounds = grid.getBoundingClientRect();
+    const coords = { clientX: bounds.left + 1.2 * pitch, clientY: bounds.top + 1.2 * pitch };
+    const source = tab(root), dataTransfer = start(source);
+    try {
+      const hit = document.elementFromPoint(coords.clientX, coords.clientY);
+      assert.equal(hit, grid, "pointer hits an empty cell");
+      assert.ok(dispatchDrag("dragover", hit, { dataTransfer, ...coords }).defaultPrevented);
+      const preview = grid.querySelector(".cell-preview").getBoundingClientRect();
+      for (const [actual, expected] of [[preview.left - bounds.left, pitch], [preview.top - bounds.top, pitch],
+        [preview.width, 2 * pitch - 16], [preview.height, 3 * pitch - 16]]) {
+        assert.ok(Math.abs(actual - expected) < 0.5, `stretched preview geometry: expected ${expected}, got ${actual}`);
+      }
+      dispatchDrag("drop", hit, { dataTransfer, ...coords });
+      dispatchDrag("dragend", source, { dataTransfer });
+      await flush(ff); await flush(ff);
+      const groupId = (await ff.browser.tabs.get(15)).groupId;
+      assert.deepEqual(rectOf(root.querySelector(`[data-tile-id="local:${groupId}"]`)), { x: 1, y: 1, w: 2, h: 3 });
+      reply = { ...reply, folders: { [groupId]: "new" } };
+      endName(root); await control.refresh(); await flush(ff); await flush(ff);
+      assert.deepEqual((await ff.browser.storage.sync.get("tile:group:new"))["tile:group:new"],
+        { x: 1, y: 1, w: 2, h: 3 });
+    } finally { dispatchDrag("dragend", source, { dataTransfer }); endName(root); }
+  });
+}
+
+for (const [label, x, y, expected] of [
+  ["empty cell", 5.2, 0.2, { zone: "cell", tabId: 15, rect: { x: 5, y: 0, w: 3, h: 4 } }],
+  ["empty trailing gap", 5.95, 0.2, { zone: "cell", tabId: 15, rect: { x: 5, y: 0, w: 3, h: 4 } }],
+  ["right tile gap", 2.95, 0.2, { zone: "group", groupId: 101, slot: 0, tabId: 15 }],
+  ["next column", 3.01, 0.2, { zone: "cell", tabId: 15, rect: { x: 3, y: 0, w: 3, h: 4 } }],
+  ["bottom tile gap", 0.2, 1.95, { zone: "group", groupId: 101, slot: 2, tabId: 15 }],
+  ["next row", 0.2, 2.01, { zone: "cell", tabId: 15, rect: { x: 0, y: 2, w: 3, h: 4 } }],
+]) {
+  test(`fractional pitch: ${label} selects the cell or covered tile under the pointer`, async () => {
+    const { root, board, calls, handlers, renderBoard } = await draw(setup(), 1237.5);
+    renderBoard(root, { ...board, columns: board.columns.filter(g => g.id === 101) }, {}, handlers, {
+      synced: { showClock: false, showPinned: false, showSaved: false, railCells: 3, otherWindows: true },
+      folders: { 101: "one" }, layout: [{ id: "group:one", x: 0, y: 0, w: 3, h: 2 }],
+    });
+    const grid = root.querySelector(".grid"), bounds = grid.getBoundingClientRect(), pitch = 1253.5 / 13;
+    const coords = { clientX: bounds.left + x * pitch, clientY: bounds.top + y * pitch };
+    const hit = document.elementFromPoint(coords.clientX, coords.clientY);
+    assert.ok(hit && root.contains(hit));
+    const source = tab(root), dataTransfer = start(source);
+    try {
+      assert.ok(dispatchDrag("dragover", hit, { dataTransfer, ...coords }).defaultPrevented);
+      if (expected.zone === "cell") {
+        const box = root.querySelector(".cell-preview").getBoundingClientRect();
+        assert.ok(Math.abs(box.left - (bounds.left + expected.rect.x * pitch)) < 0.5);
+        assert.ok(Math.abs(box.top - (bounds.top + expected.rect.y * pitch)) < 0.5);
+        assert.ok(Math.abs(box.width - (3 * pitch - 16)) < 0.5);
+      } else {
+        assert.equal(root.querySelector(".cell-preview"), null);
+        assert.ok(root.querySelector('.rows[data-group-id="101"] .drop-line'));
+      }
+      dispatchDrag("drop", hit, { dataTransfer, ...coords });
+      assert.deepEqual(calls.tabs, [[15, expected]]);
+    } finally { dispatchDrag("dragend", source, { dataTransfer }); }
+  });
+}

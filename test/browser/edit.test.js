@@ -24,7 +24,7 @@ async function root() {
   await css; await document.fonts.ready;
   const node = document.createElement("div");
   node.className = "board"; node.setAttribute("aria-label", "Tab board");
-  node.style.width = "1600px"; node.style.height = "500px";
+  node.style.width = "1520px"; node.style.height = "500px";
   fixture().append(node);
   return node;
 }

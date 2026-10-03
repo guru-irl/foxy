@@ -62,15 +62,15 @@ test("older preview scenarios answer with no saved groups or banner", async t =>
   assert.equal(board.columns.length, 3);
 });
 
-for (const [name, cell, width] of [["grid-m", 80, 1600], ["grid-xl", 144, 1600],
-  ["grid-narrow", 80, 700], ["settings-open", 80, 1600]]) {
+for (const [name, cell, width] of [["grid-m", 1616 / 16 - 16, 1600], ["grid-xl", 1616 / 10 - 16, 1600],
+  ["grid-narrow", 716 / 7 - 16, 700], ["settings-open", 1616 / 16 - 16, 1600]]) {
   test(`${name} preview supplies saved geometry, settings and mapped group tiles`, async t => {
     const { api, board, reply } = await preview(t, name);
     assert.deepEqual(reply.folders, { 101: "preview-101", 102: "preview-102", 103: "preview-103" });
     assert.equal(board.saved.length, 3);
     const layout = await loadLayout(api);
     const settings = await loadSettings(api);
-    const view = buildView(board, { layout, ...settings, contentWidth: width - 96,
+    const view = buildView(board, { layout, ...settings, contentWidth: width,
       folders: reply.folders });
     assert.equal(view.cell, cell);
     assert.equal(view.tiles.length, 6);
