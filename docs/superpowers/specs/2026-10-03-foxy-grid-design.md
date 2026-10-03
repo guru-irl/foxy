@@ -22,7 +22,7 @@ a fixed rail on the right. A settings pane makes the board configurable.
 | Scrolling | The grid area scrolls vertically; rows are unbounded. |
 | Collisions | Push down, gaps allowed, live preview. No upward packing. |
 | Layout scope | Synced across devices (`storage.sync`), one key per tile. |
-| Narrow screens | Tiles that do not fit are shown at the first free spot below. Saved positions do not change unless you move that tile. |
+| Narrow screens | Empty columns close first, then tiles shift left as needed; tiles wrap below only when a row cannot fit (§12). Saved positions do not change unless you move that tile. |
 | Settings | Gear button in the TABS rail header opens a pane. The same pane is the add-on's options page. |
 | Version | Foxy 3.0.0. |
 
@@ -49,7 +49,7 @@ preset: S 2, M 3, L 4, XL 5.
 - **Move or resize** (`place`): the tile takes its new rectangle; any tile it
   overlaps moves down to just below it, and that repeats for tiles those
   overlap. Nothing moves up.
-- **Display fit** (`fit`): first, in reading order (row, column, then id), a
+- **Display fit** (`fit`, replaced by §12 in 3.1.1): first, in reading order (row, column, then id), a
   tile stays at its saved place if it is inside the columns and clear of the
   tiles kept before it. Then every other tile, in reading order, is shown at
   the first free spot at or below its own row, with width capped at the
@@ -256,3 +256,35 @@ of §2 to §5 and §7 where they differ.
 - With reduced motion, nothing slides; positions change at once.
 
 Version: Foxy 3.1.0.
+
+## 12. Foxy 3.1.1: narrow windows keep the arrangement
+
+User feedback on 3.1.0: shrinking the window by one column sent tiles to the
+far left even though closing an empty gap would have kept the layout. This
+replaces the display fit rule in §3 (and the "Narrow screens" row in §2).
+Saved positions still never change unless you move a tile.
+
+`fit(tiles, cols)` (display only, visible tiles):
+
+1. **Overlaps:** in reading order (row, column, id), keep each tile that is
+   clear of the tiles kept before it; set the others aside. Columns are not
+   checked here.
+2. **Width:** cap every width at the column count.
+3. **Close gaps:** while kept tiles reach past the last column, remove the
+   rightmost empty column to the left of their right edge (a column no kept
+   tile covers). Kept tiles to its right move one column left. The
+   arrangement is unchanged; only empty space shrinks.
+4. **Push left:** if kept tiles still reach past the last column:
+   - left to right, each tile's leftmost possible column is 0 or the
+     leftmost possible end of the kept tiles to its left that share a row;
+     a tile whose leftmost possible end is past the last column is set aside
+     (it no longer constrains others);
+   - then right to left, each kept tile moves to
+     `min(x, limit - w)`, where `limit` is the column count or the new
+     left edge of the nearest kept tile to its right that shares a row.
+   Tiles move left only as far as needed; tiles not in the way stay.
+5. **Set-aside tiles**, in reading order, go to the first free spot at or
+   below their own row (as before).
+
+Result: if a window loses columns that were empty, every tile keeps its
+neighbours; tiles wrap below only when the row truly cannot fit.
