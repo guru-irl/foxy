@@ -40,7 +40,7 @@ test("the gear opens a sibling pane and Escape or gear closes it with focus rest
   gear().click(); assert.equal(pane.hidden, false);
   assert.equal(gear().getAttribute("aria-expanded"), "true");
   const first = pane.querySelector("button"); assert.equal(document.activeElement, first);
-  const box = pane.getBoundingClientRect(); assert.equal(box.width, 360); assert.equal(box.height, innerHeight);
+  const box = pane.getBoundingClientRect(); assert.equal(box.width, 360); assert.equal(box.height, innerHeight - 48);
   assert.equal(getComputedStyle(pane).boxShadow, "none"); assert.equal(getComputedStyle(pane).borderTopWidth, "0px");
   assert.equal(pane.querySelectorAll(".setting-caption").length, 2);
   const scroll = pane.querySelector(".settings-scroll"); assert.equal(scroll.tabIndex, -1);
@@ -404,4 +404,14 @@ test("options.html renders the shared pane, saves and resets only tile keys", as
     assert.ok(css.backgroundColor !== "rgba(0, 0, 0, 0)");
     assert.equal(frame.contentWindow.getComputedStyle(pane.querySelector("h2")).fontStyle, "normal");
   }
+});
+
+test("the open pane floats like a card: inset by the board margin with the tile radius", async () => {
+  const { node, pane } = await setup();
+  try {
+    node.querySelector(".settings-button").click(); await nextFrame(); await nextFrame();
+    const style = getComputedStyle(pane);
+    for (const side of ["top", "right", "bottom"]) assert.equal(style[side], "24px", side);
+    assert.equal(style.borderRadius, "12px");
+  } finally { pane.hidden = true; }
 });
