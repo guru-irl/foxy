@@ -558,10 +558,7 @@ button.dot {
   top: 0;
   width: 100%;
   height: max(100%, calc(var(--rows) * var(--pitch) - var(--gap)));
-  background-image: radial-gradient(circle,
-    light-dark(rgba(0, 0, 0, 0.35), rgba(255, 255, 255, 0.35)) 1.5px, transparent 1.5px);
-  background-size: var(--pitch) var(--pitch);
-  background-position: calc((var(--pitch) - var(--gap)) / 2) calc((var(--pitch) - var(--gap)) / 2);
+  fill: light-dark(rgba(0, 0, 0, 0.35), rgba(255, 255, 255, 0.35));
   opacity: 0;
   transition: opacity 120ms ease-out;
 }

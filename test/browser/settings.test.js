@@ -583,6 +583,37 @@ test("new groups save the same XL default size at 1600 and 1000 px", async () =>
   assert.deepEqual(sizes, [[2, 3], [2, 3]]);
 });
 
+// Keeping the old page minimum while measuring makes a second narrow resize
+// reuse the previous overflow floor instead of the new viewport width.
+test("XL narrowing from 401 to 300 px matches a fresh 300 px render", async () => {
+  const makeFirefox = async () => {
+    const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], selfTabId: 99,
+      groups: [], tabs: [{ id: 99, windowId: 1 }] },
+      message => message.type === "foxy:reconcile" ? { ok: true } : message.type === "foxy:saved"
+        ? { folders: {}, saved: [], missing: [] } : undefined);
+    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "XL" } });
+    return ff;
+  };
+  const ff = await makeFirefox(), frame = await newtab(ff, 401);
+  let fresh;
+  const geometry = frame => {
+    const board = frame.contentDocument.querySelector(".board");
+    return { width: board.getBoundingClientRect().width,
+      cell: parseFloat(frame.contentWindow.getComputedStyle(board).getPropertyValue("--cell")) };
+  };
+  try {
+    assert.equal(geometry(frame).cell, 192.5, "initial XL stretch at 401 px");
+    const before = await ff.browser.storage.sync.get(null);
+    frame.style.width = "300px"; await flush(ff); await flush(ff);
+    const freshFirefox = await makeFirefox();
+    fresh = await newtab(freshFirefox, 300);
+    assert.deepEqual(geometry(frame), geometry(fresh),
+      `narrowing measures the viewport, not the old floor: resized ${JSON.stringify(geometry(frame))}, fresh ${JSON.stringify(geometry(fresh))}`);
+    assert.deepEqual(geometry(fresh), { width: 932, cell: 300 });
+    assert.deepEqual(await ff.browser.storage.sync.get(null), before, "display fit does not rewrite saved layouts");
+  } finally { frame.remove(); fresh?.remove(); }
+});
+
 async function missingNewtab(width, height) {
   const { ff } = await setup(), send = ff.browser.runtime.sendMessage;
   ff.browser.runtime.sendMessage = async message => {

@@ -20,6 +20,24 @@ export function positionTiles(grid, tiles) {
     const tile = shown.get(node.dataset.tileId);
     for (const key of ["x", "y", "w", "h"]) node.style.setProperty(`--${key}`, tile[key]);
   }
+  if (grid.classList.contains("gesturing")) {
+    const dots = grid.querySelector(".grid-corners"), pitch = parseFloat(grid.style.getPropertyValue("--pitch"));
+    const cols = Number(grid.style.getPropertyValue("--cols"));
+    const height = Math.max(grid.clientHeight, Math.max(0, ...tiles.map(tile => tile.y + tile.h)) * pitch - 16);
+    const dragged = grid.querySelector(".tile.dragging")?.dataset.tileId;
+    const resting = tiles.filter(tile => tile.id !== dragged), circles = [];
+    for (let j = 1; j * pitch - 8 < height; j++) {
+      for (let i = 1; i < cols; i++) {
+        if (resting.some(tile => tile.x < i && i < tile.x + tile.w && tile.y < j && j < tile.y + tile.h)) continue;
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("cx", i * pitch - 8);
+        circle.setAttribute("cy", j * pitch - 8);
+        circle.setAttribute("r", "1.5");
+        circles.push(circle);
+      }
+    }
+    dots.replaceChildren(...circles);
+  }
 }
 
 function readEdge(node) {
@@ -77,6 +95,7 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   grid.tabIndex = -1;
   grid.style.setProperty("--cols", view.cols);
   grid.style.setProperty("--cell", `${view.cell}px`);
+  grid.style.setProperty("--cell-target", `${view.targetCell}px`);
   grid.style.setProperty("--gap", "16px");
   grid.style.setProperty("--pitch", `${view.cell + 16}px`);
   for (const tile of view.tiles) {
@@ -93,7 +112,8 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
     grid.append(node);
   }
   positionTiles(grid, view.tiles);
-  const corners = el("div", "grid-corners");
+  const corners = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  corners.setAttribute("class", "grid-corners");
   corners.setAttribute("aria-hidden", "true");
   grid.append(corners);
   const rail = fixedColumn(root, "tabs", "TABS", board.tabs, handlers);

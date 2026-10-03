@@ -72,7 +72,8 @@ export function attachDnd(root, handlers, board) {
     const left = parseFloat(style.paddingLeft) || 0, top = parseFloat(style.paddingTop) || 0;
     const col = Math.max(0, Math.min(cols - 1, Math.floor((x - bounds.left - left + grid.scrollLeft) / (cell + GAP))));
     const row = Math.max(0, Math.floor((y - bounds.top - top + grid.scrollTop) / (cell + GAP)));
-    const { id, ...rect } = clampRect("group:new", { x: col, y: row, ...defaultSize("group", cell, cols) }, cols);
+    const targetCell = parseFloat(style.getPropertyValue("--cell-target"));
+    const { id, ...rect } = clampRect("group:new", { x: col, y: row, ...defaultSize("group", targetCell, cols) }, cols);
     return { rect, cell, left, top, col, row };
   }
   function dropZone(target) {

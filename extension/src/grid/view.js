@@ -22,6 +22,6 @@ export function buildView(board, { layout, synced, device, contentWidth, folders
   const placed = addMissing(visible, ids, cols, targetCell).map(tile => savedIds.has(tile.id) ? tile
     : { ...tile, ...defaultSize(metadata.get(tile.id).kind, targetCell, 10000) });
   const newTiles = placed.filter(tile => !savedIds.has(tile.id) && !tile.id.startsWith("local:"));
-  return { cell, total, cols, railCells, saved: layout,
+  return { cell, targetCell, total, cols, railCells, saved: layout,
     tiles: fit(placed, cols).map(tile => ({ ...tile, ...metadata.get(tile.id) })), newTiles };
 }

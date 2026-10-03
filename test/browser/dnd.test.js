@@ -1054,6 +1054,43 @@ test("a failed key check for a post-paint group retries on a later render instea
   } finally { console.warn = warn; if (root) { endName(root); root.remove(); } timer.restore(); }
 });
 
+// Using the stretched cell for defaults loses a row except at the exact XL pitch.
+for (const [width, pitch] of [[1000, 1016 / 6], [1366, 1382 / 8], [1584, 160], [1600, 161.6]]) {
+  test(`XL tab drop at ${width}px previews and saves the setting's 2 by 3 default`, async () => {
+    let reply = { folders: {}, saved: [], missing: [] };
+    const set = { windows: [{ id: 1, focused: true }], selfTabId: 99, groups: [],
+      tabs: [{ id: 15, windowId: 1 }, { id: 99, windowId: 1 }] };
+    const { root, ff, control } = await controller(set, message => message.type === "foxy:reconcile"
+      ? { ok: true } : message.type === "foxy:saved" ? reply : undefined,
+      { settings: { showClock: false, showPinned: false, showSaved: false } });
+    root.style.width = `${width}px`;
+    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "XL" } });
+    await control.refresh(); await flush(ff); await flush(ff);
+    const grid = root.querySelector(".grid"), bounds = grid.getBoundingClientRect();
+    const coords = { clientX: bounds.left + 1.2 * pitch, clientY: bounds.top + 1.2 * pitch };
+    const source = tab(root), dataTransfer = start(source);
+    try {
+      const hit = document.elementFromPoint(coords.clientX, coords.clientY);
+      assert.equal(hit, grid, "pointer hits an empty cell");
+      assert.ok(dispatchDrag("dragover", hit, { dataTransfer, ...coords }).defaultPrevented);
+      const preview = grid.querySelector(".cell-preview").getBoundingClientRect();
+      for (const [actual, expected] of [[preview.left - bounds.left, pitch], [preview.top - bounds.top, pitch],
+        [preview.width, 2 * pitch - 16], [preview.height, 3 * pitch - 16]]) {
+        assert.ok(Math.abs(actual - expected) < 0.5, `stretched preview geometry: expected ${expected}, got ${actual}`);
+      }
+      dispatchDrag("drop", hit, { dataTransfer, ...coords });
+      dispatchDrag("dragend", source, { dataTransfer });
+      await flush(ff); await flush(ff);
+      const groupId = (await ff.browser.tabs.get(15)).groupId;
+      assert.deepEqual(rectOf(root.querySelector(`[data-tile-id="local:${groupId}"]`)), { x: 1, y: 1, w: 2, h: 3 });
+      reply = { ...reply, folders: { [groupId]: "new" } };
+      endName(root); await control.refresh(); await flush(ff); await flush(ff);
+      assert.deepEqual((await ff.browser.storage.sync.get("tile:group:new"))["tile:group:new"],
+        { x: 1, y: 1, w: 2, h: 3 });
+    } finally { dispatchDrag("dragend", source, { dataTransfer }); endName(root); }
+  });
+}
+
 for (const [label, x, y, expected] of [
   ["empty cell", 5.2, 0.2, { zone: "cell", tabId: 15, rect: { x: 5, y: 0, w: 3, h: 4 } }],
   ["empty trailing gap", 5.95, 0.2, { zone: "cell", tabId: 15, rect: { x: 5, y: 0, w: 3, h: 4 } }],

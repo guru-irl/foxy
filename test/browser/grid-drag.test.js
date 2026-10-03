@@ -758,10 +758,59 @@ test("corner dots stay behind clock, pinned, saved and group tiles during a gest
     assert.equal(getComputedStyle(dots).zIndex, "0", "dots stay below all tiles");
     assert.equal(getComputedStyle(grid.querySelector(".drop-outline")).zIndex, "2");
     assert.equal(getComputedStyle(tile(root)).zIndex, "3", "dragged tile stays above the target");
-    assert.equal(document.elementFromPoint(origin.left + 7 * 96 + 88, origin.top + 2 * 96 + 88), dots,
-      "the dots layer still paints in empty space");
+    const emptyHit = document.elementFromPoint(origin.left + 7 * 96 + 88, origin.top + 2 * 96 + 88);
+    assert.ok(emptyHit === dots || dots.contains(emptyHit), "the dots layer still paints in empty space");
   } finally { dots.style.pointerEvents = ""; escape(); await flush(ff); }
 });
+
+// A full-grid dot image shows through glass cards. Check the generated dots,
+// not hit testing, which cannot detect paint through translucent tiles.
+for (const kind of ["move", "resize"]) {
+  test(`${kind} dots omit resting interiors and follow pushed preview tiles only on target changes`, async () => {
+    const { ff, root } = await setup(), grid = root.querySelector(".grid");
+    const dots = grid.querySelector(".grid-corners");
+    const source = kind === "move" ? header(root) : tile(root).querySelector(".tile-resize");
+    const start = down(source);
+    const points = () => [...dots.querySelectorAll("circle")].map(circle =>
+      [Number(circle.getAttribute("cx")), Number(circle.getAttribute("cy"))]);
+    const has = (x, y) => points().some(([cx, cy]) => cx === x && cy === y);
+    const checkInteriors = () => {
+      for (const [cx, cy] of points()) {
+        const i = (cx + 8) / 96, j = (cy + 8) / 96;
+        for (const node of grid.querySelectorAll(".tile:not(.dragging)")) {
+          const { x, y, w, h } = rect(node);
+          assert.equal(x < i && i < x + w && y < j && j < y + h, false,
+            `dot (${i}, ${j}) must not show through ${node.dataset.tileId}`);
+        }
+      }
+    };
+    try {
+      pointer("pointermove", document, shifted(start, 12, 0));
+      assert.ok(has(88, 88), "the dragged tile's start area keeps its dot");
+      assert.ok(has(280, 184), "tile edges keep their gap-crossing dot");
+      assert.ok(has(376, 88), "an uncovered crossing keeps its dot");
+      assert.equal(has(88, 472), false, "resting group interior has no dot");
+      assert.equal(has(568, 88), false, "resting pinned interior has no dot");
+      assert.equal(has(568, 472), false, "resting clock interior has no dot");
+      checkInteriors();
+      const changes = [], observer = new MutationObserver(records => changes.push(...records));
+      observer.observe(dots, { childList: true, subtree: true, attributes: true });
+      try {
+        for (let x = 13; x < 23; x++) pointer("pointermove", document, shifted(start, x, 0));
+        await Promise.resolve();
+        assert.equal(changes.length, 0, "same-target moves do not rebuild dots");
+      } finally { observer.disconnect(); }
+      pointer("pointermove", document, shifted(start, 12, 192));
+      assert.equal(rect(tile(root, "group:b")).y, 6, "preview pushes the resting group");
+      assert.ok(has(88, 472), "the pushed group's old interior is uncovered");
+      assert.equal(has(88, 664), false, "the pushed group's new interior has no dot");
+      checkInteriors();
+      pointer("pointermove", document, shifted(start, 12, 0));
+      assert.equal(has(88, 472), false, "dots follow the returning group too");
+      checkInteriors();
+    } finally { escape(); await flush(ff); }
+  });
+}
 
 test("cell-corner dots fade only for tile gestures, centred in gap intersections", async () => {
   const { ff, root } = await setup(), grid = root.querySelector(".grid");
@@ -773,9 +822,13 @@ test("cell-corner dots fade only for tile gestures, centred in gap intersections
     await new Promise(resolve => setTimeout(resolve, 150));
     const style = getComputedStyle(dots);
     assert.equal(style.opacity, "1"); assert.equal(style.transitionDuration, "0.12s");
-    assert.equal(style.backgroundSize, "96px 96px");
-    assert.equal(style.backgroundPosition, "40px 40px", "image centre 48px plus offset 40px puts dots at gap centre 88px");
-    assert.ok(style.backgroundImage.includes("1.5px"), "3px diameter dots");
+    const circle = dots.querySelector('circle[cx="88"][cy="88"]');
+    assert.ok(circle, "dot is centred at the 88px gap crossing");
+    assert.ok([...dots.querySelectorAll("circle")].every(circle => circle.getAttribute("r") === "1.5"), "3px diameter dots");
+    for (const [scheme, fill] of [["dark", "rgba(255, 255, 255, 0.35)"], ["light", "rgba(0, 0, 0, 0.35)"]]) {
+      root.style.colorScheme = scheme;
+      assert.equal(getComputedStyle(circle).fill, fill, "35% neutral dots in either theme");
+    }
     escape(); assert.equal(grid.classList.contains("gesturing"), false);
     await flush(ff); assert.equal(getComputedStyle(dots).opacity, "0");
     assert.equal(root.querySelector(".drop-outline"), null);
