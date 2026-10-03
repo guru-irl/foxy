@@ -278,7 +278,7 @@ for (const hold of ["drag", "edit"]) {
   });
 }
 
-test("integration: slow saved and reconcile replies never block the first tab render", async () => {
+test("integration: slow saved and reconcile replies hold first paint only until the 500ms fallback", async () => {
   const ff = createFirefox(config()), sync = await background(ff);
   const send = ff.browser.runtime.sendMessage, held = gate();
   ff.browser.runtime.sendMessage = async message => {
@@ -289,7 +289,10 @@ test("integration: slow saved and reconcile replies never block the first tab re
   const { root, control } = mount(ff);
   try {
     await control.refresh();
-    assert.ok(root.querySelector('[data-tab-id="10"]'), "tabs must render while both messages are pending");
+    assert.equal(root.querySelector(".grid"), null, "first paint waits for saved, but not indefinitely");
+    await new Promise(resolve => setTimeout(resolve, 550)); await drain(ff, sync);
+    assert.ok(root.querySelector('[data-tab-id="10"]'), "tabs render after 500ms while both messages are pending");
+    assert.equal(ff.calls.filter(call => call.api === "storage.sync.set").length, 0, "no tile writes before any saved reply");
     assert.equal(root.querySelector(".saved"), null);
     assert.equal(messages(ff, "foxy:reconcile").length, 1);
     assert.ok(messages(ff, "foxy:saved").length > 0);
@@ -334,11 +337,14 @@ for (const answer of ["reject", "undefined", "malformed"]) {
     await warningsDuring(async warnings => {
       const { root, control, page } = mount(ff);
       await control.refresh(); await drain(ff);
+      if (answer === "reject") { await new Promise(resolve => setTimeout(resolve, 550)); await drain(ff); }
       for (let i = 0; i < 3; i++) { await control.refresh(); await drain(ff); }
       assert.ok(root.querySelector('[data-tab-id="10"]'));
       assert.equal(root.querySelector(".saved"), null); assert.equal(page.querySelector(".banner"), null);
       assert.equal(warnings.length, 1); assert.ok(warnings[0][0].startsWith("Foxy:"));
       assert.equal(control.ui.busy.size, 0);
+      assert.equal(ff.calls.some(call => call.api === "storage.sync.set"), false,
+        "tiles are written only after a valid reply with the group-to-folder map");
     });
   });
 }
@@ -511,7 +517,7 @@ for (const failure of ["reject", "false"]) {
     await warningsDuring(async warnings => {
       const { root, control } = mount(ff);
       try {
-        await control.refresh();
+        await control.refresh(); await drain(ff, sync);
         assert.ok(root.querySelector('[data-tab-id="10"]'));
         ff.calls.length = 0;
         held.release(); await drain(ff, sync);
@@ -681,8 +687,10 @@ test("fix r2: first saved read timeout renders tabs without a saved column", asy
     const { root, page, control } = mount(ff, { maxWait: 150 });
     try {
       await control.refresh();
-      assert.ok(root.querySelector('[data-tab-id="10"]'), "the first tab render must not await saved");
-      await new Promise(resolve => setTimeout(resolve, 400)); await drain(ff);
+      assert.equal(root.querySelector(".grid"), null, "first paint still waits for the 500ms bound after a request timeout");
+      await new Promise(resolve => setTimeout(resolve, 550)); await drain(ff);
+      assert.ok(root.querySelector('[data-tab-id="10"]'), "the 500ms fallback renders tabs after the saved request times out");
+      assert.equal(ff.calls.filter(call => call.api === "storage.sync.set").length, 0, "timeouts are not saved replies");
       assert.equal(warnings.length, 1, "the first saved timeout must warn once per load");
       assert.ok(warnings[0][0].startsWith("Foxy:"));
       assert.ok(String(warnings[0][1]).includes("timed out"));
@@ -690,7 +698,7 @@ test("fix r2: first saved read timeout renders tabs without a saved column", asy
       assert.equal(page.querySelector(".banner"), null);
       assert.equal(control.ui.busy.size, 0);
       const reads = messages(ff, "foxy:saved").length;
-      assert.ok(reads <= 2, "timeouts must not create a read loop");
+      assert.ok(reads <= 2, `timeouts must not create a read loop: ${reads} saved reads; ${ff.calls.filter(c => c.api === "windows.getAll").length} tab reads`);
       waiting = false;
       ff.fire("bookmarks.onChanged", "dev", { title: "Recovered" }); await drain(ff);
       assert.equal(messages(ff, "foxy:saved").length, reads + 1, "timeout clears the flight guard for later reads");

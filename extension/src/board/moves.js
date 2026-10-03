@@ -15,7 +15,7 @@ export async function dropTab(api, tabId, target) {
     }
     if (target.kind === "new-group") {
       const groupId = await api.tabs.group({ tabIds: [tabId], createProperties: { windowId: target.windowId } });
-      return { ok: true, groupId };
+      return { ok: true, groupId, ...(target.rect ? { rect: target.rect } : {}) };
     }
     if (target.kind === "group") {
       await dropIntoGroup(api, tab, target);
@@ -128,32 +128,18 @@ async function dropPinned(api, tab, target) {
   return true;
 }
 
-/** Execute a group column target. Null means a resolver-detected no-op. */
-export async function dropGroup(api, groupId, target) {
-  if (target == null) return true;
-  return attempt("could not drop group", async () => {
-    let index = -1;
-    if (target.beforeGroupId != null) {
-      const group = await api.tabGroups.get(groupId);
-      const members = await orderedTabs(api, { groupId });
-      const first = (await orderedTabs(api, { groupId: target.beforeGroupId }))[0];
-      if (first?.windowId === target.windowId) {
-        const forward = group.windowId === first.windowId && members[0].index < first.index;
-        index = first.index - (forward ? members.length : 0);
-      }
-    }
-    await api.tabGroups.move(groupId, { windowId: target.windowId, index });
-  });
-}
-
 export async function bringGroupHere(api, groupId, windowId) {
   return attempt("could not bring group here", () => api.tabGroups.move(groupId, { windowId, index: -1 }));
 }
 
 /** Activate via the existing close protocol. Only pins follow across windows. */
-export async function openTab(api, row, self, { close = true } = {}) {
+export async function openTab(api, row, self, { close = true, pinsMoveHere = true } = {}) {
   try {
     const tab = await api.tabs.get(row.id);
+    if (tab.pinned && tab.windowId !== self.windowId && !pinsMoveHere) {
+      await api.windows.update(tab.windowId, { focused: true });
+      return await activateTab(api, tab.id, self.id, { close: false });
+    }
     if (tab.pinned && tab.windowId !== self.windowId) {
       await api.tabs.move(tab.id, { windowId: self.windowId, index: await pinnedCount(api, self.windowId) });
     }

@@ -30,11 +30,13 @@
   color-scheme: light dark;
   --text: light-dark(rgba(0, 0, 0, 0.85), rgba(255, 255, 255, 0.92));
   --text-muted: light-dark(rgba(0, 0, 0, 0.55), rgba(255, 255, 255, 0.6));
-  --gap: 12px;
+  --gap: 16px;
   --board-margin: 24px;
   --column-padding: 8px;
   --title-padding: 10px;
-  --card: light-dark(rgba(246, 246, 247, 0.7), rgba(22, 22, 24, 0.6));
+  --card-alpha-light: 0.7;
+  --card-alpha-dark: 0.6;
+  --card: light-dark(rgba(246, 246, 247, var(--card-alpha-light)), rgba(22, 22, 24, var(--card-alpha-dark)));
   --label: light-dark(rgba(0, 0, 0, 0.62), rgba(255, 255, 255, 0.68));
   --unnamed: light-dark(rgba(0, 0, 0, 0.48), rgba(255, 255, 255, 0.48));
   --hover: light-dark(rgba(0, 0, 0, 0.06), rgba(255, 255, 255, 0.08));
@@ -63,66 +65,193 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  padding-block: 10vh 24px;
+  padding-block: 24px;
 }
+
+/* --- Settings ---------------------------------------------------------- */
+
+.settings-pane {
+  --card: light-dark(rgba(246, 246, 247, min(0.92, calc(var(--card-alpha-light) + 0.2))), rgba(22, 22, 24, min(0.92, calc(var(--card-alpha-dark) + 0.2))));
+  --setting-accent: light-dark(#286ac4, #8cb9f4);
+  position: fixed;
+  inset-block: var(--board-margin);
+  inset-inline-end: var(--board-margin);
+  z-index: 2;
+  box-sizing: border-box;
+  width: 360px;
+  max-width: calc(100vw - 2 * var(--board-margin));
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--card);
+  backdrop-filter: blur(28px);
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  transition: transform 180ms ease;
+}
+
+@starting-style {
+  .settings-pane:not([hidden]) { transform: translateX(calc(100% + var(--board-margin))); }
+}
+
+.settings-button { z-index: 3; }
+.board:has(+ .settings-pane:not([hidden])) .rail .column-title,
+.board:has(+ .settings-pane:not([hidden])) .rail .rows { visibility: hidden; }
+
+.settings-scroll {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 12px 24px 32px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--thumb) transparent;
+  outline: none;
+  --fade-start: 0px;
+  --fade-end: 0px;
+}
+
+.settings-pane.scroll-start .settings-scroll { --fade-start: 24px; }
+.settings-pane.scroll-end .settings-scroll { --fade-end: 24px; }
+.settings-pane.scroll-start .settings-scroll,
+.settings-pane.scroll-end .settings-scroll {
+  mask-image: linear-gradient(to bottom, transparent, black var(--fade-start), black calc(100% - var(--fade-end)), transparent);
+}
+
+.settings-section + .settings-section { margin-top: 24px; }
+.settings-title {
+  margin: 0 0 12px;
+  color: var(--label);
+  font: normal 700 16px / 24px "Foxy Sans", system-ui, sans-serif;
+  font-stretch: 50%;
+  text-transform: uppercase;
+}
+
+.setting { margin-bottom: 12px; }
+.setting-label { line-height: 20px; }
+.setting-caption { display: block; color: var(--text-muted); font-size: 11px; }
+.settings-segmented, .settings-stepper {
+  display: flex;
+  align-items: center;
+  width: fit-content;
+  gap: 2px;
+  margin-top: 6px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--hover);
+}
+
+.settings-segmented button, .settings-stepper button, .settings-pill {
+  padding: 6px 12px;
+  border-radius: 999px;
+  min-height: 30px;
+}
+.settings-segmented button[aria-pressed="true"] { color: var(--setting-accent); background: var(--pressed); }
+.settings-stepper output { min-width: 32px; text-align: center; }
+.settings-pane button:disabled { opacity: 0.4; cursor: default; }
+.setting-toggle { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.setting-toggle .setting-label { flex: 1; }
+.settings-toggle {
+  flex: none;
+  width: 36px;
+  height: 22px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--pressed);
+}
+.settings-toggle::before {
+  content: "";
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--text-muted);
+}
+.settings-toggle[aria-checked="true"]::before { transform: translateX(14px); background: var(--setting-accent); }
+.settings-number {
+  box-sizing: border-box;
+  width: 96px;
+  margin-top: 6px;
+  padding: 6px 12px;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--text);
+  font: inherit;
+}
+.settings-number:focus-visible { background: var(--pressed); }
+.settings-reset { background: var(--hover); }
+.settings-pane button:focus-visible { background: var(--thumb); }
+.options-page .settings-pane {
+  position: static;
+  width: 360px;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+  transition: none;
+}
+.options-page .settings-scroll { height: auto; overflow: visible; }
+@media (prefers-reduced-motion: reduce) { .settings-pane { transition: none; } }
 
 /* --- Clock ------------------------------------------------------------- */
 
 .clock {
-  flex: none;
-  margin-bottom: 40px;
-  /* Board margin + column inset + title inset = the PINNED title's box. */
-  margin-inline: calc(var(--board-margin) + var(--column-padding) + var(--title-padding));
-  text-align: start;
+  box-sizing: border-box;
+  container-type: size;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--card);
+  overflow: hidden;
 }
 
-/* Firefox 157 flat lining-digit ink: 63/115px versus Sans 64/115px.
-   Scale the previous 88px / 11vw / 160px clamp by 1.1, not by line height.
-   Only group titles slant. The date stays Sans. */
+/* Firefox 157, bold tabular figures at 100px: 00:00 is 239.8px;
+   the widest 12-hour label, 12:59 AM, is 427.2px. Their inverse advances
+   fill the content width. The height cap leaves room for the date. */
 .clock-time {
   display: block;
-  font: normal 600 clamp(96.8px, 12.1vw, 176px) / 1 "Foxy Serif", serif;
+  font: normal 700 min(41.7cqw, 70cqh) / 1 "Foxy Serif", serif;
   font-variant-numeric: lining-nums tabular-nums;
   white-space: nowrap;
 }
 
-/* case does not raise EB Garamond's colon. Its ink midpoint is 0.134em
-   below the flat lining digits' midpoint at both ends of the size clamp.
-   The 0.004em rightward nudge equalises its raster ink side bearings
-   within 1px. Adjacent digits have different bearings even with tnum. */
+.clock[data-format="12"] .clock-time {
+  font-size: min(23.4cqw, 70cqh);
+}
+
 .clock-colon {
   display: inline-block;
   text-indent: 0;
   transform: translate(0.004em, -0.134em);
 }
 
-/* Garamond lining tabular wght 600 lead bearings, Firefox 157:
-   0/1/2 = 3/9/4px at 96.8px, 5/17/8px at 176px (50% coverage).
-   Pull left by the measured em bearing; keep the title's 1px ink inset.
-   This makes the clock, date and PINNED inks meet within one pixel. */
-.clock-time[data-lead="0"] {
-  text-indent: calc(1px - 0.03em);
-}
-
-.clock-time[data-lead="1"] {
-  text-indent: calc(1px - 0.095em);
-}
-
-.clock-time[data-lead="2"] {
-  text-indent: calc(1px - 0.045em);
-}
-
-/* Left-aligned with the clock and the title, so the trailing letter gap
-   after the last letter needs no compensation. */
 .clock-date {
-  margin-top: 8px;
-  /* PINNED's P ink starts 1px inside its title box in Firefox 157. */
-  text-indent: 1px;
-  font: normal 600 22px / 1 "Foxy Sans", system-ui, sans-serif;
+  margin-top: min(8px, 4cqh);
+  font: normal 600 min(18px, 4.8cqw, 9cqh) / 1 "Foxy Sans", system-ui, sans-serif;
   font-stretch: 85%;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* 4.8cqw and 9cqh must both allow a date of at least 10px. */
+@container (width < 208.333333px) or (height < 111.111111px) {
+  .clock-date { display: none; }
+}
+
+/* Resolve the alpha variables here, so live settings inherited from the board
+   can change each card's fill in either colour scheme. */
+.column,
+.clock,
+.banner {
+  --card: light-dark(rgba(246, 246, 247, var(--card-alpha-light)), rgba(22, 22, 24, var(--card-alpha-dark)));
 }
 
 /* --- Missing groups ----------------------------------------------------- */
@@ -298,23 +427,136 @@ button.dot {
   white-space: nowrap;
 }
 
-/* Fixed edges and a horizontally scrolling middle. All columns keep their
-   width, even when a title or row is longer than the viewport. */
+/* Fixed-width cell tracks scroll vertically beside the full-height rail. */
 .board {
   display: flex;
+  justify-content: center;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   gap: var(--gap);
   margin-inline: var(--board-margin);
 }
 
-.strip {
+.grid {
   position: relative;
-  display: flex;
-  flex: 1;
-  min-width: 0;
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(var(--cols), var(--cell));
+  grid-auto-rows: var(--cell);
+  align-content: start;
   gap: var(--gap);
-  overflow-x: auto;
+  width: calc(var(--cols) * (var(--cell) + var(--gap)) - var(--gap));
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Classic scrollbars must not take width from the whole-cell tracks. */
+  scrollbar-width: none;
+}
+
+.rail {
+  position: relative;
+  flex: none;
+  width: calc(var(--rail-cells) * (var(--cell) + var(--gap)) - var(--gap));
+}
+
+.tile {
+  position: relative;
+}
+
+.tile .column-header,
+.tile .column-title,
+.tile-header {
+  touch-action: none;
+  cursor: grab;
+}
+
+.tile-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 24px;
+}
+
+.tile-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  opacity: 0;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+.tile-resize::before {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--text-muted);
+}
+
+.tile:hover .tile-resize,
+.tile:focus-within .tile-resize {
+  opacity: 1;
+}
+
+.rail-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.tile-lifted {
+  opacity: 0.85;
+}
+
+.board[data-grid-dragging] {
+  user-select: none;
+}
+
+.board[data-grid-dragging] .grid {
+  mask-image: none;
+}
+
+.rail-header {
+  position: relative;
+  flex: none;
+}
+
+.rail-header .column-title {
+  padding-inline-end: var(--row);
+}
+
+.settings-button {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  display: grid;
+  place-items: center;
+  width: var(--row);
+  height: var(--row);
+  border-radius: 999px;
+}
+
+.settings-button::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  background: var(--text-muted);
+  mask: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"%3E%3Cpath fill="black" d="m10 2-1 3-3 1-3-1-2 4 2 2v2l-2 2 2 4 3-1 3 1 1 3h4l1-3 3-1 3 1 2-4-2-2v-2l2-2-2-4-3 1-3-1-1-3zm2 6a4 4 0 1 1 0 8 4 4 0 0 1 0-8"/%3E%3C/svg%3E') center / contain no-repeat;
 }
 
 .column {
@@ -323,8 +565,6 @@ button.dot {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  flex: 0 0 264px;
-  width: 264px;
   min-width: 0;
   min-height: 0;
   padding: var(--column-padding);
@@ -365,7 +605,7 @@ button.dot {
 .column-close,
 .bring-here {
   position: absolute;
-  top: 4px;
+  top: calc((var(--row) - 24px) / 2);
   right: 4px;
   width: 24px;
   height: 24px;
@@ -399,44 +639,40 @@ button.dot {
    Missing edge attributes leave a full-strength edge; fitting content has
    no mask at all. Hit testing and the DnD insertion geometry are unchanged. */
 .rows,
-.strip {
+.grid {
   --fade-start: 0px;
   --fade-end: 0px;
 }
 
 .rows[data-scroll-start],
-.strip[data-scroll-start] {
+.grid[data-scroll-start] {
   --fade-start: 24px;
 }
 
 .rows[data-scroll-end],
-.strip[data-scroll-end] {
+.grid[data-scroll-end] {
   --fade-end: 24px;
 }
 
-.strip[data-scroll-start],
-.strip[data-scroll-end] {
-  mask-image: linear-gradient(to right, transparent, black var(--fade-start), black calc(100% - var(--fade-end)), transparent);
-}
-
 .rows[data-scroll-start],
-.rows[data-scroll-end] {
+.rows[data-scroll-end],
+.grid[data-scroll-start],
+.grid[data-scroll-end] {
   mask-image: linear-gradient(to bottom, transparent, black var(--fade-start), black calc(100% - var(--fade-end)), transparent);
 }
 
 .board[data-dragging] .rows,
-.board[data-dragging] .strip {
+.board[data-dragging] .grid {
   mask-image: none;
 }
 
-.rows,
-.strip {
+.rows {
   scrollbar-width: thin;
   scrollbar-color: var(--thumb) transparent;
 }
 
 .rows:focus-visible,
-.strip:focus-visible,
+.grid:focus-visible,
 .row:focus-visible {
   outline: none;
 }
@@ -504,32 +740,20 @@ button.group-name:focus-visible {
   height: 20px;
 }
 
-.new-group {
-  align-items: center;
-  justify-content: center;
-  background: color-mix(in srgb, var(--card) 45%, transparent);
-}
-
-.action {
-  color: var(--text-muted);
-  font: normal 700 14px / 1 "Foxy Sans", system-ui, sans-serif;
-  font-stretch: 80%;
-}
-
-/* The strip's classic scrollbar occupies layout space; fixed columns reserve
-   the same measured space so every card shares its bottom edge. */
-.board > .fixed {
-  margin-bottom: var(--strip-scrollbar, 0px);
-}
-
-.dragging,
-.column:has(.column-header.dragging) > .rows,
-.column:has(.column-header.dragging) > .other-window {
+.dragging {
   opacity: 0.4;
 }
 
 .column.drop-target {
   background: color-mix(in srgb, var(--card) 85%, var(--text));
+}
+
+.cell-preview {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  border-radius: 12px;
+  background: light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.12));
 }
 
 .drop-line {
@@ -541,14 +765,6 @@ button.group-name:focus-visible {
   height: 2px;
   border-radius: 1px;
   background: var(--text);
-}
-
-.drop-line.vertical {
-  top: 0;
-  bottom: 0;
-  right: auto;
-  height: auto;
-  width: 2px;
 }
 
 .url {

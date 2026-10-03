@@ -6,12 +6,12 @@ const root = new URL("../extension/", import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), "utf8");
 const manifest = JSON.parse(read("manifest.json"));
 
-test("manifest and package name the add-on Foxy 2.2.0", () => {
+test("manifest and package name the add-on Foxy 3.0.0", () => {
   assert.equal(manifest.name, "Foxy");
-  assert.equal(manifest.version, "2.2.0");
-  assert.equal(manifest.description, "A kanban board of your tabs and tab groups, shared across devices through bookmarks.");
+  assert.equal(manifest.version, "3.0.0");
+  assert.equal(manifest.description, "A grid board of your tabs and tab groups, shared across devices through bookmarks.");
   const pkg = JSON.parse(readFileSync(new URL("../package.json", root), "utf8"));
-  assert.equal(pkg.version, "2.2.0");
+  assert.equal(pkg.version, "3.0.0");
 });
 
 test("manifest replaces the new tab page and the home page with newtab.html", () => {
@@ -35,6 +35,13 @@ test("the background script exists and imports the close helper", () => {
   const source = read("background.js");
   assert.match(source, /from ["']\.\/src\/close\.js["']/);
   assert.ok(existsSync(new URL("src/close.js", root)), "missing src/close.js");
+});
+
+test("manifest registers the embedded options page and its references exist", () => {
+  assert.deepEqual(manifest.options_ui, { page: "options.html" });
+  for (const ref of [...read("options.html").matchAll(/(?:src|href)="([^"]+)"/g)].map(m => m[1])) {
+    assert.ok(existsSync(new URL(ref, root)), `missing ${ref}`);
+  }
 });
 
 test("manifest has the gecko settings AMO needs", () => {

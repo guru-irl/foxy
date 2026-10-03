@@ -1,6 +1,6 @@
 import { pinOrigin } from "../sync/names.js";
 import { normalizePinName } from "../sync/codec.js";
-import { colorKey } from "../model.js";
+import { colorKey, formatDate, formatTime } from "../model.js";
 import { attachDnd } from "./dnd.js";
 import { openNameEditor, openColorPicker } from "./edit.js";
 
@@ -12,9 +12,8 @@ const confirmations = new WeakMap();
 const layouts = new WeakMap();
 
 function readEdge(node) {
-  const horizontal = node.classList.contains("strip");
-  const position = horizontal ? node.scrollLeft : node.scrollTop;
-  const extent = horizontal ? node.scrollWidth - node.clientWidth : node.scrollHeight - node.clientHeight;
+  const position = node.scrollTop;
+  const extent = node.scrollHeight - node.clientHeight;
   // Integer extents and fractional offsets can disagree at the maximum.
   // Less than one CSS pixel remaining is at-end; a full pixel gets a hint.
   return { node, start: extent > 0 && position > 0, end: extent > 0 && extent - position >= 1 };
@@ -26,7 +25,7 @@ function writeEdge({ node, start, end }) {
 }
 
 export function updateScrollEdges(root) {
-  const edges = [...root.querySelectorAll(".strip, .rows")].map(readEdge);
+  const edges = [...root.querySelectorAll(".grid, .rows")].map(readEdge);
   for (const edge of edges) writeEdge(edge);
 }
 
@@ -35,25 +34,19 @@ function watchLayout(root) {
   // before watching their replacements, including content size changes.
   layouts.get(root)?.disconnect();
   const observer = new ResizeObserver(() => {
-    alignColumns(root);
     updateScrollEdges(root);
   });
   layouts.set(root, observer);
   observer.observe(root);
-  for (const node of root.querySelectorAll(".strip, .rows")) {
+  for (const node of root.querySelectorAll(".grid, .rows")) {
     node.addEventListener("scroll", () => writeEdge(readEdge(node)), { passive: true });
     observer.observe(node);
     for (const child of node.children) observer.observe(child);
   }
   updateScrollEdges(root);
 }
-function alignColumns(root) {
-  const strip = root.querySelector(".strip");
-  root.style.setProperty("--strip-scrollbar", `${strip.offsetHeight - strip.clientHeight}px`);
-}
-
 // Text is always assigned as textContent, never parsed as markup.
-export function renderBoard(root, board, ui, handlers) {
+export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   if (ui.confirmFolderId == null) confirmations.delete(root);
   else if (confirmations.get(root)?.folderId !== ui.confirmFolderId) {
     confirmations.set(root, { folderId: ui.confirmFolderId, at: performance.now() });
@@ -63,18 +56,37 @@ export function renderBoard(root, board, ui, handlers) {
   // identity checks prevent this old cleanup from ending a newer editor.
   editors.get(root)?.cancel();
   root.setAttribute("role", "region");
-  const strip = el("div", "strip");
-  strip.tabIndex = -1;
-  if (board.saved?.length) strip.append(savedColumn(root, board.saved, ui, handlers));
-  strip.append(...board.columns.map(column => groupColumn(root, column, handlers)));
-  const create = el("section", "column new-group");
-  create.dataset.zone = "new-group";
-  const action = el("span", "action");
-  action.textContent = "+ NEW GROUP";
-  create.append(action);
-  strip.append(create);
-  root.replaceChildren(fixedColumn(root, "pinned", "PINNED", board.pinned, handlers), strip,
-    fixedColumn(root, "tabs", "TABS", board.tabs, handlers));
+  root.style.setProperty("--cell", `${view.cell}px`);
+  root.style.setProperty("--gap", "16px");
+  const grid = el("div", "grid");
+  grid.tabIndex = -1;
+  grid.style.setProperty("--cols", view.cols);
+  grid.style.setProperty("--cell", `${view.cell}px`);
+  grid.style.setProperty("--gap", "16px");
+  for (const tile of view.tiles) {
+    const node = tile.kind === "group" ? groupColumn(root, tile.group, handlers)
+      : tile.kind === "pinned" ? fixedColumn(root, "pinned", "PINNED", board.pinned, handlers)
+      : tile.kind === "saved" ? savedColumn(root, board.saved, ui, handlers) : clockTile();
+    node.classList.add("tile");
+    node.dataset.tileId = tile.id;
+    node.dataset.kind = tile.kind;
+    node.style.gridColumn = `${tile.x + 1} / span ${tile.w}`;
+    node.style.gridRow = `${tile.y + 1} / span ${tile.h}`;
+    const handle = button("tile-resize", `Resize ${tile.kind === "group" ? tile.group.title.trim() || "Unnamed" : tile.kind}`);
+    handle.tabIndex = -1;
+    handle.setAttribute("aria-hidden", "true");
+    node.append(handle);
+    grid.append(node);
+  }
+  const rail = fixedColumn(root, "tabs", "TABS", board.tabs, handlers);
+  rail.classList.add("rail");
+  rail.style.setProperty("--rail-cells", view.railCells);
+  const header = el("header", "rail-header"), title = rail.querySelector(".column-title");
+  title.replaceWith(header);
+  header.append(title, button("settings-button", "Settings"));
+  rail.append(el("div", "rail-resize"));
+  root.replaceChildren(grid, rail);
+  updateClock(root, settings);
   const previousBanner = banners.get(root);
   const missingCount = board.missing?.length ?? 0;
   if (missingCount && previousBanner?.dataset.count === String(missingCount)) {
@@ -88,8 +100,11 @@ export function renderBoard(root, board, ui, handlers) {
       banners.set(root, banner);
     }
   }
+  for (const scheme of ["dark", "light"]) {
+    const key = `--card-alpha-${scheme}`;
+    banners.get(root)?.style.setProperty(key, root.style.getPropertyValue(key));
+  }
   attachDnd(root, handlers, board);
-  alignColumns(root);
   if (ui.editGroupId != null) {
     const name = root.querySelector(`.column[data-group-id="${ui.editGroupId}"] .group-name`);
     renameStarts.get(name)?.();
@@ -102,7 +117,7 @@ export function renderBoard(root, board, ui, handlers) {
       target = row ? (focus.selector ? row.querySelector(focus.selector) : row)
         : rows[Math.min(focus.index, rows.length - 1)]?.querySelector(".row-open");
     } else target = banners.get(root)?.querySelector(focus.selector);
-    (target ?? strip).focus({ preventScroll: true });
+    (target ?? grid).focus({ preventScroll: true });
   }
   watchLayout(root);
 }
@@ -284,7 +299,7 @@ function groupColumn(root, group, handlers) {
   column.dataset.windowId = String(group.windowId);
   column.dataset.color = group.color;
   const header = el("header", "column-header");
-  header.draggable = true;
+  header.draggable = false;
   const groupName = group.title.trim() || "Unnamed";
   const dot = button("dot", `Colour of ${groupName}`);
   dot.setAttribute("aria-expanded", "false");
@@ -457,4 +472,34 @@ function el(tag, className) {
   const node = document.createElement(tag);
   node.className = className;
   return node;
+}
+
+function clockTile() {
+  const tile = el("section", "clock");
+  const header = el("header", "tile-header");
+  header.setAttribute("aria-label", "Move clock");
+  tile.append(header, el("time", "clock-time"), el("div", "clock-date"));
+  return tile;
+}
+
+// Keep the colon independently raised without changing the formatted label.
+export function renderTime(timeEl, time) {
+  const [hour, minute] = time.split(":");
+  const hours = el("span", "clock-hours"), colon = el("span", "clock-colon"), minutes = el("span", "clock-minutes");
+  hours.textContent = hour; colon.textContent = ":"; minutes.textContent = minute;
+  timeEl.replaceChildren(hours, colon, minutes);
+  timeEl.setAttribute("aria-label", time);
+  if (timeEl.localName === "time") timeEl.setAttribute("datetime", time);
+}
+
+export function updateClock(root, { timeFormat = "24", showDate = true } = {}, now = new Date()) {
+  const time = root.querySelector(".clock-time"), date = root.querySelector(".clock-date");
+  if (!time) return;
+  const iso = formatTime(now);
+  const label = timeFormat === "12" ? `${now.getHours() % 12 || 12}:${iso.slice(3)} ${now.getHours() < 12 ? "AM" : "PM"}` : iso;
+  renderTime(time, label);
+  time.setAttribute("datetime", iso);
+  time.closest(".clock").dataset.format = timeFormat;
+  date.textContent = formatDate(now);
+  date.hidden = !showDate;
 }

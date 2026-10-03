@@ -1,9 +1,10 @@
 /**
  * @typedef {Object} TabDrop
- * @property {"group"|"tabs"|"pinned"|"new-group"} zone
+ * @property {"group"|"tabs"|"pinned"|"cell"} zone
  * @property {number} tabId The dragged tab; required to suppress no-op drops.
- * @property {number} [slot] Insertion slot (not needed for new-group).
- * @property {number} [groupId] Group column ID when zone is group.
+ * @property {number} [slot] Insertion slot (not needed for cell).
+ * @property {{x:number,y:number,w:number,h:number}} [rect] New group's tile rectangle.
+ * @property {number} [groupId] Group ID when zone is group.
  */
 
 /**
@@ -13,7 +14,7 @@
  * @param {number} currentWindowId
  */
 export function resolveTabTarget(board, drop, currentWindowId) {
-  if (drop.zone === "new-group") return { kind: "new-group", windowId: currentWindowId };
+  if (drop.zone === "cell") return { kind: "new-group", windowId: currentWindowId, rect: drop.rect };
 
   let rows, target;
   if (drop.zone === "group") {
@@ -52,16 +53,8 @@ export function resolveTabTarget(board, drop, currentWindowId) {
   return target;
 }
 
-/** Resolve a column insertion slot, suppressing both slots adjacent to itself. */
-export function resolveGroupTarget(board, groupId, slot, currentWindowId) {
-  const before = board.columns[slot], after = board.columns[slot - 1];
-  if (before?.id === groupId || after?.id === groupId) return null;
-  const { windowId, beforeId } = adjacentTarget(board.columns, slot, currentWindowId);
-  return { windowId, beforeGroupId: beforeId };
-}
-
 // A boundary belongs to the window above it. At the top, use the window below;
-// inside a window, insert before the row/column below; an empty zone is local.
+// inside a window, insert before the row below; an empty zone is local.
 function adjacentTarget(items, slot, currentWindowId) {
   const before = items[slot], after = items[slot - 1];
   if (before && (!after || after.windowId === before.windowId)) {
@@ -70,7 +63,7 @@ function adjacentTarget(items, slot, currentWindowId) {
   return { windowId: after?.windowId ?? currentWindowId, beforeId: null };
 }
 
-/** Count row/column midpoints strictly above the pointer. */
+/** Count row midpoints strictly above the pointer. */
 export function slotFromPointer(midpoints, y) {
   return midpoints.filter(midpoint => midpoint < y).length;
 }

@@ -1,5 +1,6 @@
 import { test, assert, fixture, nextFrame, dispatchDrag } from "./harness.js";
-import { renderBoard, updateScrollEdges } from "../../extension/src/board/render.js";
+import { updateScrollEdges } from "../../extension/src/board/render.js";
+import { renderBoard } from "./view.js";
 
 let css;
 async function draw({ width = 900, height = 180, groups = 3, count = 20 } = {}, handlers = {}) {
@@ -38,16 +39,14 @@ async function scroll(el, axis, value) {
   await nextFrame(); await nextFrame();
 }
 
-test("horizontal strip fades only the edges with hidden content and clears on resize", async () => {
-  const { root } = await draw(); const strip = root.querySelector(".strip");
-  edges(strip, false, true);
-  await scroll(strip, "scrollLeft", 100); edges(strip, true, true);
-  await scroll(strip, "scrollLeft", strip.scrollWidth); edges(strip, true, false);
-  await scroll(strip, "scrollLeft", 0); edges(strip, false, true);
-  root.style.width = "2400px";
-  await nextFrame(); await nextFrame(); edges(strip, false, false);
-  root.style.width = "900px";
-  await nextFrame(); await nextFrame(); edges(strip, false, true);
+test("grid scrolls vertically with edge fades, never as a horizontal strip", async () => {
+  const { root } = await draw(); const grid = root.querySelector(".grid");
+  edges(grid, false, true);
+  assert.equal(grid.scrollWidth, grid.clientWidth);
+  await scroll(grid, "scrollTop", 100); edges(grid, true, true);
+  await scroll(grid, "scrollTop", grid.scrollHeight); edges(grid, true, false);
+  root.style.height = "2400px";
+  await nextFrame(); await nextFrame(); edges(grid, false, false);
 });
 
 for (const selector of ['.rows[data-zone="pinned"]', '.rows[data-zone="tabs"]', '.rows[data-zone="group"]', '.rows[data-zone="saved"]']) {
@@ -58,6 +57,8 @@ for (const selector of ['.rows[data-zone="pinned"]', '.rows[data-zone="tabs"]', 
     await scroll(rows, "scrollTop", rows.scrollHeight); edges(rows, true, false);
     await scroll(rows, "scrollTop", 0); edges(rows, false, true);
     root.style.height = "1000px";
+    const tile = rows.closest(".tile");
+    if (tile) tile.style.gridRow = "1 / span 12";
     await nextFrame(); await nextFrame(); edges(rows, false, false);
   });
 }
@@ -73,7 +74,7 @@ test("even one pixel of hidden row content gets an edge hint", async () => {
   await scroll(rows, "scrollTop", 1); edges(rows, true, false);
 });
 
-for (const [selector, axis, dimension] of [[".rows[data-zone='pinned']", "scrollTop", "height"], [".strip", "scrollLeft", "width"]]) {
+for (const [selector, axis, dimension] of [[".rows[data-zone='pinned']", "scrollTop", "height"], [".grid", "scrollTop", "height"]]) {
   test(`${dimension} with a fractional container size clears the end fade at the scroll maximum`, async () => {
     const { root } = await draw({ height: 600 });
     // Fractional scaling reproduces Firefox's subpixel scroll maximum on a
@@ -91,7 +92,7 @@ for (const [selector, axis, dimension] of [[".rows[data-zone='pinned']", "scroll
 
 test("scroll edge refresh reads every container before writing any edge attributes", async () => {
   const { root } = await draw();
-  const containers = [...root.querySelectorAll(".strip, .rows")];
+  const containers = [...root.querySelectorAll(".grid, .rows")];
   const operations = [];
   const properties = ["scrollLeft", "scrollTop", "scrollWidth", "clientWidth", "scrollHeight", "clientHeight"];
   try {
@@ -119,11 +120,11 @@ test("scroll edge refresh reads every container before writing any edge attribut
   }
 });
 
-for (const sourceSelector of [".row", ".column-header"]) {
+for (const sourceSelector of [".row"]) {
   test(`dragging a ${sourceSelector} disables all scroll masks until dragend`, async () => {
     const states = [];
     const { root } = await draw({}, { onDragState: active => states.push(active) });
-    const containers = [...root.querySelectorAll(".strip, .rows")];
+    const containers = [...root.querySelectorAll(".grid, .rows")];
     const before = containers.map(node => getComputedStyle(node).maskImage);
     assert.ok(before.every(mask => mask.includes("linear-gradient")));
     const source = root.querySelector(sourceSelector);
@@ -138,18 +139,70 @@ for (const sourceSelector of [".row", ".column-header"]) {
   });
 }
 
-test("short lists and a fitting strip never acquire a fade", async () => {
+for (const selector of [".grid", '.rail .rows[data-zone="tabs"]']) {
+  test(`tab drag continuously scrolls both vertical edges of ${selector} at 12px per frame`, async () => {
+    const { root } = await draw();
+    const area = root.querySelector(selector), source = root.querySelector(".row");
+    const dataTransfer = new DataTransfer();
+    dispatchDrag("dragstart", source, { dataTransfer });
+    const bounds = area.getBoundingClientRect(), x = bounds.left + 20;
+    const over = y => dispatchDrag("dragover", area, { dataTransfer, clientX: x, clientY: y });
+    try {
+      over(bounds.bottom - 49);
+      await nextFrame(); await nextFrame();
+      assert.equal(area.scrollTop, 0, "49px from the edge is outside the 48px threshold");
+      over(bounds.bottom - 47);
+      await nextFrame();
+      assert.equal(area.scrollTop, 12);
+      await nextFrame();
+      assert.equal(area.scrollTop, 24, "one dragover keeps scrolling on successive frames");
+      over(bounds.top + 1);
+      await nextFrame();
+      assert.equal(area.scrollTop, 12);
+      await nextFrame();
+      assert.equal(area.scrollTop, 0);
+      over(bounds.bottom - 1); await nextFrame();
+      dispatchDrag("dragend", source, { dataTransfer });
+      const stopped = area.scrollTop;
+      await nextFrame(); await nextFrame();
+      assert.equal(area.scrollTop, stopped, "dragend stops the frame loop");
+    } finally { dispatchDrag("dragend", source, { dataTransfer }); }
+  });
+
+  for (const stop of ["drop", "leave", "centre", "foreign"]) {
+    test(`${selector} edge-scroll stops on ${stop}`, async () => {
+      const { root } = await draw();
+      const area = root.querySelector(selector), source = root.querySelector(".row");
+      const dataTransfer = new DataTransfer();
+      dispatchDrag("dragstart", source, { dataTransfer });
+      const bounds = area.getBoundingClientRect(), x = bounds.left + 20, y = bounds.bottom - 1;
+      try {
+        dispatchDrag("dragover", area, { dataTransfer, clientX: x, clientY: y });
+        await nextFrame(); assert.ok(area.scrollTop > 0, "the scroll loop must start");
+        if (stop === "drop") dispatchDrag("drop", area, { dataTransfer, clientX: x, clientY: y });
+        else if (stop === "leave") dispatchDrag("dragleave", area, { dataTransfer, relatedTarget: document.body });
+        else dispatchDrag("dragover", area, { dataTransfer: stop === "foreign" ? new DataTransfer() : dataTransfer,
+          clientX: x, clientY: stop === "centre" ? (bounds.top + bounds.bottom) / 2 : y });
+        const stopped = area.scrollTop;
+        await nextFrame(); await nextFrame();
+        assert.equal(area.scrollTop, stopped);
+      } finally { dispatchDrag("dragend", source, { dataTransfer }); }
+    });
+  }
+}
+
+test("short lists and a fitting grid never acquire a fade", async () => {
   const { root } = await draw({ width: 1800, height: 600, groups: 1, count: 1 });
-  for (const el of root.querySelectorAll(".strip, .rows")) edges(el, false, false);
+  for (const el of root.querySelectorAll(".grid, .rows")) edges(el, false, false);
 });
 
 test("new render recalculates fades instead of retaining old edge states", async () => {
   const { root, model } = await draw();
-  const old = root.querySelector(".strip"); await scroll(old, "scrollLeft", 100);
-  renderBoard(root, { ...model, columns: [] }, { editGroupId: null }, {});
+  const old = root.querySelector(".grid"); await scroll(old, "scrollTop", 100);
   root.style.width = "1800px"; root.style.height = "1000px";
+  renderBoard(root, { ...model, columns: [], saved: [], pinned: [{ current: true, rows: model.pinned[0].rows.slice(0, 1) }], tabs: [] }, { editGroupId: null }, {});
   await nextFrame(); await nextFrame();
-  for (const el of root.querySelectorAll(".strip, .rows")) edges(el, false, false);
+  for (const el of root.querySelectorAll(".grid, .rows")) edges(el, false, false);
 });
 
 test("masked scrolled rows still accept a drag and show its insertion line", async () => {

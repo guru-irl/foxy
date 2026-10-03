@@ -233,7 +233,9 @@ test("first-run same-URL pins and groups retain one canonical mapping across eit
       assert.deepEqual(merged.extraPinned, []);
       assert.equal(merged.folders.length, 1, "duplicate Dev is not SAVED in the root");
       assert.equal(state.groups[(await group(ff)).id].folderId, originals[1].groups[11].folderId);
-      assert.deepEqual(await ff.sync.onMessage({ type: "foxy:saved" }), { saved: [], missing: [] });
+      assert.deepEqual(await ff.sync.onMessage({ type: "foxy:saved" }), {
+        saved: [], missing: [], folders: { [(await group(ff)).id]: originals[1].groups[11].folderId },
+      });
       const archives = await ff.browser.bookmarks.search({ title: "Foxy merge leftovers" });
       assert.ok(archives.length);
       assert.ok(archives.every(folder => folder.parentId === "unfiled_____"));
@@ -343,7 +345,9 @@ test("archive hand-added bookmarks are never read or opened live or after restar
     await ff.sync.onMessage({ type: "foxy:restore-all" });
     await converge(server, a, b);
     assert.equal((await ff.browser.tabs.query({})).some(t => t.url.startsWith("https://archive-")), false);
-    assert.deepEqual(await ff.sync.onMessage({ type: "foxy:saved" }), { saved: [], missing: [] });
+    assert.deepEqual(await ff.sync.onMessage({ type: "foxy:saved" }), {
+      saved: [], missing: [], folders: { [(await group(ff)).id]: (await tree(ff)).folders[0].id },
+    });
     assert.equal(ff.calls.slice(before).some(call => ["bookmarks.get", "bookmarks.getChildren", "bookmarks.getSubTree"].includes(call.api)
       && archivedIds.includes(call.args[0])), false, "controller must not read inside the archive");
   }

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildBoard } from "../extension/src/board/model.js";
-import { resolveTabTarget, resolveGroupTarget, slotFromPointer } from "../extension/src/board/targets.js";
+import { resolveTabTarget, slotFromPointer } from "../extension/src/board/targets.js";
 import { createFirefox } from "./fakes/firefox.js";
 
 async function fixture() {
@@ -83,10 +83,13 @@ for (const [groupId, slot, windowId, beforeTabId] of [
   });
 }
 
-test("NEW GROUP always targets the supplied current window", async () => {
-  assert.deepEqual(resolveTabTarget(await fixture(), { zone: "new-group", tabId: 13 }, 7), {
-    kind: "new-group", windowId: 7,
+test("empty cell targets a new group in the current window with its rectangle", async () => {
+  const rect = { x: 4, y: 6, w: 3, h: 4 };
+  const drop = { zone: "cell", tabId: 13, rect };
+  assert.deepEqual(resolveTabTarget(await fixture(), drop, 7), {
+    kind: "new-group", windowId: 7, rect: { x: 4, y: 6, w: 3, h: 4 },
   });
+  assert.deepEqual(drop, { zone: "cell", tabId: 13, rect: { x: 4, y: 6, w: 3, h: 4 } });
 });
 
 test("a group missing from the board cannot be a tab drop target", async () => {
@@ -147,37 +150,11 @@ test("a move into a different zone or a non-adjacent slot is not suppressed", as
   });
 });
 
-for (const [slot, groupId, windowId, beforeGroupId] of [
-  [0, 301, 1, 101], [1, 301, 1, 102], [2, 301, 1, null],
-  [3, 301, 2, 202], [4, 101, 2, null], [5, 101, 3, null],
-]) {
-  test(`group column slot ${slot} resolves top, interior, boundary or end without defaulting to current`, async () => {
-    assert.deepEqual(resolveGroupTarget(await fixture(), groupId, slot, 7), {
-      windowId, beforeGroupId,
-    });
-  });
-}
-
-test("an empty group strip resolves to the supplied current window", async () => {
-  const board = await fixture();
-  board.columns = [];
-  assert.deepEqual(resolveGroupTarget(board, 101, 0, 7), { windowId: 7, beforeGroupId: null });
-});
-
-for (const [groupId, ownSlot, followingSlot] of [[101, 0, 1], [201, 2, 3], [301, 4, 5]]) {
-  test(`group ${groupId} dropped on either side of itself is a no-op, including window boundaries`, async () => {
-    const board = await fixture();
-    assert.equal(resolveGroupTarget(board, groupId, ownSlot, 1), null);
-    assert.equal(resolveGroupTarget(board, groupId, followingSlot, 1), null);
-  });
-}
-
 test("target resolution leaves the board and drops unchanged", async () => {
   const board = await fixture();
   const drop = { zone: "tabs", slot: 2, tabId: 13 };
   const before = structuredClone({ board, drop });
   resolveTabTarget(board, drop, 1);
-  resolveGroupTarget(board, 301, 2, 1);
   assert.deepEqual({ board, drop }, before);
 });
 

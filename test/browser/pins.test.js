@@ -1,7 +1,7 @@
 import { test, assert, fixture, nextFrame, withPseudoState } from "./harness.js";
 import { createFirefox } from "../fakes/firefox.js";
 import { buildBoard } from "../../extension/src/board/model.js";
-import { renderBoard } from "../../extension/src/board/render.js";
+import { renderBoard } from "./view.js";
 
 let css;
 async function root() {

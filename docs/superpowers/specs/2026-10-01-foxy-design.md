@@ -1,5 +1,8 @@
 # Foxy: design
 
+**Layout update:** §5 and §6 (board layout and interactions) are replaced by
+[the grid design](2026-10-03-foxy-grid-design.md).
+
 Date: 2026-10-01. Status: draft for review.
 Supersedes the page layout in `2026-09-30-newtab-design.md` (Default New Tab 1.0.1).
 Everything in that spec not changed here still holds: the page replaces the new

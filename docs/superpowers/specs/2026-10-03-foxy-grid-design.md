@@ -49,13 +49,26 @@ preset: S 2, M 3, L 4, XL 5.
 - **Move or resize** (`place`): the tile takes its new rectangle; any tile it
   overlaps moves down to just below it, and that repeats for tiles those
   overlap. Nothing moves up.
-- **Display fit** (`fit`): tiles whose right edge is past the column count, in
-  reading order, are shown at the first free spot at or below their own row,
-  with width capped at the column count.
-- **New tiles** (a group seen for the first time, a tile shown again in
-  settings): first free spot in reading order that fits the default size.
-- **Reset layout**: clock, then pinned, then groups in tab-strip order (this
-  window first), then saved, each at the first free spot.
+- **Display fit** (`fit`): first, in reading order (row, column, then id), a
+  tile stays at its saved place if it is inside the columns and clear of the
+  tiles kept before it. Then every other tile, in reading order, is shown at
+  the first free spot at or below its own row, with width capped at the
+  column count. Saved layouts can overlap (two devices editing at once, a
+  reopened group whose place was taken); this keeps them apart on screen
+  without writing anything.
+- **Only visible tiles count.** Closed groups and hidden tiles keep their
+  saved place but do not reserve space for placement or fit.
+- **New tiles** (a group seen for the first time, or any tile with no saved
+  place): first free spot in reading order that fits the default size.
+- **Reset layout**: after a second click within 3 s confirms, read
+  `storage.sync.get(null)` and remove every `tile:` key in one
+  `storage.sync.remove` call. Leave settings and all other keys alone, and
+  clear this page's pending tile placements. This is the same action in the
+  board pane and the options page. Open Foxy boards then place their visible
+  tiles as new through the normal storage-change path and existing write
+  rules: clock, then pinned, then groups in tab-strip order (this window
+  first), then saved, each at the first free spot. Hidden and closed tiles
+  no longer have a saved position after a reset.
 
 ## 4. Board
 
@@ -113,10 +126,21 @@ preset: S 2, M 3, L 4, XL 5.
 - A new group created by a drop on empty cells: the page remembers the target
   rectangle for that group id and writes `tile:group:<folderId>` when the
   mapping arrives (within the page's lifetime).
-- Pruning: after the board loads, keys `tile:group:<id>` whose folder is
-  neither open (in `folders`) nor saved (in `saved` or `missing`) are
-  removed. A closed group keeps its tile key, so reopening returns it to
-  its place.
+- Pruning: tile layouts and bookmark folders sync separately and in any
+  order, so a tile key can arrive before its folder. Keys are therefore not
+  pruned just because their folder is unknown. A tile key is removed when
+  its saved group is deleted from the board (with the folder). On load,
+  only when there are more than 400 `tile:` keys, keys `tile:group:<id>`
+  whose folder is neither open (in `folders`) nor saved (in `saved` or
+  `missing`) are removed. A closed group keeps its tile key, so reopening
+  returns it to its place.
+- First paint: the grid waits for the first `foxy:saved` reply (up to
+  500 ms) so groups appear at their saved places. New tiles are written
+  only after a valid `foxy:saved` reply with the `folders` map has arrived
+  (a failed or malformed reply does not count). A tile placed
+  automatically is saved at its full default size, even when the window is
+  too narrow to show it; the display caps it. A tile created by dropping a
+  tab on empty cells is saved where and at the size it was shown.
 - Invalid stored values (wrong types, negative or non-integer cells) are
   ignored and the tile is placed as new.
 
@@ -141,9 +165,13 @@ preset: S 2, M 3, L 4, XL 5.
   and tabs.
 - With pins moving off, clicking another window's pin focuses that window.
 - The pane is a glass panel over the rail, 360 px wide, sections as above,
-  plain labels, changes apply immediately. Escape or the gear closes it.
+  plain labels, changes apply immediately. Its fill alpha is
+  `min(0.92, card alpha + 0.2)` in each scheme, with blur. While it is open,
+  the rail heading and rows are hidden but keep their space and scroll
+  position; the gear stays visible and focusable. Escape or the gear closes
+  it.
 - `options_ui` points at `options.html`, which renders the same pane.
-- Hidden tiles keep their saved position.
+- Hidden tiles keep their saved position unless Reset layout removes it.
 
 ## 8. Errors
 

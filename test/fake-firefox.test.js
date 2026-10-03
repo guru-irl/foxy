@@ -1129,6 +1129,64 @@ test("settle waits for in-flight message listeners and drains events they queue"
   assert.equal(await response, "ready");
 });
 
+test("sync storage supports all get forms with detached JSON values", async () => {
+  const ff = createFirefox(), s = ff.browser.storage.sync;
+  const input = { a: { nested: [1] }, b: false };
+  await s.set(input);
+  input.a.nested.push(2);
+  assert.deepEqual(await s.get(), { a: { nested: [1] }, b: false });
+  assert.deepEqual(await s.get(null), { a: { nested: [1] }, b: false });
+  assert.deepEqual(await s.get("a"), { a: { nested: [1] } });
+  assert.deepEqual(await s.get(["b", "missing"]), { b: false });
+  const defaults = { a: 4, missing: { nested: [3] }, absent: undefined };
+  const read = await s.get(defaults);
+  assert.deepEqual(read, { a: { nested: [1] }, missing: { nested: [3] } });
+  read.a.nested.push(8);
+  read.missing.nested.push(9);
+  assert.deepEqual(await s.get("a"), { a: { nested: [1] } });
+  assert.deepEqual(defaults.missing, { nested: [3] });
+});
+
+test("sync storage writes, removal and clear emit sync changes without touching local or session", async () => {
+  const ff = createFirefox(), s = ff.browser.storage.sync;
+  await ff.browser.storage.local.set({ a: "local" });
+  await ff.browser.storage.session.set({ a: "session" });
+  await ff.settle();
+  const log = logEvents(ff, ["storage.onChanged"]);
+  await s.set({ a: 1, b: { nested: [2] } });
+  await s.set({ a: 3 });
+  await s.remove("a");
+  await s.remove(["b", "absent"]);
+  await s.set({ c: true });
+  await s.clear();
+  await s.clear();
+  await s.remove("absent");
+  assert.deepEqual(log, []);
+  await ff.settle();
+  assert.deepEqual(log, [
+    ["storage.onChanged", { a: { newValue: 1 }, b: { newValue: { nested: [2] } } }, "sync"],
+    ["storage.onChanged", { a: { oldValue: 1, newValue: 3 } }, "sync"],
+    ["storage.onChanged", { a: { oldValue: 3 } }, "sync"],
+    ["storage.onChanged", { b: { oldValue: { nested: [2] } } }, "sync"],
+    ["storage.onChanged", { c: { newValue: true } }, "sync"],
+    ["storage.onChanged", { c: { oldValue: true } }, "sync"],
+  ]);
+  assert.deepEqual(await s.get(), {});
+  assert.deepEqual(await ff.browser.storage.local.get(), { a: "local" });
+  assert.deepEqual(await ff.browser.storage.session.get(), { a: "session" });
+});
+
+test("sync storage survives restarts with and without session restore", async () => {
+  for (const restore of [true, false]) {
+    const ff = createFirefox();
+    await ff.browser.storage.sync.set({ "tile:clock": { x: 0, y: 0, w: 5, h: 2 } });
+    await ff.settle();
+    ff.restart({ restore });
+    await ff.settle();
+    assert.deepEqual(await ff.browser.storage.sync.get(), { "tile:clock": { x: 0, y: 0, w: 5, h: 2 } });
+  }
+});
+
 // Catch lost durable data, surviving listeners, or unchanged ids at restart.
 test("session storage supports defaults, snapshots, changes, removal and clear", async () => {
   const ff = createFirefox(), api = ff.browser;

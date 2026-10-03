@@ -587,6 +587,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       })),
       missing: closed.filter(folder => state.missing.includes(folder.id))
         .map(folder => ({ folderId: folder.id, title: folder.name, color: folder.color })),
+      folders: Object.fromEntries(Object.entries(state.groups).map(([id, group]) => [id, group.folderId])),
     };
   }
   async function groupFolder(folderId) {
@@ -659,7 +660,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
    * - foxy:pins -> { pins: { [tabId]: { name, origin, allowed } } } (named pins only)
    * - foxy:rename-pin { tabId, name: string | null } -> { ok }
    * - foxy:saved -> { saved: [{ folderId, title, color, count, cantReopen }],
-   *                   missing: [{ folderId, title, color }] }
+   *                   missing: [{ folderId, title, color }], folders: { [groupId]: folderId } }
    * - foxy:open-saved { folderId, windowId } -> { ok: true, groupId } on success
    * - foxy:delete-saved { folderId } -> { ok }
    * - foxy:restore-all { windowId } -> { ok } (continue after individual failures)

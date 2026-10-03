@@ -5,7 +5,6 @@ import { readdirSync, readFileSync } from "node:fs";
 
 const root = new URL("../extension/", import.meta.url);
 const css = readFileSync(new URL("newtab.css", root), "utf8");
-const main = readFileSync(new URL("src/main.js", root), "utf8");
 const fontFiles = [
   "CascadiaMono-OFL.txt",
   "CascadiaMono.ttf",
@@ -90,36 +89,6 @@ test("Foxy Serif exposes EB Garamond's upright variable weight range", () => {
   assert.equal(serif["font-style"], "normal");
 });
 
-test("the clock uses semibold upright lining tabular serif digits at an ink-matched scale", () => {
-  const clock = rule(".clock-time");
-  assert.equal(clock.font, 'normal 600 clamp(96.8px, 12.1vw, 176px) / 1 "Foxy Serif", serif');
-  assert.equal(clock["font-variant-numeric"], "lining-nums tabular-nums");
-});
-
-test("the date is upright, slightly compressed weight 600 capitals", () => {
-  const date = rule(".clock-date");
-  assert.equal(date.font, 'normal 600 22px / 1 "Foxy Sans", system-ui, sans-serif');
-  assert.equal(date["font-stretch"], "85%");
-  assert.equal(date["text-transform"], "uppercase");
-  assert.equal(date["letter-spacing"], "0.12em");
-  // Match the PINNED P's 1px ink inset, not the trailing letter gap.
-  assert.equal(date["text-indent"], "1px");
-});
-
-test("the clock and date start at the column title inset expressed from layout values", () => {
-  assert.equal(rule(".clock")["text-align"], "start");
-  assert.equal(rule(".clock")["margin-inline"], "calc(var(--board-margin) + var(--column-padding) + var(--title-padding))");
-  assert.equal(rule(".board")["margin-inline"], "var(--board-margin)");
-});
-
-test("the clock is pulled left by its lead digit's side bearing so the ink meets the title ink", () => {
-  // Garamond lining tabular figures, wght 600; recalibrated at both clamp ends.
-  for (const [digit, indent] of [["0", "calc(1px - 0.03em)"], ["1", "calc(1px - 0.095em)"], ["2", "calc(1px - 0.045em)"]]) {
-    assert.equal(rule(`.clock-time[data-lead="${digit}"]`)["text-indent"], indent, digit);
-  }
-  assert.match(main, /dataset\.lead\s*=/);
-});
-
 test("group titles are heavy, condensed, slanted capitals without extra letter spacing", () => {
   const title = rule(".column-header");
   assert.equal(title["font-family"], '"Foxy Sans", system-ui, sans-serif');
@@ -128,6 +97,13 @@ test("group titles are heavy, condensed, slanted capitals without extra letter s
   assert.equal(title["font-style"], "oblique 10deg");
   assert.equal(title["text-transform"], "uppercase");
   assert.equal(title["letter-spacing"], "0");
+});
+
+test("the 12px group dot keeps the sidebar's original glow", () => {
+  const dot = rule(".dot");
+  assert.equal(dot.width, "12px");
+  assert.equal(dot.height, "12px");
+  assert.equal(dot["box-shadow"], "0 0 6px color-mix(in oklab, var(--g2) 50%, transparent)");
 });
 
 test("no typography role overrides the default zero roundness or sets a slant axis", () => {
@@ -153,11 +129,4 @@ test("only group titles have oblique or italic styling in any style rule", () =>
     }
   }
   assert.deepEqual(slanted, [".column-header"]);
-});
-
-test("the 12px group dot keeps the sidebar's original glow", () => {
-  const dot = rule(".dot");
-  assert.equal(dot.width, "12px");
-  assert.equal(dot.height, "12px");
-  assert.equal(dot["box-shadow"], "0 0 6px color-mix(in oklab, var(--g2) 50%, transparent)");
 });

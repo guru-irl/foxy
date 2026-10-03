@@ -1,14 +1,14 @@
 import { colorKey } from "../model.js";
 
 /** Build the board from detached WebExtension snapshots, without changing them. */
-export function buildBoard({ windows, tabs, groups, currentWindowId, selfTabId, selfUrl, saved = [], missing = [], pins = {} }) {
+export function buildBoard({ windows, tabs, groups, currentWindowId, selfTabId, selfUrl, saved = [], missing = [], pins = {}, otherWindows = true }) {
   const selfBaseUrl = selfUrl?.split(/[?#]/, 1)[0];
   const recency = new Map();
   for (const tab of tabs) {
     recency.set(tab.windowId, Math.max(recency.get(tab.windowId) ?? 0, tab.lastAccessed ?? 0));
   }
   const windowOrder = windows
-    .filter(win => win.type === "normal" && !win.incognito)
+    .filter(win => win.type === "normal" && !win.incognito && (otherWindows || win.id === currentWindowId))
     .map(win => win.id)
     .sort((a, b) => {
       if (a === currentWindowId) return -1;

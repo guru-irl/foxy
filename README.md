@@ -2,42 +2,65 @@
 
 A private Firefox add-on and browser theme.
 
-- Replaces the new tab and home pages with a clock and a board of your tabs and tab groups from every window.
+- Replaces the new tab and home pages with a grid of your tabs and tab groups from every window.
 - Saves groups and pinned tabs as bookmarks, so they survive a failed session restore and sync to your other devices through Firefox Sync.
 - Ships a glass, neutral, borderless Firefox theme with bundled fonts.
 
-**Platforms:** the add-on works in desktop Firefox 140 or later on macOS, Windows and Linux (not Android). The theme is built for macOS; elsewhere the layout and fonts apply, but the glass blur does not.
+**Platforms:** desktop Firefox 140+ on macOS, Windows and Linux, not Android. The theme supports glass blur on macOS only.
 
-Version 2.2.0. Unlisted and signed by Mozilla. Design: `docs/superpowers/specs/2026-10-01-foxy-design.md`.
+Version 3.0.0. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-10-03-foxy-grid-design.md`.
 
 ## Board
 
-- **Columns:** PINNED on the left, TABS (ungrouped tabs) on the right, and SAVED, the groups and `+ NEW GROUP` in a scrolling strip between them.
-- **Windows:** this window's tabs and groups come first; other windows are labelled.
-- **Open a tab:** click it. A pin from another window moves here.
-- **Move tabs:** drag a tab to any group, TABS or PINNED. Dropping on PINNED pins it here; dropping on `+ NEW GROUP` creates a group.
-- **Groups:** click the name to rename, click the dot to recolour, drag the header to reorder or move it to another window, use the arrow to bring it here, × to close it on this device.
+- **Tiles:** groups, PINNED, SAVED and a clock on a scrolling grid, with scrolling tab lists.
+- **TABS rail:** ungrouped tabs stay on the right, with their own scroll and the Settings gear.
+- **Move and resize:** drag tile headers or corner handles. Tiles snap to cells and push overlaps down. Escape cancels. Drag the rail edge to resize it.
+- **Narrow windows:** overflowing tiles appear below. Saved places stay unchanged until you move them.
+- **Windows:** this window comes first; others are labelled. Tile places do not change tab order.
+- **Open a tab:** click it. A pin from another window moves here unless that setting is off.
+- **Move tabs:** drag to a group, TABS or PINNED. Drop on empty grid space to create and name a group.
+- **Groups:** click the name to rename or the dot to recolour, use the arrow to bring a group here, × to close it on this device.
 - **Close a tab:** × on its row.
-- **Rename a pin:** the pencil on its row, or F2. Enter or click away saves, Escape cancels, an empty name removes it.
-- **Page closing:** after you pick a tab, the page closes only if it has no other history, so it stays out of Recently Closed Tabs.
+- **Rename a pin:** the pencil or F2. Enter or click away saves, Escape cancels, an empty name removes it.
+- **Page closing:** picking a tab closes Foxy only when it has no history, without a Recently Closed entry.
+
+## Settings
+
+Open the gear in TABS. Changes apply immediately; Escape or the gear closes the pane.
+The same settings are in about:addons, Foxy, Options.
+
+| Setting | Values | Scope |
+|---|---|---|
+| Cell size | S 48, M 80, L 112, XL 144; custom 40 to 240 px | Per device |
+| TABS rail width | 2 cells to half the available width; default 3 | Synced |
+| Show clock, pinned, saved | On or off for each | Synced |
+| Reset layout | Click twice within 3 seconds; clears all saved tile places | Synced |
+| Time format | 24-hour or 12-hour | Synced |
+| Show date | On or off | Synced |
+| Transparency | Low, medium, high | Synced |
+| Row density | Normal 32 px, compact 24 px | Per device |
+| Other windows | Show or hide their tabs and groups | Synced |
+| Move other-window pins here on click | On; off focuses their window instead | Synced |
+
+Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their places until a reset.
 
 ## Pinned tab names
 
-- **In the sidebar:** pinned tabs on well-known sites show a short name such as YOUTUBE, GMAIL, DISCORD, AZURE, DEVOPS or COPILOT (theme, about 30 sites, matched by title).
+- **Sidebar:** the theme gives pins on about 30 sites short names, such as YOUTUBE or GMAIL, matched by title.
 - **Renamed pins:** the name is stored in the pin's bookmark and syncs to every device.
-- **Site access:** Firefox asks once per site, the first time you rename a pin there. On a device without access, the row shows ALLOW.
-- **Trade-off:** the name replaces the page title everywhere, including the window title and history, so unread counts in titles are hidden.
+- **Site access:** Firefox asks once per site when renaming a pin. Devices without access show ALLOW.
+- **Trade-off:** names replace page titles in windows and history, hiding unread counts.
 
 ## Saved groups and Sync
 
-- **Storage:** `Other Bookmarks/Foxy` holds `📌 Pinned` and one folder per group, named with a colour emoji and the group name, for example `🔵 Reading`.
+- **Storage:** `Other Bookmarks/Foxy` holds `📌 Pinned` and group folders, such as `🔵 Reading`.
 - **Closing:** a whole group or window keeps the group saved. Closing one tab removes its bookmark after 2 seconds.
-- **SAVED:** groups not open on this device. Click to open one here. `N CAN'T REOPEN` counts pages Firefox won't let an add-on open, such as `about:` or `file:`.
+- **SAVED:** groups closed here. Click to open. `N CAN'T REOPEN` counts blocked pages, such as `about:` or `file:`.
 - **Delete everywhere:** × then `DELETE?` on a saved group.
 - **After a restart:** if groups don't come back, a banner offers `RESTORE ALL` or `DISMISS`. Pins always reopen.
 - **Other devices:** changes apply live, except to the tab you are looking at, which waits until you switch away.
-- **Editing bookmarks:** works too. Rename a folder to rename its group, or add or move bookmarks to change its tabs.
-- **Merge leftovers:** duplicates from a first-run merge go to `Other Bookmarks/Foxy merge leftovers`. Nothing is deleted.
+- **Editing bookmarks:** rename folders to rename groups; add or move bookmarks to change tabs.
+- **Merge leftovers:** first-run duplicates stay in `Other Bookmarks/Foxy merge leftovers`.
 - **Private windows:** never shown or synced.
 
 ## Permissions
@@ -47,7 +70,7 @@ Version 2.2.0. Unlisted and signed by Mozilla. Design: `docs/superpowers/specs/2
 | `tabs` | Read, open, move, pin and close tabs |
 | `tabGroups` | Read, create, move, rename and recolour groups |
 | `bookmarks` | Save groups and pins |
-| `storage` | Remember mappings and pending changes across restarts |
+| `storage` | Remember mappings and pending changes; tile layout and settings (synced), device settings (local) |
 | `scripting` | Keep a renamed pin's title |
 | Site access (optional) | Requested per site when you rename a pin there |
 
@@ -69,8 +92,8 @@ To remove: uninstall in about:addons. The `Foxy` bookmark folders stay; delete t
 ## Theme
 
 - `theme/userChrome.css` styles the Firefox window, `theme/userContent.css` styles content pages, `theme/user.js` sets the preferences.
-- **Install:** quit Firefox (Cmd+Q), then run `python3 scripts/install_theme.py`. It looks for the macOS profile folder by default; use `--profile PATH` or `--firefox-dir PATH` on other systems or to pick another profile.
-- **What it does:** backs up existing files to `<profile>/chrome/backup-<time>/`, then links the profile to the repo. Keep the repo where it is.
+- **Install:** quit Firefox, then run `python3 scripts/install_theme.py`. It defaults to the macOS profile; use `--profile PATH` or `--firefox-dir PATH` elsewhere.
+- **Backup:** existing files go to `<profile>/chrome/backup-<time>/`. The profile links to this repo; keep it in place.
 - **Changes:** Firefox reads the theme only at startup, so quit and reopen after any change.
 - **Undo:** quit Firefox, delete the four links, and move the backed-up files back (`user.js` goes in the profile folder, the rest in `chrome/`).
 

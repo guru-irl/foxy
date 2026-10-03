@@ -1,7 +1,7 @@
 import { test, assert, fixture, nextFrame, dispatchDrag, withPseudoState } from "./harness.js";
 import { createBoardFirefox as createFirefox } from "./controller.js";
 import { buildBoard } from "../../extension/src/board/model.js";
-import { renderBoard } from "../../extension/src/board/render.js";
+import { renderBoard } from "./view.js";
 
 const setup = () => ({
   windows: [{ id: 1, focused: true }, { id: 2 }], selfTabId: 99,
@@ -84,10 +84,10 @@ for (const ending of ["Enter", "Escape", "blur"]) {
 
 // Leaving a draggable ancestor enabled makes pointer text selection drag the group.
 for (const ending of ["Enter", "Escape", "blur", "rerender"]) {
-  test(`rename disables header dragging and restores it after ${ending}`, async () => {
+  test(`rename headers stay non-draggable after ${ending}`, async () => {
     const node = await draw();
     const header = name(node).closest(".column-header");
-    assert.equal(header.draggable, true);
+    assert.equal(header.draggable, false);
     name(node).click();
     const field = input(node);
     try {
@@ -99,7 +99,7 @@ for (const ending of ["Enter", "Escape", "blur", "rerender"]) {
           groups: await ff.browser.tabGroups.query({}), currentWindowId: 1, selfTabId: 99 });
         renderBoard(node, board, {}, {});
       } else key(field, ending);
-      assert.equal(header.draggable, true, "editor completion must restore the previous drag state");
+      assert.equal(header.draggable, false, "editor completion must not enable HTML5 group drag");
     } finally { key(field, "Escape"); }
   });
 }
@@ -110,7 +110,7 @@ test("empty commit remains faint UNNAMED and long editor never widens a column",
   name(node, 102).click();
   const field = input(node), column = field.closest(".column");
   field.value = "Long name ".repeat(100);
-  assert.equal(column.offsetWidth, 264);
+  assert.equal(column.offsetWidth, 272);
   assert.ok(field.getBoundingClientRect().right <= column.getBoundingClientRect().right);
   const style = getComputedStyle(field);
   assert.ok(style.fontFamily.includes("Foxy Sans"));
@@ -206,7 +206,7 @@ for (const area of ["padding", "gap"]) {
       picker.dispatchEvent(down);
       // Synthetic events have no default focus action. Reproduce Firefox's
       // focus of the enclosing scroll container only if it was not prevented.
-      if (!down.defaultPrevented) node.querySelector(".strip").focus();
+      if (!down.defaultPrevented) node.querySelector(".grid").focus();
       picker.dispatchEvent(new MouseEvent("click", options));
       await flush(ff);
       assert.equal(node.querySelector(".color-picker"), picker, "picker background must not dismiss it");
@@ -276,7 +276,7 @@ test("picker offers nine distinct dots in API order and picks green once", async
   const dots = [...picker.querySelectorAll("button.dot")];
   assert.deepEqual(dots.map(dot => dot.dataset.color), ["blue", "cyan", "green", "grey", "orange", "pink", "purple", "red", "yellow"]);
   assert.equal(new Set(dots.map(dot => getComputedStyle(dot).backgroundImage)).size, 9);
-  assert.equal(picker.closest(".column").offsetWidth, 264);
+  assert.equal(picker.closest(".column").offsetWidth, 272);
   assert.ok(picker.getBoundingClientRect().top >= picker.closest(".column").querySelector("header").getBoundingClientRect().bottom);
   assert.equal(dots.filter(dot => dot.getAttribute("aria-pressed") === "true").length, 1);
   assert.equal(dots.find(dot => dot.getAttribute("aria-pressed") === "true").dataset.color, "red");
@@ -290,7 +290,7 @@ for (const ending of ["Escape", "outside click"]) {
     const node = await draw({ onRecolor: (...args) => picked.push(args), onEditEnd: () => ended.push(true) });
     const dot = node.querySelector('[data-group-id="101"] .dot');
     dot.click(); assert.ok(node.querySelector(".color-picker"));
-    if (ending === "Escape") key(document.activeElement, "Escape"); else node.querySelector(".new-group").click();
+    if (ending === "Escape") key(document.activeElement, "Escape"); else node.querySelector(".rail .column-title").click();
     assert.equal(node.querySelector(".color-picker"), null);
     assert.deepEqual(picked, []); assert.equal(ended.length, 1);
     if (ending === "Escape") assert.equal(document.activeElement, dot);
@@ -357,30 +357,6 @@ test("picker keeps its hold while focus moves between swatches or its dot and wh
     assert.equal(control.ui.editing, true);
   } finally { key(document, "Escape"); await flush(ff); }
 });
-
-for (const ending of ["Enter", "Escape"]) {
-  test(`new-group DOM drop opens selected focused input and ${ending} releases one refresh`, async () => {
-    const { ff, node, control } = await controller();
-    node.querySelector('[data-tab-id="15"]').focus();
-    const source = node.querySelector('[data-tab-id="15"]');
-    const transfer = dispatchDrag("dragstart", source).dataTransfer;
-    dispatchDrag("drop", node.querySelector(".new-group"), { dataTransfer: transfer });
-    dispatchDrag("dragend", source, { dataTransfer: transfer });
-    await flush(ff);
-    const field = input(node), id = (await ff.browser.tabs.get(15)).groupId;
-    assert.equal(field.closest(".column").dataset.groupId, String(id));
-    assert.equal(document.activeElement, field, "focus restore must not override the new editor");
-    assert.equal(field.value, ""); assert.equal(control.ui.editGroupId, id); assert.equal(control.ui.editing, true);
-    const count = rebuilds(node);
-    await ff.browser.tabs.update(23, { url: "https://example.com/during-edit" }); await flush(ff);
-    assert.equal(input(node), field); assert.equal(count(), 0);
-    field.value = "  Created  "; key(field, ending); await flush(ff);
-    assert.equal((await ff.browser.tabGroups.get(id)).title, ending === "Enter" ? "Created" : "");
-    assert.equal(control.ui.editGroupId, null); assert.equal(control.ui.editing, false);
-    assert.equal(count(), 1); assert.equal(node.querySelector(".name-editor"), null);
-    assert.equal((await ff.browser.tabs.get(99)).url, location.origin + location.pathname);
-  });
-}
 
 for (const kind of ["name", "colour"]) {
   test(`existing ${kind} editor holds pending events and unrelated removal, then releases once`, async () => {

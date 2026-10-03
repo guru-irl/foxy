@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { buildView } from "../extension/src/grid/view.js";
+import { loadSettings } from "../extension/src/settings/store.js";
+import { loadLayout } from "../extension/src/grid/store.js";
 import { buildBoard } from "../extension/src/board/model.js";
 
 // fake-browser.js only needs the page URL and the scheme target at import time.
@@ -58,3 +61,25 @@ test("older preview scenarios answer with no saved groups or banner", async t =>
   assert.deepEqual(reply, { saved: [], missing: [] });
   assert.equal(board.columns.length, 3);
 });
+
+for (const [name, cell, width] of [["grid-m", 80, 1600], ["grid-xl", 144, 1600],
+  ["grid-narrow", 80, 700], ["settings-open", 80, 1600]]) {
+  test(`${name} preview supplies saved geometry, settings and mapped group tiles`, async t => {
+    const { api, board, reply } = await preview(t, name);
+    assert.deepEqual(reply.folders, { 101: "preview-101", 102: "preview-102", 103: "preview-103" });
+    assert.equal(board.saved.length, 3);
+    const layout = await loadLayout(api);
+    const settings = await loadSettings(api);
+    const view = buildView(board, { layout, ...settings, contentWidth: width - 96,
+      folders: reply.folders });
+    assert.equal(view.cell, cell);
+    assert.equal(view.tiles.length, 6);
+    assert.equal(view.newTiles.length, 0, "fixture has saved positions for every tile");
+    for (const tile of view.tiles) assert.ok(tile.x + tile.w <= view.cols);
+    if (name === "grid-narrow") {
+      assert.ok(view.tiles.some(tile => tile.y !== layout.find(saved => saved.id === tile.id).y),
+        "narrow fixture must exercise display fit");
+      assert.deepEqual(await loadLayout(api), layout, "display fit must not save positions");
+    }
+  });
+}

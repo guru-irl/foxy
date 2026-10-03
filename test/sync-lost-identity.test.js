@@ -51,7 +51,9 @@ for (const deliveryOrder of ["forward", "reverse", "shuffle"]) test(`silent dedu
   assert.equal(after.groups[11].folderId, expected.groups[11].folderId);
   for (const id of [2, 3, 4]) assert.equal(after.tabs[id].bookmarkId, expected.tabs[id].bookmarkId);
   assert.deepEqual(tabMutations(b), [], "no close, ungroup, move, navigate, discard or reopen on identity loss");
-  assert.deepEqual(await b.sync.onMessage({ type: "foxy:saved" }), { saved: [], missing: [] });
+  assert.deepEqual(await b.sync.onMessage({ type: "foxy:saved" }), {
+    saved: [], missing: [], folders: { 11: expected.groups[11].folderId },
+  });
   assert.equal(b.calls.filter(call => call.api === "bookmarks.getSubTree" && call.args[0] === expected.rootId).length, 3,
     "one rebuild (two snapshots), then one SAVED snapshot");
   await stable(server, a, b);
