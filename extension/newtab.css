@@ -241,6 +241,11 @@ body {
   white-space: nowrap;
 }
 
+/* 4.8cqw and 9cqh must both allow a date of at least 10px. */
+@container (width < 208.333333px) or (height < 111.111111px) {
+  .clock-date { display: none; }
+}
+
 /* Resolve the alpha variables here, so live settings inherited from the board
    can change each card's fill in either colour scheme. */
 .column,

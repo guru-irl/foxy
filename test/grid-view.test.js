@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS, DEFAULT_DEVICE } from "../extension/src/settings/stor
 const group = (id, current = true) => ({ id, current, windowId: current ? 1 : 2, rows: [] });
 const board = { columns: [group(1), group(2)], saved: [], pinned: [], tabs: [] };
 const options = (overrides = {}) => ({ layout: [], synced: { ...DEFAULT_SETTINGS, showClock: false, showPinned: false },
-  device: DEFAULT_DEVICE, contentWidth: 944, folders: { 1: "a", 2: "b" }, pending: new Map(), ...overrides });
+  device: DEFAULT_DEVICE, contentWidth: 944, folders: { 1: "a", 2: "b" }, ...overrides });
 
 test("new tiles use clock, pinned, current tab-strip groups, remote groups, saved order", () => {
   const ordered = buildBoard({ windows: [{ id: 2, type: "normal" }, { id: 1, type: "normal" }],
@@ -56,11 +56,6 @@ test("unmapped groups get display-only local ids", () => {
   assert.deepEqual(view.newTiles.map(t => t.id), ["group:a"]);
 });
 
-test("an unmapped pending group uses its remembered rectangle without a write", () => {
-  const view = buildView({ ...board, columns: [group(2)] }, options({ folders: {}, pending: new Map([[2, { x: 2, y: 7, w: 3, h: 4 }]]) }));
-  assert.deepEqual(view.tiles.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })), [{ id: "local:2", x: 2, y: 7, w: 3, h: 4 }]);
-  assert.deepEqual(view.newTiles, []);
-});
 
 test("narrow fit is display-only and retains the raw saved layout", () => {
   const layout = [{ id: "group:a", x: 8, y: 0, w: 4, h: 4 }, { id: "group:b", x: 0, y: 0, w: 3, h: 4 }];
@@ -92,13 +87,6 @@ for (const [contentWidth, cols] of [[252, 1], [400, 2]]) {
   });
 }
 
-test("a newly mapped pending group also saves its full default size in a narrow window", () => {
-  const view = buildView({ ...board, columns: [group(2)] }, options({
-    contentWidth: 252, pending: new Map([[2, { x: 0, y: 7, w: 3, h: 4 }]]),
-  }));
-  assert.deepEqual(view.newTiles, [{ id: "group:b", x: 0, y: 7, w: 3, h: 4 }]);
-  assert.deepEqual(view.tiles.map(({ x, y, w, h }) => [x, y, w, h]), [[0, 7, 1, 4]]);
-});
 
 test("overlapping saved tiles are fitted without becoming new writes", () => {
   const layout = [{ id: "group:a", x: 0, y: 0, w: 3, h: 4 }, { id: "group:b", x: 0, y: 0, w: 3, h: 4 }];

@@ -60,11 +60,14 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let pruned = false;
   let persistence = Promise.resolve();
   const pendingTiles = new Map();
+  // User commits wait for writable storage and a valid folder reply.
+  const heldWrites = new Map();
   const settingsPane = root.parentElement?.querySelector(":scope > .settings-pane");
   const paneHandlers = settingActions(api, async () => {
     await persistence;
     await resetLayout(api);
     pendingTiles.clear();
+    heldWrites.clear();
   });
   const gear = () => root.querySelector(".settings-button");
   function setPaneOpen(open) {
@@ -176,6 +179,8 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       return false;
     }
     gridState = !next.writable && gridState ? { ...gridState, writable: false } : next;
+    // Keep held user placements visible over intervening remote changes.
+    gridState.layout = [...new Map([...gridState.layout, ...heldWrites.values()].map(tile => [tile.id, tile])).values()];
     loadedVersion = next.version;
     pendingGrid = false;
     return true;
@@ -343,7 +348,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       if (gridState.layout.some(tile => tile.id === `group:${savedReply.folders?.[id]}`)) clearDeferredGroup(id);
     }
     const options = { ...gridState, contentWidth: root.clientWidth,
-      folders: savedReply.folders ?? {}, pending: new Map() };
+      folders: savedReply.folders ?? {} };
     view = buildGridView(options);
     const knowsFolders = hasValidSavedReply && validFoldersReply(savedReply);
     const writable = save && gridState.writable && knowsFolders;
@@ -363,7 +368,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       }
       const fresh = beforeView.newTiles.filter(tile => !mappedIds.has(tile.id));
       const changed = mapped.length ? changedTiles(shownBefore, shownAfter).filter(tile => !tile.id.startsWith("local:")) : [];
-      writes = [...new Map([...fresh, ...changed].map(tile => [tile.id, tile])).values()]
+      writes = [...new Map([...fresh, ...heldWrites.values(), ...changed].map(tile => [tile.id, tile])).values()]
         .filter(tile => {
           if (!tile.id.startsWith("group:") || gridState.layout.some(saved => saved.id === tile.id)) return true;
           const group = board.columns.find(group => tile.id === `group:${options.folders[group.id]}`);
@@ -375,6 +380,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       if (writes.length) {
         gridState.layout = [...new Map([...gridState.layout, ...writes].map(tile => [tile.id, tile])).values()];
       }
+      heldWrites.clear();
       for (const group of mapped) pendingTiles.delete(group.id);
       if (mapped.length) view = buildGridView({ ...options, layout: gridState.layout });
       prune = !pruned;
@@ -632,7 +638,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     onPreview: changed => {
       const { pending, layout } = tileChangeState(changed);
       const preview = buildGridView({ ...gridState, layout, contentWidth: root.clientWidth,
-        folders: savedReply.folders ?? {}, pending: new Map() }, pending);
+        folders: savedReply.folders ?? {} }, pending);
       displayPending(preview, pending);
       previewTiles(preview.tiles);
     },
@@ -641,7 +647,11 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       const { pending, writes, layout } = tileChangeState(changed);
       for (const [groupId, rect] of pending) pendingTiles.set(groupId, rect);
       gridState.layout = layout;
-      if (!writes.length || !gridState.writable || !hasValidSavedReply || !validFoldersReply(savedReply)) return;
+      if (!writes.length) return;
+      if (!gridState.writable || !hasValidSavedReply || !validFoldersReply(savedReply)) {
+        for (const tile of writes) heldWrites.set(tile.id, tile);
+        return;
+      }
       persistence = persistence.then(async () => {
         try { await saveTiles(api, writes); }
         finally { ++tileWriteVersion; }
@@ -649,7 +659,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     },
     onRail: (cells, commit) => {
       view = buildGridView({ ...gridState, synced: { ...gridState.synced, railCells: cells },
-        contentWidth: root.clientWidth, folders: savedReply.folders ?? {}, pending: new Map() });
+        contentWidth: root.clientWidth, folders: savedReply.folders ?? {} });
       displayPending(view);
       previewTiles(view.tiles);
       if (!commit) return;
@@ -742,6 +752,7 @@ function captureView(root) {
         rowsKey: rowsKey(list), index: [...list.querySelectorAll(".row")].indexOf(row) };
     } else if (active.matches(".rows")) focus = { rowsKey: rowsKey(active) };
     else if (active.matches(".grid")) focus = { grid: true };
+    else if (active.matches(".settings-button")) focus = { gear: true };
     else if (group) focus = { groupId: group.dataset.groupId, className: active.className,
       index: [...root.querySelectorAll(".column[data-group-id]")].indexOf(group) };
   }
@@ -754,7 +765,8 @@ function restoreView(root, { focus, top, tops }) {
   if (focus && !editor) {
     let active;
     const list = [...root.querySelectorAll(".rows")].find(list => rowsKey(list) === focus.rowsKey);
-    if (focus.grid) active = root.querySelector(".grid");
+    if (focus.gear) active = root.querySelector(".settings-button");
+    else if (focus.grid) active = root.querySelector(".grid");
     else if (focus.tabId === undefined && focus.rowsKey !== undefined) active = list;
     else {
       const container = focus.tabId !== undefined

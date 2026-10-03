@@ -28,7 +28,7 @@ for (const [cell, w, h] of sizes) {
         for (const side of ["Top", "Right", "Bottom", "Left"]) assert.equal(style[`padding${side}`], "16px");
         assert.equal(date.textContent, "WEDNESDAY, 30 SEPTEMBER");
         const content = { left: bounds.left + 16, right: bounds.right - 16, top: bounds.top + 16, bottom: bounds.bottom - 16 };
-        for (const element of [time, date]) {
+        for (const element of [time, date].filter(element => getComputedStyle(element).display !== "none")) {
           const range = document.createRange(); range.selectNodeContents(element);
           const text = range.getBoundingClientRect();
           assert.ok(text.left >= content.left - 0.5 && text.right <= content.right + 0.5,
@@ -42,6 +42,25 @@ for (const [cell, w, h] of sizes) {
       }
     }
     assert.equal(getComputedStyle(time.closest(".tile")).containerType, "size");
+  });
+}
+
+// The final reviewer's minimum-clock probe measured a 6.9 px S date.
+// Missing either width or height guard leaves an unreadable label visible.
+for (const [cell, w, h, visible] of [["S", 3, 2, false], ["S", 3, 3, false], ["S", 5, 2, false],
+  ["S", 5, 3, true], ["M", 3, 2, true], ["XL", 3, 2, true]]) {
+  test(`clock ${cell} ${w}x${h} ${visible ? "shows a readable date" : "hides the date below 10 px"} and keeps time`, async () => {
+    const { node, time, date, updateClock } = await clock(w, h, cell);
+    for (const format of ["24", "12"]) {
+      updateClock(node, { ...DEFAULT_SETTINGS, timeFormat: format }, new Date(2026, 8, 30, 23, 59));
+      assert.equal(getComputedStyle(date).display !== "none", visible);
+      assert.equal(date.textContent, "WEDNESDAY, 30 SEPTEMBER");
+      if (visible) assert.ok(parseFloat(getComputedStyle(date).fontSize) >= 10, "visible date must be readable");
+      else assert.equal(date.getBoundingClientRect().height, 0, "hidden date takes no space");
+      assert.equal(getComputedStyle(time).display, "block");
+      assert.ok(time.getBoundingClientRect().height > 20, "time stays visible");
+      assert.equal(time.textContent, format === "24" ? "23:59" : "11:59 PM");
+    }
   });
 }
 

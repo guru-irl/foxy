@@ -49,6 +49,7 @@ export function renderSettings(container, state, handlers) {
         if (pane.saving.get(id) === 1) update();
       } finally {
         pane.saving.set(id, pane.saving.get(id) - 1);
+        if (key === "railCells" && !pane.saving.get(id)) update();
       }
     };
     function section(title) {
@@ -113,11 +114,19 @@ export function renderSettings(container, state, handlers) {
     minus.dataset.rail = "minus"; plus.dataset.rail = "plus"; count.dataset.rail = "value";
     minus.setAttribute("aria-label", "Decrease TABS rail width"); plus.setAttribute("aria-label", "Increase TABS rail width");
     const railCells = () => Math.max(2, Math.min(pane.state.railMax, pane.state.synced.railCells));
-    minus.addEventListener("click", () => change("synced", "railCells", railCells() - 1));
-    plus.addEventListener("click", () => change("synced", "railCells", railCells() + 1));
+    function showRail(value) {
+      const cells = Math.max(2, Math.min(pane.state.railMax, value));
+      count.textContent = cells; minus.disabled = cells <= 2; plus.disabled = cells >= pane.state.railMax;
+    }
+    function stepRail(delta) {
+      showRail(Number(count.textContent) + delta);
+      change("synced", "railCells", Number(count.textContent));
+    }
+    minus.addEventListener("click", () => stepRail(-1));
+    plus.addEventListener("click", () => stepRail(1));
     stepper.append(minus, count, plus); rail.append(stepper);
     pane.controls.push(() => {
-      count.textContent = railCells(); minus.disabled = railCells() <= 2; plus.disabled = railCells() >= pane.state.railMax;
+      showRail(pane.saving.get("synced:railCells") ? Number(count.textContent) : railCells());
     });
     const tiles = section("Tiles");
     toggle(tiles, "Show clock", "showClock"); toggle(tiles, "Show pinned", "showPinned"); toggle(tiles, "Show saved", "showSaved");

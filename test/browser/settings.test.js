@@ -54,6 +54,20 @@ test("the gear opens a sibling pane and Escape or gear closes it with focus rest
   gear().click(); gear().click(); assert.equal(pane.hidden, true); assert.equal(document.activeElement, gear());
 });
 
+// Based on the final reviewer's gear-focus probe. A tab update replaces the
+// rail, so restoring only rows and group headers loses the keyboard position.
+test("gear keeps focus across a board render after Escape closes the pane", async () => {
+  const { ff, node, pane } = await setup();
+  const gear = () => node.querySelector(".settings-button");
+  gear().click();
+  pane.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(document.activeElement, gear());
+  const before = gear();
+  await ff.browser.tabs.update(10, { url: "https://example.com/focus" }); await flush(ff);
+  assert.ok(gear() !== before, "tab event must replace the board");
+  assert.equal(document.activeElement, gear(), "focus stays on the replacement gear");
+});
+
 // Based on the reviewer's SAVED-row Escape probe, with the confirmation armed.
 test("Escape handled by SAVED confirmation leaves the settings pane open", async () => {
   const { ff, node, pane } = await setup(); node.querySelector(".settings-button").click();
@@ -196,6 +210,69 @@ for (const key of ["showClock", "showPinned", "showSaved", "showDate", "otherWin
     assert.equal(button.getAttribute("aria-checked"), "true");
   });
 }
+// Based on the final reviewer's quick-stepper probe. Steps must use the
+// shown value, not the stored value while serialised saves are in flight.
+test("two quick rail plus clicks show and save 4 then 5", async () => {
+  const { ff, node, pane } = await setup(); node.querySelector(".settings-button").click();
+  const plus = pane.querySelector('[data-rail="plus"]'), count = pane.querySelector('[data-rail="value"]');
+  const start = ff.calls.length;
+  plus.click(); assert.equal(count.textContent, "4");
+  plus.click(); assert.equal(count.textContent, "5");
+  await flush(ff);
+  const values = ff.calls.slice(start).filter(c => c.api === "storage.sync.set" && c.args[0].settings)
+    .map(c => c.args[0].settings.railCells);
+  assert.deepEqual(values, [4, 5]);
+  assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 5);
+  assert.equal(count.textContent, "5");
+  plus.click(); plus.click(); assert.equal(plus.disabled, true); await flush(ff);
+  assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 6);
+  const minus = pane.querySelector('[data-rail="minus"]');
+  for (let i = 0; i < 6; i++) minus.click();
+  assert.equal(count.textContent, "2"); assert.equal(minus.disabled, true); await flush(ff);
+  assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 2);
+});
+
+test("a completed rail save cannot replace the shown value of a later in-flight step", async () => {
+  const { ff, node, pane } = await setup(); node.querySelector(".settings-button").click();
+  const set = ff.browser.storage.sync.set, releases = [];
+  ff.browser.storage.sync.set = async values => {
+    await new Promise(resolve => releases.push(resolve)); await set(values);
+  };
+  const plus = pane.querySelector('[data-rail="plus"]'), count = pane.querySelector('[data-rail="value"]');
+  try {
+    plus.click(); plus.click(); await flush(ff);
+    assert.equal(count.textContent, "5"); assert.equal(releases.length, 1);
+    releases[0](); await flush(ff);
+    assert.equal(releases.length, 2);
+    assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 4);
+    assert.equal(count.textContent, "5", "the later step is still the shown value");
+    releases[1](); await flush(ff);
+    assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 5);
+    assert.equal(count.textContent, "5");
+  } finally { ff.browser.storage.sync.set = set; releases.forEach(release => release()); }
+});
+
+test("failed rail steps roll back only after the last in-flight save", async () => {
+  const { ff, node, pane } = await setup();
+  await ff.browser.storage.sync.set({ settings: { railCells: 4 } }); await flush(ff);
+  node.querySelector(".settings-button").click();
+  const set = ff.browser.storage.sync.set, warn = console.warn, releases = [], warnings = [];
+  ff.browser.storage.sync.set = async () => {
+    await new Promise(resolve => releases.push(resolve)); throw new Error("quota");
+  };
+  console.warn = (...args) => warnings.push(args);
+  const plus = pane.querySelector('[data-rail="plus"]'), count = pane.querySelector('[data-rail="value"]');
+  try {
+    plus.click(); plus.click(); await flush(ff); assert.equal(count.textContent, "6");
+    releases[0](); await flush(ff);
+    assert.equal(count.textContent, "6", "first failure must not erase the later step");
+    releases[1](); await flush(ff);
+    assert.equal(count.textContent, "4"); assert.equal(plus.disabled, false);
+    assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 4);
+    assert.ok(warnings.some(args => String(args[0]).startsWith("Foxy:")));
+  } finally { ff.browser.storage.sync.set = set; console.warn = warn; releases.forEach(release => release()); }
+});
+
 test("custom cell validates integer bounds and rail stepper stays within whole-cell limits", async () => {
   const { ff, node, pane } = await setup(); node.querySelector(".settings-button").click();
   choice(pane, "cellSize", "custom").click(); await flush(ff);

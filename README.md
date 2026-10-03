@@ -70,7 +70,7 @@ Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their pl
 | `tabs` | Read, open, move, pin and close tabs |
 | `tabGroups` | Read, create, move, rename and recolour groups |
 | `bookmarks` | Save groups and pins |
-| `storage` | Remember mappings and pending changes across restarts |
+| `storage` | Remember mappings and pending changes; tile layout and settings (synced), device settings (local) |
 | `scripting` | Keep a renamed pin's title |
 | Site access (optional) | Requested per site when you rename a pin there |
 

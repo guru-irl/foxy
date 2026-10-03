@@ -71,7 +71,7 @@ for (const [name, cell, width] of [["grid-m", 80, 1600], ["grid-xl", 144, 1600],
     const layout = await loadLayout(api);
     const settings = await loadSettings(api);
     const view = buildView(board, { layout, ...settings, contentWidth: width - 96,
-      folders: reply.folders, pending: new Map() });
+      folders: reply.folders });
     assert.equal(view.cell, cell);
     assert.equal(view.tiles.length, 6);
     assert.equal(view.newTiles.length, 0, "fixture has saved positions for every tile");
