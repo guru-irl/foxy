@@ -262,7 +262,13 @@ Version: Foxy 3.1.0.
 User feedback on 3.1.0: shrinking the window by one column sent tiles to the
 far left even though closing an empty gap would have kept the layout. This
 replaces the display fit rule in §3 (and the "Narrow screens" row in §2).
-Saved positions still never change unless you move a tile.
+Resizing the window never saves anything. Moving or resizing a tile, or
+dropping a tab on the grid, in a window where the fit moved tiles saves
+the arrangement you see: every visible tile whose shown place differs
+from its saved place is written as shown, together with the moved and
+pushed tiles. The tile then always lands in its outline, and the saved
+layout never overlaps. (Display places cannot be converted back to saved
+ones in general: steps 4 and 5 are not reversible.)
 
 `fit(tiles, cols)` (display only, visible tiles):
 

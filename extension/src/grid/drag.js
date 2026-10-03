@@ -62,7 +62,11 @@ export function attachGridDrag(root, { view, canCommit, onPreview, onCommit, onC
     drag.target = target;
     for (const key of ["x", "y", "w", "h"]) drag.outline.style.setProperty(`--${key}`, target[key]);
     const placed = place(before.tiles, tile.id, target, before.cols);
-    drag.changed = changedTiles(before.tiles, placed);
+    // Save fit shifts too, but keep unsaved neighbours on their existing
+    // new/pending placement path unless the gesture moves or pushes them.
+    const saved = new Map(before.saved.map(tile => [tile.id, tile]));
+    const savedVisible = before.tiles.map(tile => saved.get(tile.id) ?? tile);
+    drag.changed = changedTiles(savedVisible, placed);
     // The controller builds previews through the same placement path as release.
     onPreview(drag.changed);
   }

@@ -376,7 +376,9 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
         shownAfter = place(shownAfter, `group:${savedReply.folders[group.id]}`, pendingTiles.get(group.id), view.cols);
       }
       const fresh = beforeView.newTiles.filter(tile => !mappedIds.has(tile.id));
-      const changed = mapped.length ? changedTiles(shownBefore, shownAfter).filter(tile => !tile.id.startsWith("local:")) : [];
+      const visibleIds = new Set(shownBefore.map(tile => tile.id));
+      const savedVisible = gridState.layout.filter(tile => visibleIds.has(tile.id));
+      const changed = mapped.length ? changedTiles(savedVisible, shownAfter).filter(tile => !tile.id.startsWith("local:")) : [];
       writes = [...new Map([...fresh, ...heldWrites.values(), ...changed].map(tile => [tile.id, tile])).values()]
         .filter(tile => {
           if (!tile.id.startsWith("group:") || gridState.layout.some(saved => saved.id === tile.id)) return true;
