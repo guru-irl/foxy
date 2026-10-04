@@ -4,20 +4,20 @@ A private Firefox add-on and browser theme.
 
 - Replaces the new tab and home pages with a grid of your tabs and tab groups from every window.
 - Saves groups and pinned tabs as bookmarks, so they survive a failed session restore and sync to your other devices through Firefox Sync.
-- Switches to an open tab instead of opening a duplicate.
+- Switches to an open tab instead of opening a duplicate, including through Safe Links and sign-in pages.
 - Lets local agents add tabs to your groups.
 - Ships a glass, neutral, borderless Firefox theme with bundled fonts.
 
 **Platforms:** desktop Firefox 140+ on macOS, Windows and Linux, not Android. The theme supports glass blur on macOS only.
 
-Version 3.3.0. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-10-03-foxy-grid-design.md`, `2026-10-04-foxy-3.2-design.md` and `2026-10-04-foxy-3.3-design.md`.
+Version 3.3.1. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-10-03-foxy-grid-design.md`, `2026-10-04-foxy-3.2-design.md` and `2026-10-04-foxy-3.3-design.md`.
 
 ## Board
 
 - **Tiles:** groups, PINNED, SAVED, a clock, MEMORY and weather on a scrolling grid that fills the page edge to edge. Groups and SAVED have scrolling lists.
 - **PINNED:** one icon per cell, in tab order. Hover shows the name, other-window label and ×; the active pin has a neutral bottom dot. A muted top-left dot means the name needs site access; hover or focus the icon for ALLOW. Extra pins scroll with edge fades. Default 6 × 2 cells, minimum 1 × 1.
 - **Memory:** the helper measures Firefox's process total and system use, with a five-minute sparkline. Loaded sites are grouped by host; UNLOAD discards inactive tabs. Firefox cannot report per-site memory. Without the helper, the tile shows installation guidance; see Agents to install it.
-- **Weather:** your location (rounded to about 1 km) or a city you pick in Settings. The tile shows more as it grows: temperature, then condition, place and high / low, then the next 24 hours (scroll them with the wheel, the arrow keys or a swipe), then 7 days. It refreshes every 15 minutes while a Foxy page is visible; offline it shows the last reading and when it was updated.
+- **Weather:** your location (rounded to about 1 km) or a city you pick in Settings. The tile shows more as it grows, in one column: temperature, then place, condition and high / low, then the next 24 hours (scroll them with the wheel, the arrow keys or a swipe), then feels like, wind and humidity, then up to 7 days. It refreshes every 15 minutes while a Foxy page is visible; offline it shows the last reading and when it was updated.
 - **UNGROUPED TABS rail:** ungrouped tabs stay on the right, running to the board bottom with their own scroll. A round Settings gear sits inside the rail at its bottom right; the tab list ends above it.
 - **Move and resize:** drag a tile's header (empty space or the 4 px icon margins for PINNED, even at 1 × 1; the weather tile by its body), or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
 - **Window widths:** each width keeps its own layout (up to 4). A width without one shows the closest: tiles narrow slightly, or columns of tiles pack together in order. Resizing saves nothing. Moving a tile updates the layout shown if the result still fits it; otherwise it saves a new layout for this width.
@@ -65,6 +65,7 @@ Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their pl
 
 - **What:** a link that opens in the foreground (from mail, Teams or any app) for a page already open switches to that tab and closes the new one.
 - **Matches:** same address ignoring `#…`, same container and private state; tabs in any window, pinned tabs and tabs in collapsed groups (the group expands).
+- **Redirects:** the new tab is followed through Safe Links and sign-in pages for up to 2 minutes, until a page has loaded and stayed for 3 seconds; later clicks in that tab are never switched.
 - **Left alone:** background tabs, bursts such as session restore or open all in tabs, the first 15 seconds after start, popups, and tabs Foxy opens.
 - **Closed duplicates** skip Recently Closed, so Ctrl+Shift+T still reaches your own closed tabs.
 - **Trade-off:** a tab you reopen with Ctrl+Shift+T while its page is open elsewhere is switched too, and its back and forward history is lost.

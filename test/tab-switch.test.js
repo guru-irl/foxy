@@ -6,6 +6,13 @@ const URL_A = "https://example.com/path?q=1";
 // A missing module is an explicit RED, not a silent skipped test.
 async function fixture(t, options = {}) {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 100000 });
+  const timers = new Set();
+  const schedule = globalThis.setTimeout, cancel = globalThis.clearTimeout;
+  t.mock.method(globalThis, "setTimeout", (fn, ms) => {
+    const id = schedule(() => { timers.delete(id); fn(); }, ms);
+    timers.add(id); return id;
+  });
+  t.mock.method(globalThis, "clearTimeout", id => { timers.delete(id); return cancel(id); });
   const { createTabSwitch } = await import("../extension/src/tabs/switch.js");
   const ff = createFirefox({ windows: [{ id: 1, focused: true }, { id: 2 }],
     tabs: [{ id: 1, windowId: 1, url: URL_A }, { id: 2, windowId: 2, url: URL_A }], ...options.setup });
@@ -44,7 +51,13 @@ async function fixture(t, options = {}) {
     assert.deepEqual(ff.errors, []);
   }
   async function retained(tab) { assert.equal((await ff.browser.tabs.get(tab.id)).id, tab.id); assert.deepEqual(ff.errors, []); }
-  return { ff, create, navigate, complete, advance, flush, switched, retained };
+  async function suspend(ms = 0) {
+    ff.suspendBackground();
+    await advance(ms);
+    const control = createTabSwitch(ff.browser, { now: Date.now, ...options.dependencies });
+    await control.ready; await flush();
+  }
+  return { ff, create, navigate, complete, advance, flush, switched, retained, timers, suspend };
 }
 
 for (const delay of [0, 2000]) {
@@ -71,16 +84,16 @@ for (const url of ["https://example.com/path/?q=1", "https://example.com/path?q=
   });
 }
 
-test("redirect chains remain candidates until the matching URL within ten seconds", async t => {
-  const f = await fixture(t); const tab = await f.create({ url: "https://redirect.example/start" });
-  await f.advance(1001); await f.navigate(tab, "https://redirect.example/next"); await f.retained(tab);
+test("redirect chains remain candidates until the matching URL before settling", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://redirect.example.com/start" });
+  await f.advance(1001); await f.navigate(tab, "https://redirect.example.com/next"); await f.retained(tab);
   await f.advance(8000); await f.navigate(tab, URL_A); await f.switched(tab);
 });
 
 test("a final URL and completion in the same update still switch", async t => {
   const f = await fixture(t); const tab = await f.create(); await f.advance(1001);
   // Queue the combined event first, then update the live fake before delivery.
-  // Its later URL-only event must not rescue a candidate already completed.
+  // The combined completion must still allow the queued URL check to switch.
   f.ff.fire("tabs.onUpdated", tab.id, { url: URL_A, status: "complete" }, { ...tab, url: URL_A, status: "complete" });
   await f.ff.browser.tabs.update(tab.id, { url: URL_A });
   await f.flush(); await f.switched(tab);
@@ -94,20 +107,21 @@ test("a redirect while matches are queried does not close the new tab for a stal
     await new Promise(resolve => { release = resolve; }); return result;
   });
   await f.navigate(tab, URL_A); assert.ok(release);
-  await f.navigate(tab, "https://redirect.example/unmatched");
+  await f.navigate(tab, "https://redirect.example.com/unmatched");
   // Future checks should use the real query, not remain artificially blocked.
   f.ff.browser.tabs.query = query;
   release(); await f.flush(); await f.retained(tab);
 });
 
-test("after ten seconds URL changes cannot switch", async t => {
-  const f = await fixture(t); const tab = await f.create(); await f.advance(10000);
-  await f.navigate(tab, URL_A); await f.retained(tab);
+test("at the two minute cap URL changes cannot switch", async t => {
+  const f = await fixture(t); const tab = await f.create(); await f.advance(120000);
+  await f.navigate(tab, URL_A); await f.retained(tab); assert.equal(f.timers.size, 0);
 });
 
-test("after the first complete load a later matching navigation cannot switch", async t => {
-  const f = await fixture(t); const tab = await f.create({ url: "https://different.example/" });
-  await f.complete(tab); await f.navigate(tab, URL_A); await f.retained(tab);
+test("three seconds after a non-hop completion a later matching navigation cannot switch", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://different.example.com/" });
+  await f.complete(tab); await f.advance(3000);
+  await f.navigate(tab, URL_A); await f.retained(tab); assert.equal(f.timers.size, 0);
 });
 
 test("a URL checked before the third burst tab may already have switched", async t => {
@@ -141,7 +155,7 @@ test("two creations are not a burst", async t => {
 });
 
 test("two simultaneous duplicates never close each other's only remaining URL", async t => {
-  const f = await fixture(t, { setup: { tabs: [{ id: 1, windowId: 1, url: "https://different.example/" }] } });
+  const f = await fixture(t, { setup: { tabs: [{ id: 1, windowId: 1, url: "https://different.example.com/" }] } });
   const a = await f.ff.createExternal({ windowId: 1, active: true });
   const b = await f.ff.createExternal({ windowId: 1, active: true });
   f.ff.commitExternal(a.id, URL_A); f.ff.commitExternal(b.id, URL_A);
@@ -243,7 +257,8 @@ test("live synced setting changes apply, local changes do not, and removal resto
   await f.ff.browser.storage.local.set({ settings: { switchToOpenTab: true } }); await f.flush();
   await f.navigate(tab, `${URL_A}#local`); await f.retained(tab);
   await f.ff.browser.storage.sync.remove("settings"); await f.flush();
-  await f.navigate(tab, `${URL_A}#sync`); await f.switched(tab);
+  await f.navigate(tab, `${URL_A}#sync`); await f.retained(tab);
+  const later = await f.create({ url: URL_A }); await f.switched(later, tab.id);
 });
 
 test("turning the setting off before URL arrival prevents a pending switch", async t => {
@@ -253,7 +268,7 @@ test("turning the setting off before URL arrival prevents a pending switch", asy
 });
 
 test("the new tab never matches itself", async t => {
-  const f = await fixture(t, { setup: { tabs: [{ id: 1, windowId: 1, url: "https://different.example/" }] } });
+  const f = await fixture(t, { setup: { tabs: [{ id: 1, windowId: 1, url: "https://different.example.com/" }] } });
   const tab = await f.create({ url: URL_A }); await f.advance(1001); await f.retained(tab);
 });
 
@@ -338,7 +353,7 @@ test("a URL change during window focus prevents blanking or closing the source",
   const f = await fixture(t); const tab = await f.create();
   const update = f.ff.browser.windows.update;
   t.mock.method(f.ff.browser.windows, "update", async (...args) => {
-    f.ff.commitExternal(tab.id, "https://different.example/");
+    f.ff.commitExternal(tab.id, "https://different.example.com/");
     return update(...args);
   });
   await f.navigate(tab, URL_A); await f.retained(tab);
@@ -391,13 +406,173 @@ test("switch updates fall back if a properties filter is unavailable", async t =
 
 test("web completion does not repeat the unchanged URL query", async t => {
   const f = await fixture(t);
-  const tab = await f.ff.browser.tabs.create({ windowId: 1, active: true, url: "https://different.example/" });
+  const tab = await f.ff.browser.tabs.create({ windowId: 1, active: true, url: "https://different.example.com/" });
   await f.advance(1001);
   const count = () => f.ff.calls.filter(call => call.api === "tabs.query").length;
   assert.equal(count(), 1); await f.complete(tab); assert.equal(count(), 1);
 });
 
-test("a completed Foxy board is never a later web navigation candidate", async t => {
+test("a settled Foxy board is never a later web navigation candidate", async t => {
   const f = await fixture(t); const tab = await f.create({ url: "moz-extension://foxy-test/newtab.html" });
-  await f.complete(tab); await f.navigate(tab, URL_A); await f.retained(tab);
+  await f.complete(tab); await f.advance(3000); await f.navigate(tab, URL_A); await f.retained(tab);
+});
+
+
+test("a client-side redirect inside the settle window still switches", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://different.example.com/" });
+  await f.complete(tab); await f.advance(2999); await f.navigate(tab, URL_A); await f.switched(tab);
+  assert.equal(f.timers.size, 0);
+});
+
+test("a URL change cancels settling until the next non-hop page completes", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://different.example.com/" });
+  await f.complete(tab); await f.advance(2000); await f.navigate(tab, "https://different.example.com/next");
+  await f.advance(4000); await f.navigate(tab, URL_A); await f.switched(tab);
+});
+
+test("same-document URL changes keep the settle deadline", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://different.example.com/" });
+  await f.complete(tab); await f.advance(2000);
+  // pushState, replaceState and hash changes arrive as one complete update with a URL.
+  const live = await f.ff.browser.tabs.get(tab.id);
+  f.ff.fire("tabs.onUpdated", tab.id, { status: "complete", url: "https://different.example.com/route" },
+    { ...live, url: "https://different.example.com/route", status: "complete" });
+  await f.flush(); await f.advance(1000);
+  await f.navigate(tab, URL_A); await f.retained(tab);
+});
+
+test("a same-document change still starts settling when none is running", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://different.example.com/" });
+  const live = await f.ff.browser.tabs.get(tab.id);
+  f.ff.fire("tabs.onUpdated", tab.id, { status: "complete", url: "https://different.example.com/route" },
+    { ...live, url: "https://different.example.com/route", status: "complete" });
+  await f.flush(); await f.advance(3000);
+  await f.navigate(tab, URL_A); await f.retained(tab);
+});
+
+test("a failing session write does not stop switching", async t => {
+  const f = await fixture(t);
+  t.mock.method(f.ff.browser.storage.session, "set", async () => { throw new Error("quota"); });
+  t.mock.method(console, "warn", () => {});
+  const tab = await f.create({ url: URL_A }); await f.switched(tab);
+  const next = await f.create({ url: "https://different.example.com/" }); await f.navigate(next, URL_A); await f.switched(next);
+});
+
+test("a new completed page gets its own three second settle window", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://different.example.com/" });
+  await f.complete(tab); await f.advance(2000); await f.navigate(tab, "https://different.example.com/next");
+  await f.complete(tab); await f.advance(2999); await f.navigate(tab, URL_A); await f.switched(tab);
+});
+
+test("chat-app Safe Links completion does not end the watch", async t => {
+  const f = await fixture(t); const tab = await f.create({ url:
+    "https://cdn.example.net/evergreen-assets/safelinks/2/atp-safelinks.html" });
+  await f.complete(tab); await f.advance(12000); await f.navigate(tab, URL_A); await f.switched(tab);
+});
+
+test("sign-in completions keep watching through the final URL forty seconds later", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://different.example.com/" });
+  await f.complete(tab); await f.advance(2000);
+  await f.navigate(tab, "https://login.example.com/common"); await f.complete(tab);
+  await f.advance(10000); await f.navigate(tab, "https://logon.example.com/"); await f.complete(tab);
+  await f.advance(10000); await f.navigate(tab, "https://device.login.example.net/common/return"); await f.complete(tab);
+  await f.advance(20000); await f.navigate(tab, URL_A); await f.switched(tab);
+});
+
+for (const url of ["https://login.example.com/common", "https://accounts.example.com/signin",
+  "https://eu.safelinks.example.net/", "https://example.com/LOGIN",
+  "https://cdn.example.net/evergreen-assets/safelinks/2/atp-safelinks.html"]) {
+  test(`identical open hop tabs never match: ${url}`, async t => {
+    const f = await fixture(t, { setup: { tabs: [{ id: 1, windowId: 1, url }] } });
+    const tab = await f.create({ url }); await f.complete(tab); await f.advance(4000); await f.retained(tab);
+    assert.equal(f.ff.calls.some(call => call.api === "tabs.query"), false);
+  });
+}
+
+test("the optional hop classifier is used for matching and completion", async t => {
+  const hop = "https://example.net/hop";
+  const f = await fixture(t, { dependencies: { isHop: url => url === hop },
+    setup: { tabs: [{ id: 1, windowId: 1, url: hop }, { id: 2, windowId: 1, url: URL_A }] } });
+  const tab = await f.create({ url: hop }); await f.complete(tab); await f.advance(4000); await f.retained(tab);
+  await f.navigate(tab, URL_A); await f.switched(tab, 2);
+});
+
+test("hop changes and completions cannot extend the two minute cap", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://logon.example.com/" });
+  await f.complete(tab); await f.advance(119999);
+  await f.navigate(tab, "https://login.example.com/common"); await f.complete(tab);
+  await f.advance(1); await f.navigate(tab, URL_A); await f.retained(tab); assert.equal(f.timers.size, 0);
+});
+
+test("a hop candidate still switches one millisecond before the cap", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://logon.example.com/" });
+  await f.complete(tab); await f.advance(119999); await f.navigate(tab, URL_A); await f.switched(tab);
+});
+
+for (const action of ["close", "setting off", "startup"]) {
+  test(`${action} clears persisted candidates without timers`, async t => {
+    const f = await fixture(t); const tab = await f.create({ url: "https://different.example.com/" });
+    await f.complete(tab); assert.equal(f.timers.size, 0);
+    assert.deepEqual(await f.ff.browser.storage.session.get("foxySwitchCandidates"), {
+      foxySwitchCandidates: { [tab.id]: { created: 115000, url: "https://different.example.com/", settleAt: 118000 } },
+    });
+    if (action === "close") await f.ff.browser.tabs.remove(tab.id);
+    if (action === "setting off") await f.ff.browser.storage.sync.set({ settings: { switchToOpenTab: false } });
+    if (action === "startup") f.ff.fire("runtime.onStartup");
+    await f.flush(); assert.equal(f.timers.size, 0);
+    assert.deepEqual(await f.ff.browser.storage.session.get("foxySwitchCandidates"), { foxySwitchCandidates: {} });
+    if (action !== "close") {
+      await f.advance(15000); await f.ff.browser.storage.sync.remove("settings"); await f.flush();
+      await f.navigate(tab, URL_A); await f.retained(tab);
+    }
+  });
+}
+
+
+test("a sign-in chain survives losing in-memory state and switches forty seconds later", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://different.example.com/" });
+  await f.complete(tab); await f.advance(2000);
+  await f.navigate(tab, "https://login.example.com/common"); await f.complete(tab);
+  await f.suspend(20000);
+  await f.navigate(tab, "https://device.login.example.net/return"); await f.complete(tab);
+  await f.suspend(20000); await f.navigate(tab, URL_A); await f.switched(tab);
+  assert.deepEqual(await f.ff.browser.storage.session.get("foxySwitchCandidates"), { foxySwitchCandidates: {} });
+});
+
+test("a settled watch does not revive after losing in-memory state", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://different.example.com/" });
+  await f.complete(tab); await f.suspend(10000);
+  await f.navigate(tab, URL_A); await f.retained(tab);
+  assert.deepEqual(await f.ff.browser.storage.session.get("foxySwitchCandidates"), { foxySwitchCandidates: {} });
+});
+
+test("the two minute deadline survives losing in-memory state", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://login.example.com/" });
+  await f.complete(tab); await f.suspend(120000);
+  await f.navigate(tab, URL_A); await f.retained(tab);
+  assert.deepEqual(await f.ff.browser.storage.session.get("foxySwitchCandidates"), { foxySwitchCandidates: {} });
+});
+
+test("a resumed watch still switches just before its two minute deadline", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://login.example.com/" });
+  await f.complete(tab); await f.suspend(119999);
+  await f.navigate(tab, URL_A); await f.switched(tab);
+});
+
+test("any write prunes expired watches for other tabs", async t => {
+  const f = await fixture(t); const old = await f.create({ url: "https://different.example.com/" });
+  await f.complete(old); await f.advance(3000);
+  const live = await f.create({ url: "https://login.example.com/" });
+  assert.deepEqual(await f.ff.browser.storage.session.get("foxySwitchCandidates"), {
+    foxySwitchCandidates: { [live.id]: { created: 118000, url: "https://login.example.com/", settleAt: null } },
+  });
+});
+
+
+test("three initial web URLs arriving before checks still skip the entire burst", async t => {
+  const f = await fixture(t); const tabs = [];
+  for (let i = 0; i < 3; i++) tabs.push(await f.ff.browser.tabs.create({ windowId: 1, active: true, url: URL_A }));
+  await f.flush();
+  for (const tab of tabs) await f.retained(tab);
+  assert.equal(f.ff.calls.some(call => call.api === "tabs.remove"), false);
 });

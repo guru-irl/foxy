@@ -159,6 +159,166 @@ test("narrow Allow pill: the word Allow under a small cloud, labelled Allow weat
   assert.ok(!found.length, found.join("\n"));
 }, { timeout: 20000 });
 
+// One left-aligned column (3.3.1): place, reading, summary, details, hours, days.
+
+/** The user's reading: Yelahanka, 23°, overcast, 30° / 21°, feels like 25°, wind 8 km/h, humidity 84 %. */
+function yelahanka() {
+  const json = forecastJson();
+  Object.assign(json.current, { temperature_2m: 23.2, apparent_temperature: 25.1, weather_code: 3, wind_speed_10m: 8.2,
+    relative_humidity_2m: 84, precipitation: 0 });
+  json.daily.temperature_2m_max[0] = 30.1; json.daily.temperature_2m_min[0] = 21.2;
+  return { ...ok(), place: "Yelahanka", data: parseForecast(json) };
+}
+
+/** Tiles of exact pixel sizes. */
+async function boxes(sizes, state = ok(), settings = {}) {
+  await styles();
+  const host = document.createElement("div");
+  host.style.cssText = "position:relative;width:4000px;height:3000px;color-scheme:dark";
+  fixture().append(host);
+  return sizes.map(([w, h]) => {
+    const node = weatherTile(); node.classList.add("tile");
+    node.style.cssText = `position:absolute;left:0;top:0;width:${w}px;height:${h}px`;
+    host.append(node);
+    renderWeather(node, state, settings, NOW);
+    return [`${w}x${h}px`, node];
+  });
+}
+
+const SECTIONS = ["top", "now", "summary", "details", "hours", "days"];
+const sections = node => SECTIONS.map(name => [name, node.querySelector(`.weather-${name}`)]).filter(([, part]) => shown(part));
+const names = node => sections(node).map(([name]) => name).join(" ");
+
+/** The tile's content box: inside the body's padding. */
+function content(node) {
+  const body = node.querySelector(".weather-body"), r = body.getBoundingClientRect(), cs = getComputedStyle(body);
+  return { left: r.left + parseFloat(cs.paddingLeft), right: r.right - parseFloat(cs.paddingRight),
+    top: r.top + parseFloat(cs.paddingTop), bottom: r.bottom - parseFloat(cs.paddingBottom) };
+}
+
+/** The right edge of the laid-out text inside `node`. */
+function textRight(node) {
+  let right = -Infinity;
+  const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const range = document.createRange(); range.selectNodeContents(walker.currentNode);
+    for (const rect of range.getClientRects()) right = Math.max(right, rect.right);
+  }
+  return right;
+}
+
+test("the user's 5 x 4 tile at S shows the hourly strip, fully inside the tile; 4 x 4 too", async () => {
+  for (const [label, node] of await tiles(48, [[5, 4], [4, 4]], yelahanka())) {
+    const strip = node.querySelector(".weather-hours");
+    assert.ok(shown(strip), `${label} shows the strip: ${names(node)}`);
+    const r = strip.getBoundingClientRect(), box = content(node);
+    assert.ok(r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5 && r.left >= box.left - 0.5 && r.right <= box.right + 0.5,
+      `${label} strip (${r.left},${r.top},${r.right},${r.bottom}) inside (${box.left},${box.top},${box.right},${box.bottom})`);
+    assert.ok(shown(node.querySelector(".weather-summary")), `${label} keeps the summary`);
+    const found = problems(node, label);
+    assert.ok(!found.length, found.join("\n"));
+  }
+});
+
+test("summary and details start at the place's left edge, as one column", async () => {
+  const all = [...await tiles(48, [[5, 4], [5, 6], [6, 10]], yelahanka()), ...await tiles(120, [[2, 2], [3, 3], [3, 4]], yelahanka())];
+  for (const [label, node] of all) {
+    const left = node.querySelector(".weather-place").getBoundingClientRect().left;
+    for (const name of ["now", "summary", "details", "hours"]) {
+      const part = node.querySelector(`.weather-${name}`);
+      if (name === "summary" || (name === "details" && !/5x4@48|2x2@120/.test(label))) assert.ok(shown(part), `${label} shows .weather-${name}`);
+      if (!shown(part)) continue;
+      const at = part.getBoundingClientRect().left;
+      assert.ok(Math.abs(at - left) <= 0.5, `${label} .weather-${name} left ${at} vs place ${left}`);
+    }
+    // The condition is the first thing on its line.
+    const condition = node.querySelector(".weather-condition").getBoundingClientRect().left;
+    assert.ok(Math.abs(condition - left) <= 0.5, `${label} condition left ${condition} vs place ${left}`);
+  }
+});
+
+test("nothing in the summary or the reading is right-aligned against the tile", async () => {
+  const all = [...await tiles(48, [[5, 3], [5, 4], [5, 6], [6, 10], [8, 4]], yelahanka()), ...await tiles(120, [[2, 2], [3, 3]], yelahanka())];
+  for (const [label, node] of all) {
+    const box = content(node);
+    for (const name of ["summary", "now", "details"]) {
+      const part = node.querySelector(`.weather-${name}`);
+      if (!shown(part)) continue;
+      const cs = getComputedStyle(part);
+      assert.ok(!["right", "end"].includes(cs.textAlign), `${label} .weather-${name} text-align ${cs.textAlign}`);
+      assert.ok(!["flex-end", "end", "right", "space-between"].includes(cs.justifyContent), `${label} .weather-${name} justify-content ${cs.justifyContent}`);
+      assert.ok(textRight(part) < box.right - 8, `${label} .weather-${name} text ends at ${textRight(part)}, pinned to ${box.right}`);
+    }
+    // Feels like moved to the details line.
+    assert.equal(node.querySelector(".weather-summary").textContent.includes("Feels"), false, label);
+  }
+});
+
+test("the summary reads condition, high / low and the details start with feels like", async () => {
+  const [[, node]] = await tiles(48, [[5, 6]], yelahanka());
+  assert.equal(visibleText(node.querySelector(".weather-summary")), "Overcast · 30° / 21°");
+  assert.equal(visibleText(node.querySelector(".weather-details")), "Feels like 25° · Wind 8 km/h · Humidity 84 %");
+  const muted = getComputedStyle(node.querySelector(".weather-lo")).color, text = getComputedStyle(node.querySelector(".weather-hi")).color;
+  assert.ok(muted !== text, "the low is muted");
+  assert.equal(getComputedStyle(node.querySelector(".weather-condition")).color, text, "the condition is in the text colour");
+});
+
+test("consecutive sections are evenly spaced; spare height collects at the bottom", async () => {
+  const all = [...await tiles(48, [[3, 3], [4, 4], [5, 3], [5, 4], [5, 5], [5, 6], [6, 8], [6, 10], [3, 8], [10, 12]], yelahanka()),
+    ...await tiles(120, [[2, 2], [3, 3], [3, 4]], yelahanka()), ...await tiles(40, [[4, 3], [5, 5], [5, 9]], yelahanka())];
+  for (const [label, node] of all) {
+    const parts = sections(node).map(([name, part]) => [name, part.getBoundingClientRect()]);
+    const gaps = parts.slice(1).map(([name, r], i) => [`${parts[i][0]}>${name}`, r.top - parts[i][1].bottom]);
+    assert.ok(gaps.length >= 2, `${label} has sections: ${names(node)}`);
+    for (const [pair, gap] of gaps) assert.ok(Math.abs(gap - gaps[0][1]) <= 1, `${label} ${pair} gap ${gap} vs ${gaps[0][0]} ${gaps[0][1]}`);
+    const box = content(node);
+    assert.ok(Math.abs(parts[0][1].top - box.top) <= 0.5, `${label} starts at the top`);
+    if (!parts.some(([name]) => name === "days")) assert.ok(parts.at(-1)[1].bottom <= box.bottom + 0.5, `${label} ends inside`);
+  }
+});
+
+test("as the height shrinks, the details hide first, then the strip, then the summary", async () => {
+  const found = [], bounds = {};
+  // Every third height, plus each step and the pixel below it.
+  const steps = [110, 142, 158, 236, 252, 264, 280, 360, 376, 388, 404, 416, 432, 444, 460, 472, 488];
+  const heights = [...new Set([...Array.from({ length: 134 }, (_, i) => 100 + 3 * i), ...steps, ...steps.map(h => h - 1)])].sort((a, b) => a - b);
+  for (const width of [176, 240, 304, 600]) {
+    const nodes = await boxes(heights.map(h => [width, h]), yelahanka());
+    for (const [label, node] of nodes) {
+      const has = Object.fromEntries(SECTIONS.map(name => [name, shown(node.querySelector(`.weather-${name}`))]));
+      if (has.details && !has.hours) found.push(`${label} details without the strip`);
+      if (has.hours && !has.summary) found.push(`${label} strip without the summary`);
+      if (has.days && !has.details) found.push(`${label} days without the details`);
+      found.push(...problems(node, label));
+      const box = content(node), last = sections(node).filter(([name]) => name !== "days").at(-1)[1].getBoundingClientRect();
+      if (last.bottom > box.bottom + 0.5) found.push(`${label} ${names(node)} ends ${last.bottom - box.bottom} px below the padding`);
+      const h = node.getBoundingClientRect().height;
+      for (const name of ["summary", "hours", "details", "days"]) if (has[name]) bounds[`${width}:${name}`] ??= h;
+      const days = [...node.querySelectorAll(".weather-day")].filter(shown).length;
+      if (has.days && days < 3) found.push(`${label} shows ${days} days`);
+    }
+    fixture().replaceChildren();
+  }
+  for (const width of [176, 240, 304, 600]) {
+    assert.ok(bounds[`${width}:summary`] < bounds[`${width}:hours`] && bounds[`${width}:hours`] < bounds[`${width}:details`],
+      `${width}: ${JSON.stringify(bounds)}`);
+    if (width >= 220) assert.ok(bounds[`${width}:hours`] <= 240, `${width}: the strip shows at 240 px: ${bounds[`${width}:hours`]}`);
+  }
+  assert.ok(!found.length, found.slice(0, 40).join("\n"));
+}, { timeout: 120000 });
+
+test("size sweep: 1 x 1 to 10 x 12 at S, custom 40, 120 and 240 never clip or spill", async () => {
+  const found = [], sizes = [];
+  for (let w = 1; w <= 10; w++) for (let h = 1; h <= 12; h++) sizes.push([w, h]);
+  for (const cell of [48, 40, 120, 240]) {
+    for (const [state, settings, tag] of [[yelahanka(), {}, "C"], [ok({ temp: 38.4 }), { tempUnit: "F" }, "F"]].slice(0, cell === 48 ? 2 : 1)) {
+      for (const [label, node] of await tiles(cell, sizes, state, settings)) found.push(...problems(node, `${label} ${tag}`));
+      fixture().replaceChildren();
+    }
+  }
+  assert.ok(!found.length, found.slice(0, 40).join("\n"));
+}, { timeout: 120000 });
+
 test("daily range bars keep a visible width in 3-column tiles and day names do not spill", async () => {
   const found = [];
   for (const cell of [48, 40]) {

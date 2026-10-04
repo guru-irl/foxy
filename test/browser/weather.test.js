@@ -91,13 +91,32 @@ test("medium tier shows condition, place and high / low; tall adds the hourly st
   const weather = await tile(5, 5);
   assert.equal(weather.querySelector(".weather-condition").textContent, "Partly cloudy");
   assert.equal(weather.querySelector(".weather-place").textContent, "Dublin");
-  assert.equal(weather.querySelector(".weather-range").textContent.replace(/\s+/g, " ").trim(), "17° 8°");
+  assert.equal(weather.querySelector(".weather-range").textContent.replace(/\s+/g, " ").trim(), "17° / 8°");
   const hours = [...weather.querySelectorAll(".weather-hour-time")].map(n => n.textContent);
   assert.equal(hours[0], "Now"); assert.equal(hours[1], "14"); assert.equal(hours[11], "00");
   const strip = weather.querySelector(".weather-hours");
   assert.ok(strip.scrollWidth > strip.clientWidth, "hourly strip scrolls sideways");
   assert.equal(getComputedStyle(strip).overflowX, "auto");
   assert.ok(strip.hasAttribute("data-scroll-end"), "edge fade marker at the end");
+});
+
+test("no details row when the forecast has no feels-like, wind, humidity or precipitation", async () => {
+  const state = okState();
+  state.data = { ...state.data, current: { ...state.data.current, feels: null, wind: null, humidity: null, precipitation: null } };
+  const weather = await tile(5, 8, state);
+  assert.equal(weather.querySelector(".weather-details"), null);
+  assert.ok(weather.querySelector(".weather-hours"), "the strip still renders");
+});
+
+test("the longest condition fits whole in 3- and 4-column tiles, in Fahrenheit", async () => {
+  for (const [w, h] of [[3, 3], [4, 4], [4, 6]]) {
+    const state = okState();
+    state.data = { ...state.data, current: { ...state.data.current, code: 99 } };
+    const weather = await tile(w, h, state, { synced: { ...SYNCED, tempUnit: "F" } });
+    const label = weather.querySelector(".weather-condition");
+    assert.equal(label.textContent, "Thunderstorm, hail");
+    assert.ok(label.scrollWidth <= label.clientWidth, `${w}x${h}: ${label.scrollWidth} > ${label.clientWidth}`);
+  }
 });
 
 test("Fahrenheit converts every temperature on the tile", async () => {
