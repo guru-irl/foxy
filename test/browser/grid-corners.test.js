@@ -23,9 +23,9 @@ async function setup({ rect = original, width = 1232, widgets = false,
       : message.type === "foxy:saved" ? { folders: { 1: "a", 2: "b" }, missing: [],
         saved: widgets ? [{ folderId: "closed", title: "Closed" }] : [] } : undefined);
   await ff.browser.storage.sync.set({
-    "tile:group:a": rect, "tile:group:b": neighbour,
-    "tile:clock": { x: 6, y: 0, w: 4, h: 2 }, "tile:pinned": { x: 6, y: 2, w: 4, h: 2 },
-    "tile:saved": { x: 6, y: 4, w: 4, h: 2 },
+    "tile:10:group:a": rect, "tile:10:group:b": neighbour,
+    "tile:10:clock": { x: 6, y: 0, w: 4, h: 2 }, "tile:10:pinned": { x: 6, y: 2, w: 4, h: 2 },
+    "tile:10:saved": { x: 6, y: 4, w: 4, h: 2 },
     settings: { showClock: widgets, showPinned: widgets, showSaved: widgets },
   });
   await ff.settle();
@@ -40,7 +40,8 @@ const rect = node => Object.fromEntries(["x", "y", "w", "h"].map(key => [key, Nu
 const box = node => node.getBoundingClientRect();
 const close = (actual, expected, message) => assert.ok(Math.abs(actual - expected) < 0.1,
   `${message}: expected ${expected}, got ${actual}`);
-const writes = ff => ff.calls.filter(call => call.api === "storage.sync.set").map(call => call.args[0]);
+// Layout meta keys carry timestamps; tile placement is what these tests assert.
+const writes = ff => ff.calls.filter(call => call.api === "storage.sync.set").map(call => Object.fromEntries(Object.entries(call.args[0]).filter(([key]) => !key.startsWith("layout:"))));
 function pointer(type, target, coords) {
   assert.ok(target, `missing pointer target for ${type}`);
   target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1,
@@ -140,8 +141,8 @@ for (const { corner, dx, dy, target, min, edge } of corners) {
         for (let i = 0; i < 6; i++) await Promise.resolve();
         assert.equal(control.ui.gridDragging, true, "hold extends through the slide");
         assert.ok(node.classList.contains("sliding"));
-        const expectedWrites = end === "Escape" ? [] : [{ "tile:group:a": target,
-          ...(dy > 0 ? { "tile:group:b": { x: 2, y: 7, w: 4, h: 2 } } : {}) }];
+        const expectedWrites = end === "Escape" ? [] : [{ "tile:10:group:a": target,
+          ...(dy > 0 ? { "tile:10:group:b": { x: 2, y: 7, w: 4, h: 2 } } : {}) }];
         assert.deepEqual(writes(ff), expectedWrites, "release writes before settlement");
         await flush(ff);
         const landed = box(tile(root)), expected = end === "release" ? landing : before;
@@ -167,7 +168,7 @@ for (const { corner, dx, dy, target, min, edge } of corners) {
       assert.deepEqual(rect(root.querySelector(".drop-outline")), min);
       pointer("pointerup", document, shifted(start, -dx * 2000, -dy * 2000)); await flush(ff);
       assert.deepEqual(rect(tile(root)), min);
-      assert.deepEqual(writes(ff), [{ "tile:group:a": min }]);
+      assert.deepEqual(writes(ff), [{ "tile:10:group:a": min }]);
     } finally { escape(); await flush(ff); }
   });
 
@@ -183,8 +184,8 @@ for (const { corner, dx, dy, target, min, edge } of corners) {
       assert.deepEqual(writes(ff), []);
       pointer("pointerup", document, coords); await flush(ff);
       assert.deepEqual(rect(tile(root)), edge, "clamped release lands in its target");
-      assert.deepEqual(writes(ff), [{ "tile:group:a": edge,
-        ...(dy > 0 ? { "tile:group:b": { x: 2, y: 27, w: 4, h: 2 } } : {}) }]);
+      assert.deepEqual(writes(ff), [{ "tile:10:group:a": edge,
+        ...(dy > 0 ? { "tile:10:group:b": { x: 2, y: 27, w: 4, h: 2 } } : {}) }]);
     } finally { escape(); await flush(ff); }
   });
 }
@@ -240,7 +241,7 @@ for (const { corner, dx, dy, target } of corners) {
         for (let i = 0; i < 6; i++) await Promise.resolve();
         assert.equal(control.ui.gridDragging, true, "remote render is held through settlement");
         assert.equal(tile(root), node);
-        const expected = end === "Escape" ? [] : [{ "tile:group:a": target, "tile:group:b": pushed }];
+        const expected = end === "Escape" ? [] : [{ "tile:10:group:a": target, "tile:10:group:b": pushed }];
         assert.deepEqual(writes(ff), expected, "save happens before the slide ends");
         await flush(ff);
         assert.equal(control.ui.gridDragging, false);
@@ -280,7 +281,7 @@ for (const { corner, dx, dy, target } of corners) {
       assert.deepEqual(rect(root.querySelector(".drop-outline")), expected);
       pointer("pointerup", document, shifted(start, -dx * 2000, -dy * 2000)); await flush(ff);
       assert.deepEqual(rect(tile(root, "clock")), expected);
-      assert.deepEqual(writes(ff), [{ "tile:clock": expected }]);
+      assert.deepEqual(writes(ff), [{ "tile:10:clock": expected }]);
     } finally { escape(); await flush(ff); }
   });
 
