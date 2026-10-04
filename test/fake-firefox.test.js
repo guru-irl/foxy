@@ -1179,11 +1179,11 @@ test("sync storage writes, removal and clear emit sync changes without touching 
 test("sync storage survives restarts with and without session restore", async () => {
   for (const restore of [true, false]) {
     const ff = createFirefox();
-    await ff.browser.storage.sync.set({ "tile:clock": { x: 0, y: 0, w: 5, h: 2 } });
+    await ff.browser.storage.sync.set({ "tile:17:clock": { x: 0, y: 0, w: 5, h: 2 } });
     await ff.settle();
     ff.restart({ restore });
     await ff.settle();
-    assert.deepEqual(await ff.browser.storage.sync.get(), { "tile:clock": { x: 0, y: 0, w: 5, h: 2 } });
+    assert.deepEqual(await ff.browser.storage.sync.get(), { "tile:17:clock": { x: 0, y: 0, w: 5, h: 2 } });
   }
 });
 

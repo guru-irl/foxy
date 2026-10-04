@@ -100,7 +100,7 @@ function sharesRow(a, b) {
 
 // Display only: separate saved overlaps, cap widths, close empty columns,
 // then push left just enough. Wrap only tiles whose rows cannot fit.
-export function fit(tiles, cols) {
+export function arrangement(tiles, cols) {
   cols = columns(cols);
   const result = tiles.map(tile => ({ ...tile }));
   const ordered = [...result].sort(readingOrder), rest = new Set();
@@ -145,9 +145,13 @@ export function fit(tiles, cols) {
       tile.x = Math.min(tile.x, limit - tile.w);
     }
   }
+  return { tiles: result, kept, aside: ordered.filter(tile => rest.has(tile)) };
+}
+
+export function fit(tiles, cols) {
+  const { tiles: result, kept, aside } = arrangement(tiles, cols);
   // Use saved reading order for both kinds of set-aside tile.
-  for (const tile of ordered) {
-    if (!rest.has(tile)) continue;
+  for (const tile of aside) {
     Object.assign(tile, firstFree(kept, tile, cols, tile.y));
     kept.push(tile);
   }

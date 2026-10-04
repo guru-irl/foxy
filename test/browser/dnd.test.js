@@ -430,13 +430,14 @@ test("scrolled grid drop lands the group tile in the content cell under the poin
   } finally { dispatchDrag("dragend", source, { dataTransfer }); endName(root); }
 });
 
+const tileEntries = entries => Object.fromEntries(Object.entries(entries).filter(([key]) => !key.startsWith("layout:")));
 const dropLayout = {
-  "tile:clock": { x: 0, y: 0, w: 5, h: 2 },
-  "tile:pinned": { x: 5, y: 0, w: 3, h: 4 },
-  "tile:group:one": { x: 8, y: 0, w: 3, h: 4 },
-  "tile:group:two": { x: 0, y: 4, w: 3, h: 4 },
-  "tile:group:remote": { x: 3, y: 4, w: 3, h: 4 },
-  "tile:group:closed": { x: 4, y: 2, w: 3, h: 4 },
+  "tile:13:clock": { x: 0, y: 0, w: 5, h: 2 },
+  "tile:13:pinned": { x: 5, y: 0, w: 3, h: 4 },
+  "tile:13:group:one": { x: 8, y: 0, w: 3, h: 4 },
+  "tile:13:group:two": { x: 0, y: 4, w: 3, h: 4 },
+  "tile:13:group:remote": { x: 3, y: 4, w: 3, h: 4 },
+  "tile:13:group:closed": { x: 4, y: 2, w: 3, h: 4 },
 };
 async function pendingDrop(initial = { saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote" } }) {
   let reply = initial;
@@ -469,7 +470,7 @@ test("empty-cell drop shows the unmapped tile at its rect, opens its editor and 
     assert.deepEqual(rectOf(tile), { x: 4, y: 2, w: 3, h: 4 });
     assert.ok(tile.querySelector(".name-editor"), "new group opens its name editor");
     assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set"), [], "unmapped placement is display-only");
-    assert.deepEqual(await ff.browser.storage.sync.get(null), dropLayout);
+    assert.deepEqual(tileEntries(await ff.browser.storage.sync.get(null)), dropLayout);
     setReply({ saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote", [groupId]: "new" } });
     ff.fire("bookmarks.onCreated", "new", { id: "new", type: "folder" }); await flush(ff);
     assert.ok(root.querySelector(`[data-tile-id="local:${groupId}"]`), "mapping update is held by the editor");
@@ -477,10 +478,10 @@ test("empty-cell drop shows the unmapped tile at its rect, opens its editor and 
     assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
     const writes = ff.calls.filter(c => c.api === "storage.sync.set");
     assert.equal(writes.length, 1);
-    assert.deepEqual(writes[0].args[0], {
-      "tile:group:new": { x: 4, y: 2, w: 3, h: 4 },
-      "tile:pinned": { x: 5, y: 6, w: 3, h: 4 },
-      "tile:group:remote": { x: 3, y: 10, w: 3, h: 4 },
+    assert.deepEqual(tileEntries(writes[0].args[0]), {
+      "tile:13:group:new": { x: 4, y: 2, w: 3, h: 4 },
+      "tile:13:pinned": { x: 5, y: 6, w: 3, h: 4 },
+      "tile:13:group:remote": { x: 3, y: 10, w: 3, h: 4 },
     });
     assert.deepEqual(await ff.browser.storage.sync.get(null), { ...dropLayout, ...writes[0].args[0] });
     await control.refresh(); await flush(ff); await flush(ff);
@@ -538,9 +539,9 @@ for (const order of ["dropper-first", "dropper-second"]) {
       folders = { ...folders, [groupId]: "new" };
       ff.fire("bookmarks.onCreated", "new", { id: "new", type: "folder" });
       await flush(ff); await flush(ff);
-      assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:new"], { x: 4, y: 2, w: 3, h: 4 });
+      assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:13:group:new"], { x: 4, y: 2, w: 3, h: 4 });
       timer.fire(); await flush(ff); await flush(ff);
-      const writes = ff.calls.filter(c => c.api === "storage.sync.set" && c.args[0]["tile:group:new"]);
+      const writes = ff.calls.filter(c => c.api === "storage.sync.set" && c.args[0]["tile:13:group:new"]);
       assert.equal(writes.length, 1, "only the dropping page writes the new tile");
       for (const { root } of pages) {
         assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
@@ -571,15 +572,15 @@ test("a post-paint group stays display-only until the delay and key check, then 
     const result = await externalGroup(timer.options); root = result.root;
     const { ff, control } = result;
     assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:external"]')), { x: 6, y: 4, w: 3, h: 4 });
-    assert.equal((await ff.browser.storage.sync.get(null))["tile:group:external"], undefined);
+    assert.equal((await ff.browser.storage.sync.get(null))["tile:13:group:external"], undefined);
     assert.equal(timer.timers.size, 1);
     await control.refresh(); await flush(ff);
     assert.equal(timer.timers.size, 1, "refresh does not restart the delay");
     ff.calls.length = 0;
     timer.fire(); await flush(ff); await flush(ff);
-    assert.ok(ff.calls.some(c => c.api === "storage.sync.get" && c.args[0] === "tile:group:external"));
-    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:external"], { x: 6, y: 4, w: 3, h: 4 });
-    assert.equal(ff.calls.filter(c => c.api === "storage.sync.set" && c.args[0]["tile:group:external"]).length, 1);
+    assert.ok(ff.calls.some(c => c.api === "storage.sync.get" && c.args[0] === "tile:13:group:external"));
+    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:13:group:external"], { x: 6, y: 4, w: 3, h: 4 });
+    assert.equal(ff.calls.filter(c => c.api === "storage.sync.set" && c.args[0]["tile:13:group:external"]).length, 1);
     await control.refresh(); await flush(ff);
     assert.equal(timer.timers.size, 0);
   } finally { root?.remove(); timer.restore(); }
@@ -591,14 +592,14 @@ test("the delayed key check adopts an existing drop rectangle even before storag
     const result = await externalGroup(timer.options); root = result.root;
     const { ff } = result;
     await ff.browser.storage.sync.set({
-      "tile:group:external": { x: 4, y: 2, w: 3, h: 4 },
-      "tile:pinned": { x: 5, y: 6, w: 3, h: 4 },
-      "tile:group:remote": { x: 3, y: 10, w: 3, h: 4 },
+      "tile:13:group:external": { x: 4, y: 2, w: 3, h: 4 },
+      "tile:13:pinned": { x: 5, y: 6, w: 3, h: 4 },
+      "tile:13:group:remote": { x: 3, y: 10, w: 3, h: 4 },
     });
     // Keep the fake's event queue held until the delayed key read has resolved.
     ff.calls.length = 0;
     timer.fire(); await nextFrame(); await nextFrame(); await nextFrame();
-    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:external"], { x: 4, y: 2, w: 3, h: 4 });
+    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:13:group:external"], { x: 4, y: 2, w: 3, h: 4 });
     assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:external"]')), { x: 4, y: 2, w: 3, h: 4 });
     assert.equal(ff.calls.filter(c => c.api === "storage.sync.set").length, 0);
     await flush(ff);
@@ -617,7 +618,7 @@ for (const ending of ["group removal", "page unload"]) {
       else window.dispatchEvent(new Event("pagehide"));
       assert.equal(timer.timers.size, 0);
       timer.fire(); await flush(ff); await flush(ff);
-      assert.equal((await ff.browser.storage.sync.get(null))["tile:group:external"], undefined);
+      assert.equal((await ff.browser.storage.sync.get(null))["tile:13:group:external"], undefined);
       assert.equal(ff.calls.filter(c => c.api === "storage.sync.set").length, 0);
     } finally { root?.remove(); timer.restore(); }
   });
@@ -640,7 +641,7 @@ async function twoPendingDrops(layout, rects) {
 }
 
 test("mapping one pending tile ignores another pending tile's first-free position when saving pushes", async () => {
-  const layout = { ...dropLayout, "tile:group:remote": { x: 6, y: 8, w: 3, h: 4 } };
+  const layout = { ...dropLayout, "tile:13:group:remote": { x: 6, y: 8, w: 3, h: 4 } };
   const { root, ff, ids, map } = await twoPendingDrops(layout,
     [{ x: 6, y: 4, w: 3, h: 4 }, { x: 0, y: 14, w: 3, h: 4 }]);
   try {
@@ -648,10 +649,10 @@ test("mapping one pending tile ignores another pending tile's first-free positio
     assert.deepEqual(rectOf(root.querySelector(`[data-tile-id="local:${ids[1]}"]`)), { x: 0, y: 14, w: 3, h: 4 });
     ff.calls.length = 0;
     map({ [ids[0]]: "first" }); await flush(ff); await flush(ff);
-    assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set").map(c => c.args[0]),
-      [{ "tile:group:first": { x: 6, y: 4, w: 3, h: 4 } }], "only the mapped tile moves, not a real tile below a phantom local tile");
+    assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set").map(c => tileEntries(c.args[0])),
+      [{ "tile:13:group:first": { x: 6, y: 4, w: 3, h: 4 } }], "only the mapped tile moves, not a real tile below a phantom local tile");
     assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:remote"]')), { x: 6, y: 8, w: 3, h: 4 });
-    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:remote"], { x: 6, y: 8, w: 3, h: 4 });
+    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:13:group:remote"], { x: 6, y: 8, w: 3, h: 4 });
   } finally { endName(root); }
 });
 
@@ -666,8 +667,8 @@ test("pending groups mapped together are saved in drop order rather than tab-str
     map({ [ids[0]]: "first", [ids[1]]: "second" }); await flush(ff); await flush(ff);
     const writes = ff.calls.filter(c => c.api === "storage.sync.set");
     assert.equal(writes.length, 1);
-    assert.deepEqual(writes[0].args[0]["tile:group:first"], { x: 4, y: 11, w: 3, h: 4 });
-    assert.deepEqual(writes[0].args[0]["tile:group:second"], { x: 5, y: 7, w: 3, h: 4 });
+    assert.deepEqual(writes[0].args[0]["tile:13:group:first"], { x: 4, y: 11, w: 3, h: 4 });
+    assert.deepEqual(writes[0].args[0]["tile:13:group:second"], { x: 5, y: 7, w: 3, h: 4 });
     assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:first"]')), { x: 4, y: 11, w: 3, h: 4 });
     assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:second"]')), { x: 5, y: 7, w: 3, h: 4 });
   } finally { endName(root); }
@@ -698,7 +699,7 @@ for (const readEnds of ["before", "after"]) {
       return value;
     };
     sync.set = async entries => {
-      if (entries["tile:group:new"] && ++writes === 1) {
+      if (entries["tile:13:group:new"] && ++writes === 1) {
         writeBegan(); await writeGate; await set(entries); writeEnded();
       } else await set(entries);
     };
@@ -715,7 +716,7 @@ for (const readEnds of ["before", "after"]) {
       // Do not settle the fake yet: the write's onChanged has not been delivered.
       // Only the page's write guard can invalidate this stale storage snapshot.
       releaseRead(); await nextFrame(); await nextFrame(); await nextFrame();
-      assert.deepEqual((await get(null))["tile:group:new"], { x: 4, y: 2, w: 3, h: 4 });
+      assert.deepEqual((await get(null))["tile:13:group:new"], { x: 4, y: 2, w: 3, h: 4 });
       assert.equal(writes, 1, "the stale read must not write the group again at a first-free spot");
       assert.ok(reads >= 2, "discard the stale read and re-read storage after the write");
       assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
@@ -753,7 +754,7 @@ test("a pending tile write queued two microtasks after a layout reply cannot res
     return reply;
   };
   sync.set = async entries => {
-    if (entries["tile:group:new"]) { writeBegan(); await writeGate; }
+    if (entries["tile:13:group:new"]) { writeBegan(); await writeGate; }
     return set(entries);
   };
   try {
@@ -770,8 +771,8 @@ test("a pending tile write queued two microtasks after a layout reply cannot res
     assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
     releaseWrite();
     for (let i = 0; i < 6; i++) await flush(ff);
-    const writes = ff.calls.filter(c => c.api === "storage.sync.set" && c.args[0]["tile:group:new"]);
-    assert.deepEqual((await get(null))["tile:group:new"], { x: 4, y: 2, w: 3, h: 4 });
+    const writes = ff.calls.filter(c => c.api === "storage.sync.set" && c.args[0]["tile:13:group:new"]);
+    assert.deepEqual((await get(null))["tile:13:group:new"], { x: 4, y: 2, w: 3, h: 4 });
     assert.equal(writes.length, 1, "a chain queued during the await must finish before checking the write counter");
     assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
     assert.deepEqual(ff.errors, []);
@@ -798,7 +799,7 @@ test("a fast folder mapping during the final tab read preserves the pending drop
     release(); ff.browser.tabs.query = query; await dropping; await flush(ff); await flush(ff);
     assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:fast"]')), { x: 4, y: 2, w: 3, h: 4 });
     assert.ok(root.querySelector('[data-tile-id="group:fast"] .name-editor'));
-    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:fast"], { x: 4, y: 2, w: 3, h: 4 });
+    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:13:group:fast"], { x: 4, y: 2, w: 3, h: 4 });
   } finally { release(); ff.browser.tabs.query = query; await dropping; endName(root); }
 });
 
@@ -828,7 +829,7 @@ for (const [label, invalid] of [
       assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set"), [], "no writes before a valid folders reply");
       setReply({ saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote", [groupId]: "new" } });
       ff.fire("bookmarks.onChanged", "new", { title: "Mapped" }); await flush(ff); await flush(ff);
-      assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:new"], { x: 4, y: 2, w: 3, h: 4 });
+      assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:13:group:new"], { x: 4, y: 2, w: 3, h: 4 });
       assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
       assert.deepEqual(ff.errors, []);
     } finally { endName(root ?? document.createElement("div")); console.warn = warn; }
@@ -844,7 +845,7 @@ test("a pending group's removal drops its rectangle without saving a later stale
     assert.equal(root.querySelector(".name-editor"), null);
     setReply({ saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote", [groupId]: "gone" } });
     ff.fire("bookmarks.onChanged", "gone", { title: "Late" }); await flush(ff); await control.refresh(); await flush(ff);
-    assert.equal((await ff.browser.storage.sync.get(null))["tile:group:gone"], undefined);
+    assert.equal((await ff.browser.storage.sync.get(null))["tile:13:group:gone"], undefined);
     assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set"), []);
   } finally { endName(root); }
 });
@@ -1042,15 +1043,15 @@ test("a failed key check for a post-paint group retries on a later render instea
     const get = ff.browser.storage.sync.get;
     let failNext = true;
     ff.browser.storage.sync.get = async key => {
-      if (failNext && key === "tile:group:external") { failNext = false; throw new Error("transient"); }
+      if (failNext && key === "tile:13:group:external") { failNext = false; throw new Error("transient"); }
       return get(key);
     };
     timer.fire(); await flush(ff); await flush(ff);
-    assert.equal((await get(null))["tile:group:external"], undefined);
+    assert.equal((await get(null))["tile:13:group:external"], undefined);
     await control.refresh(); await flush(ff);
     assert.equal(timer.timers.size, 1, "a later render schedules the check again");
     timer.fire(); await flush(ff); await flush(ff);
-    assert.deepEqual((await get(null))["tile:group:external"], { x: 6, y: 4, w: 3, h: 4 });
+    assert.deepEqual((await get(null))["tile:13:group:external"], { x: 6, y: 4, w: 3, h: 4 });
   } finally { console.warn = warn; if (root) { endName(root); root.remove(); } timer.restore(); }
 });
 
@@ -1085,7 +1086,7 @@ for (const [width, pitch] of [[1000, 1016 / 6], [1366, 1382 / 8], [1584, 160], [
       assert.deepEqual(rectOf(root.querySelector(`[data-tile-id="local:${groupId}"]`)), { x: 1, y: 1, w: 2, h: 3 });
       reply = { ...reply, folders: { [groupId]: "new" } };
       endName(root); await control.refresh(); await flush(ff); await flush(ff);
-      assert.deepEqual((await ff.browser.storage.sync.get("tile:group:new"))["tile:group:new"],
+      assert.deepEqual((await ff.browser.storage.sync.get(`tile:${control.view.k}:group:new`))[`tile:${control.view.k}:group:new`],
         { x: 1, y: 1, w: 2, h: 3 });
     } finally { dispatchDrag("dragend", source, { dataTransfer }); endName(root); }
   });

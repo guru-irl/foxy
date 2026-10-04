@@ -22,8 +22,8 @@ async function setup(width, settings = {}) {
     message => message.type === "foxy:reconcile" ? { ok: true }
       : message.type === "foxy:saved" ? { saved: [], missing: [], folders } : undefined);
   const layout = { ...narrowLayout,
-    "tile:saved": { x: 14, y: 0, w: 5, h: 10 },
-    "tile:group:closed": { x: 15, y: 0, w: 5, h: 10 } };
+    "tile:20:saved": { x: 14, y: 0, w: 5, h: 10 },
+    "tile:20:group:closed": { x: 15, y: 0, w: 5, h: 10 } };
   await ff.browser.storage.sync.set({ ...layout, settings }); await ff.settle();
   const root = document.createElement("div"); root.className = "board";
   root.style.cssText = `width:${width}px;height:600px`;
@@ -35,7 +35,7 @@ async function setup(width, settings = {}) {
 const tile = (root, id) => [...root.querySelectorAll(".tile")].find(node => node.dataset.tileId === id);
 const rect = node => Object.fromEntries(["x", "y", "w", "h"].map(key => [key, Number(node.style.getPropertyValue(`--${key}`))]));
 const shown = root => Object.fromEntries([...root.querySelectorAll(".tile")].map(node => [node.dataset.tileId, rect(node)]));
-const writes = ff => ff.calls.filter(call => call.api === "storage.sync.set").map(call => call.args[0]);
+const writes = ff => ff.calls.filter(call => call.api === "storage.sync.set").map(call => Object.fromEntries(Object.entries(call.args[0]).filter(([key]) => !key.startsWith("layout:"))));
 function pointer(type, target, coords) {
   target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1,
     pointerType: "mouse", isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1, ...coords }));
@@ -43,7 +43,7 @@ function pointer(type, target, coords) {
 
 // Comparing writes to display instead of saved rectangles makes HARNESS land at x=4.
 for (const kind of ["move", "resize"]) {
-  test(`19-column HARNESS one-row ${kind} lands in its outline and stays right of GROUP after widening`, async () => {
+  test(`19-column HARNESS one-row ${kind} lands in layout 19 and restores layout 20 after widening`, async () => {
     const { ff, root, layout } = await setup(2096);
     assert.equal(root.querySelector(".grid").style.getPropertyValue("--cols"), "19");
     const node = tile(root, "group:f");
@@ -60,20 +60,18 @@ for (const kind of ["move", "resize"]) {
       pointer("pointerup", document, target); await flush(ff);
       assert.deepEqual(rect(tile(root, "group:f")), outline, "HARNESS lands in its outline");
       assert.deepEqual(shown(root), preview, "every previewed tile lands where shown");
-      const expected = Object.fromEntries(Object.entries(preview)
-        .filter(([id, r]) => JSON.stringify(r) !== JSON.stringify(layout[`tile:${id}`]))
-        .map(([id, r]) => [`tile:${id}`, r]));
-      assert.deepEqual(writes(ff), [expected], "only saved/display differences and gesture changes are written");
+      const expected = Object.fromEntries(Object.entries(preview).map(([id, r]) => [`tile:19:${id}`, r]));
+      assert.deepEqual(writes(ff), [expected], "a new target holds every visible rectangle");
       const stored = await ff.browser.storage.sync.get(null);
       for (const id of ["saved", "group:closed", "clock", "pinned"]) {
-        assert.deepEqual(stored[`tile:${id}`], layout[`tile:${id}`], "hidden, closed and unchanged tiles keep their keys");
+        assert.deepEqual(stored[`tile:20:${id}`], layout[`tile:20:${id}`], "hidden, closed and unchanged tiles keep their keys");
       }
       ff.calls.length = 0;
       root.style.width = "2192px"; window.dispatchEvent(new Event("resize")); await flush(ff);
       assert.equal(root.querySelector(".grid").style.getPropertyValue("--cols"), "20");
-      assert.deepEqual(rect(tile(root, "group:f")), outline);
+      assert.deepEqual(rect(tile(root, "group:f")), layout["tile:20:group:f"]);
       const group = rect(tile(root, "group:e"));
-      assert.ok(outline.x >= group.x + group.w, "HARNESS remains right of GROUP");
+      assert.ok(rect(tile(root, "group:f")).x >= group.x + group.w, "HARNESS remains right of GROUP");
       assert.deepEqual(writes(ff), [], "widening alone writes nothing");
     } finally {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await flush(ff);
@@ -148,8 +146,8 @@ for (const [cols, width, x] of [[19, 2096, 14], [15, 1712, 10]]) {
       assert.deepEqual(mapped, pending, "neighbours do not jump on mapping");
       const stored = await ff.browser.storage.sync.get(null);
       for (const id of ["saved", "group:closed"]) {
-        assert.deepEqual(stored[`tile:${id}`], layout[`tile:${id}`]);
-        assert.ok(writes(ff).every(write => !(`tile:${id}` in write)), "hidden and closed tiles are not written");
+        assert.deepEqual(stored[`tile:20:${id}`], layout[`tile:20:${id}`]);
+        assert.ok(writes(ff).every(write => !(`tile:${cols}:${id}` in write)), "hidden and closed tiles are not written");
       }
       assert.equal(writes(ff).length, 1, "mapping saves once");
       await control.refresh(); await flush(ff);

@@ -89,26 +89,26 @@ async function controller({ layout = {}, settings = {}, beforeStart = () => {} }
 }
 
 test("load saves only new tiles and preserves a tile whose folder is not known yet", async () => {
-  const { ff } = await controller({ layout: { "tile:group:closed": { x: 0, y: 7, w: 3, h: 4 },
-    "tile:group:missing": { x: 3, y: 7, w: 3, h: 4 }, "tile:group:gone": { x: 0, y: 9, w: 3, h: 4 } } });
+  const { ff } = await controller({ layout: { "tile:10:group:closed": { x: 0, y: 7, w: 3, h: 4 },
+    "tile:10:group:missing": { x: 3, y: 7, w: 3, h: 4 }, "tile:10:group:gone": { x: 0, y: 9, w: 3, h: 4 } } });
   const saved = await ff.browser.storage.sync.get(null);
-  assert.ok(saved["tile:group:open"]); assert.ok(saved["tile:group:remote"]);
-  assert.ok(saved["tile:clock"]); assert.ok(saved["tile:pinned"]); assert.ok(saved["tile:saved"]);
-  assert.ok(saved["tile:group:closed"]); assert.ok(saved["tile:group:missing"]);
-  assert.deepEqual(saved["tile:group:gone"], { x: 0, y: 9, w: 3, h: 4 });
+  assert.ok(saved["tile:10:group:open"]); assert.ok(saved["tile:10:group:remote"]);
+  assert.ok(saved["tile:10:clock"]); assert.ok(saved["tile:10:pinned"]); assert.ok(saved["tile:10:saved"]);
+  assert.ok(saved["tile:10:group:closed"]); assert.ok(saved["tile:10:group:missing"]);
+  assert.deepEqual(saved["tile:10:group:gone"], { x: 0, y: 9, w: 3, h: 4 });
   assert.equal(ff.calls.filter(c => c.api === "storage.sync.remove").length, 0);
-  const writes = ff.calls.filter(c => c.api === "storage.sync.set").slice(1).flatMap(c => Object.keys(c.args[0])).sort();
-  assert.deepEqual(writes, ["tile:clock", "tile:group:open", "tile:group:remote", "tile:pinned", "tile:saved"]);
+  const writes = ff.calls.filter(c => c.api === "storage.sync.set").slice(1).flatMap(c => Object.keys(c.args[0]).filter(key => key.startsWith("tile:"))).sort();
+  assert.deepEqual(writes, ["tile:10:clock", "tile:10:group:open", "tile:10:group:remote", "tile:10:pinned", "tile:10:saved"]);
 });
 
 test("load past 400 tile keys prunes unknown folders but keeps open, saved and missing ones", async () => {
-  const layout = Object.fromEntries(Array.from({ length: 401 }, (_, i) => [`tile:group:unknown-${i}`, { x: 0, y: 9, w: 3, h: 4 }]));
-  layout["tile:group:closed"] = { x: 0, y: 7, w: 3, h: 4 };
-  layout["tile:group:missing"] = { x: 3, y: 7, w: 3, h: 4 };
+  const layout = Object.fromEntries(Array.from({ length: 401 }, (_, i) => [`tile:10:group:unknown-${i}`, { x: 0, y: 9, w: 3, h: 4 }]));
+  layout["tile:10:group:closed"] = { x: 0, y: 7, w: 3, h: 4 };
+  layout["tile:10:group:missing"] = { x: 3, y: 7, w: 3, h: 4 };
   const { ff } = await controller({ layout });
   const stored = await ff.browser.storage.sync.get(null);
   assert.deepEqual(Object.keys(stored).filter(key => key.startsWith("tile:")).sort(),
-    ["tile:clock", "tile:group:closed", "tile:group:missing", "tile:group:open", "tile:group:remote", "tile:pinned", "tile:saved"]);
+    ["tile:10:clock", "tile:10:group:closed", "tile:10:group:missing", "tile:10:group:open", "tile:10:group:remote", "tile:10:pinned", "tile:10:saved"]);
 });
 
 for (const accepted of [true, false]) {
@@ -117,7 +117,7 @@ for (const accepted of [true, false]) {
     try {
       let deleted = false;
       const { ff, node, control } = await controller({ layout: {
-        "tile:group:closed": { x: 0, y: 7, w: 3, h: 4 }, "tile:group:unrelated": { x: 3, y: 7, w: 3, h: 4 },
+        "tile:10:group:closed": { x: 0, y: 7, w: 3, h: 4 }, "tile:10:group:unrelated": { x: 3, y: 7, w: 3, h: 4 },
       }, beforeStart(ff) {
         const send = ff.browser.runtime.sendMessage;
         ff.browser.runtime.sendMessage = async message => {
@@ -127,12 +127,12 @@ for (const accepted of [true, false]) {
         };
       } });
       await control.handlers.onDeleteSaved("closed");
-      assert.ok((await ff.browser.storage.sync.get(null))["tile:group:closed"], "unconfirmed deletion must not remove the key");
+      assert.ok((await ff.browser.storage.sync.get(null))["tile:10:group:closed"], "unconfirmed deletion must not remove the key");
       node.querySelector('[data-folder-id="closed"] .saved-delete').click();
       await control.handlers.onDeleteSaved("closed"); await flush(ff);
       const stored = await ff.browser.storage.sync.get(null);
-      assert.equal(stored["tile:group:closed"] === undefined, accepted);
-      assert.deepEqual(stored["tile:group:unrelated"], { x: 3, y: 7, w: 3, h: 4 });
+      assert.equal(stored["tile:10:group:closed"] === undefined, accepted);
+      assert.deepEqual(stored["tile:10:group:unrelated"], { x: 3, y: 7, w: 3, h: 4 });
       assert.equal(ff.calls.filter(c => c.api === "storage.sync.remove").length, accepted ? 1 : 0);
     } finally { console.warn = warn; }
   });
@@ -147,8 +147,8 @@ for (const delay of [80, 650]) {
       tabs: [{ id: 10, windowId: 1, groupId: 1 }, { id: 99, windowId: 1 }] },
       message => message.type === "foxy:reconcile" ? { ok: true }
         : message.type === "foxy:saved" ? reply : undefined);
-    await ff.browser.storage.sync.set({ "tile:pinned": { x: 5, y: 0, w: 3, h: 4 },
-      "tile:group:open": { x: 0, y: 0, w: 3, h: 4 } });
+    await ff.browser.storage.sync.set({ "tile:10:pinned": { x: 5, y: 0, w: 3, h: 4 },
+      "tile:10:group:open": { x: 0, y: 0, w: 3, h: 4 } });
     await ff.settle();
     const node = await root(), paints = [];
     const replace = node.replaceChildren.bind(node);
@@ -181,7 +181,7 @@ for (const delay of [80, 650]) {
         assert.ok(paints.every(tiles => tiles.some(t => t[0] === "group:open" && t[1] === "0" && t[2] === "0" && t[3] === "3" && t[4] === "4")), "quick replies must never paint a default group place");
       }
       const stored = await ff.browser.storage.sync.get(null);
-      assert.deepEqual(stored["tile:clock"], { x: 0, y: 4, w: 5, h: 2 }, "new clock must avoid the group's saved cells");
+      assert.deepEqual(stored["tile:10:clock"], { x: 0, y: 4, w: 5, h: 2 }, "new clock must avoid the group's saved cells");
       assert.deepEqual(rectStyle(node.querySelector('[data-tile-id="group:open"]')), ["0", "0", "3", "4"]);
     } finally {
       clearTimeout(timer); release({ folders: { 1: "open" }, saved: [], missing: [] });
@@ -196,7 +196,7 @@ for (const pins of ["pending", "reject"]) {
     const warn = console.warn; console.warn = () => {};
     try {
       const { ff, node } = await controller({ layout: {
-        "tile:pinned": { x: 5, y: 0, w: 3, h: 4 }, "tile:group:open": { x: 0, y: 0, w: 3, h: 4 },
+        "tile:10:pinned": { x: 5, y: 0, w: 3, h: 4 }, "tile:10:group:open": { x: 0, y: 0, w: 3, h: 4 },
       }, beforeStart(ff) {
         const send = ff.browser.runtime.sendMessage;
         ff.browser.runtime.sendMessage = async message => {
@@ -209,7 +209,7 @@ for (const pins of ["pending", "reject"]) {
       const tile = node.querySelector('[data-tile-id="group:open"]');
       assert.ok(tile, "the saved reply, not the pin reply, releases first paint");
       assert.deepEqual(rectStyle(tile), ["0", "0", "3", "4"]);
-      assert.ok((await ff.browser.storage.sync.get(null))["tile:clock"], "an arrived saved reply allows new tile writes");
+      assert.ok((await ff.browser.storage.sync.get(null))["tile:10:clock"], "an arrived saved reply allows new tile writes");
       release(); await flush(ff);
     } finally { release(); console.warn = warn; }
   });
@@ -244,7 +244,7 @@ for (const hold of ["drag", "editor"]) {
     const { ff, node, control } = await controller();
     const original = node.querySelector('[data-group-id="1"]');
     if (hold === "drag") control.handlers.onDragState(true); else original.querySelector(".group-name").click();
-    await ff.browser.storage.sync.set({ settings: { showClock: false }, "tile:group:open": { x: 0, y: 10, w: 4, h: 3 } });
+    await ff.browser.storage.sync.set({ settings: { showClock: false }, "tile:10:group:open": { x: 0, y: 10, w: 4, h: 3 } });
     await ff.browser.storage.local.set({ deviceSettings: { density: "compact" } });
     await flush(ff);
     assert.equal(node.querySelector('[data-group-id="1"]'), original);
@@ -259,7 +259,7 @@ for (const hold of ["drag", "editor"]) {
 }
 
 test("width changes coalesce to one frame, fit without writes, and widening restores saved places", async () => {
-  const { ff, node } = await controller({ layout: { "tile:group:open": { x: 7, y: 6, w: 3, h: 4 } } });
+  const { ff, node } = await controller({ layout: { "tile:10:group:open": { x: 7, y: 6, w: 3, h: 4 } } });
   const stored = await ff.browser.storage.sync.get(null);
   let renders = 0; const replace = node.replaceChildren.bind(node); node.replaceChildren = (...args) => { renders++; replace(...args); };
   ff.calls.length = 0;
@@ -292,7 +292,7 @@ test("the user's arrangement survives one- and five-cell narrowing and restores 
     assert.equal(node.querySelector(".grid").style.getPropertyValue("--cols"), String(20 - lost));
     const origin = node.querySelector(".grid").getBoundingClientRect();
     for (const [key, saved] of Object.entries(narrowLayout)) {
-      const tile = node.querySelector(`[data-tile-id="${key.slice(5)}"]`);
+      const tile = node.querySelector(`[data-tile-id="${key.slice(8)}"]`);
       const x = saved.x >= 10 ? saved.x - lost : saved.x;
       assert.deepEqual(rectStyle(tile), [x, saved.y, saved.w, saved.h].map(String));
       near(tile.getBoundingClientRect().left - origin.left, x * 96, `${key} left`);
@@ -309,11 +309,11 @@ test("the user's arrangement survives one- and five-cell narrowing and restores 
 });
 
 test("failed storage reads keep the shown layout and settings, write nothing, and recover on a later event", async () => {
-  const { ff, node, control } = await controller({ layout: { "tile:group:open": { x: 7, y: 6, w: 3, h: 4 } } });
+  const { ff, node, control } = await controller({ layout: { "tile:10:group:open": { x: 7, y: 6, w: 3, h: 4 } } });
   const original = node.querySelector('[data-group-id="1"]'), get = ff.browser.storage.sync.get;
   const warnings = [], warn = console.warn; console.warn = (...args) => warnings.push(args);
   try {
-    await ff.browser.storage.sync.set({ settings: { showClock: false }, "tile:group:open": { x: 0, y: 10, w: 4, h: 3 } });
+    await ff.browser.storage.sync.set({ settings: { showClock: false }, "tile:10:group:open": { x: 0, y: 10, w: 4, h: 3 } });
     ff.browser.storage.sync.get = async () => { throw new Error("Storage unavailable"); };
     ff.calls.length = 0;
     await flush(ff); await control.refresh(); await flush(ff);
@@ -334,14 +334,14 @@ test("an initial layout-read failure displays defaults without overwriting or pr
   const warnings = [], warn = console.warn; console.warn = (...args) => warnings.push(args);
   let get;
   try {
-    const { ff, node } = await controller({ layout: { "tile:group:open": { x: 7, y: 6, w: 3, h: 4 }, "tile:group:unknown": { x: 0, y: 12, w: 3, h: 4 } }, beforeStart(ff) {
+    const { ff, node } = await controller({ layout: { "tile:10:group:open": { x: 7, y: 6, w: 3, h: 4 }, "tile:10:group:unknown": { x: 0, y: 12, w: 3, h: 4 } }, beforeStart(ff) {
       get = ff.browser.storage.sync.get;
       ff.browser.storage.sync.get = async keys => { if (keys === null) throw new Error("Layout unavailable"); return get(keys); };
     } });
     assert.ok(node.querySelector('[data-group-id="1"]'));
     const stored = await get(null);
-    assert.deepEqual(stored["tile:group:open"], { x: 7, y: 6, w: 3, h: 4 });
-    assert.ok(stored["tile:group:unknown"]);
+    assert.deepEqual(stored["tile:10:group:open"], { x: 7, y: 6, w: 3, h: 4 });
+    assert.ok(stored["tile:10:group:unknown"]);
     assert.equal(ff.calls.filter(c => c.api === "storage.sync.set").length, 1, "only the fixture seed write is allowed");
     assert.equal(ff.calls.filter(c => c.api === "storage.sync.remove").length, 0);
     assert.ok(warnings.some(w => w[0].startsWith("Foxy:")));
@@ -456,7 +456,7 @@ test("a failed saved-groups reply writes no tiles, since group places are unknow
     tabs: [{ id: 10, windowId: 1, groupId: 1 }, { id: 99, windowId: 1 }] },
   message => message.type === "foxy:reconcile" ? { ok: true }
     : message.type === "foxy:saved" ? { ok: false } : undefined);
-  await ff.browser.storage.sync.set({ "tile:group:open": { x: 0, y: 0, w: 3, h: 4 } }); await ff.settle();
+  await ff.browser.storage.sync.set({ "tile:10:group:open": { x: 0, y: 0, w: 3, h: 4 } }); await ff.settle();
   ff.calls.length = 0;
   const warn = console.warn; console.warn = () => {};
   try {

@@ -5,11 +5,12 @@ import { resolveTabTarget } from "./board/targets.js";
 import { openTab, closeTabs, closeGroup, bringGroupHere, renameGroup, recolorGroup,
   dropTab } from "./board/moves.js";
 
-import { buildView } from "./grid/view.js";
+import { PendingLayoutWrites, pendingPlacement, buildPendingView, showPending } from "./grid/pending.js";
 import { attachGridDrag } from "./grid/drag.js";
-import { place, changedTiles, railLimits } from "./grid/layout.js";
+import { place, railLimits } from "./grid/layout.js";
 import { renderSettings, settingActions, resetLayout } from "./settings/pane.js";
-import { tileKey, loadLayout, saveTiles, pruneTiles, watchStorage } from "./grid/store.js";
+import { targetLayout, mergeTiles, withWrites } from "./grid/layouts.js";
+import { tileKey, parseTileKey, loadLayouts, saveTiles, removeGroupTiles, watchStorage, persistLayouts } from "./grid/store.js";
 import { loadSettings, saveSetting, cardAlpha } from "./settings/store.js";
 export { renderTime, updateClock } from "./board/render.js";
 
@@ -60,6 +61,9 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let pruned = false;
   let persistence = Promise.resolve();
   const pendingTiles = new Map();
+  const pendingWrites = new PendingLayoutWrites();
+  let storedWidths = new Set();
+  const checkingTargets = new Set();
   // User commits wait for writable storage and a valid folder reply.
   const heldWrites = new Map();
   const settingsPane = root.parentElement?.querySelector(":scope > .settings-pane");
@@ -67,6 +71,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     await persistence;
     await resetLayout(api);
     pendingTiles.clear();
+    pendingWrites.clear();
     heldWrites.clear();
   });
   const page = root.parentElement?.matches(".page") ? root.parentElement : root;
@@ -115,6 +120,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let actionsInFlight = 0;
   let requestedEditGroupId = null;
   let draggedTileId;
+  let gestureView;
   const held = () => actionsInFlight > 0 || ui.dragging || ui.gridDragging || ui.editing || ui.editGroupId != null;
   // An editor holds board reads/renders, but must not hide its own removal.
   const canCheckEdit = () => actionsInFlight === 0 && !ui.dragging && !ui.gridDragging && (ui.editGroupId != null || ui.editTabId != null);
@@ -131,17 +137,18 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     deferredGroups.delete(groupId);
   }
 
-  function maySaveNewGroup(groupId, tileId) {
+  function maySaveNewGroup(groupId, tileId, k) {
     if (unloaded) return false;
     if (firstPaintGroups.has(groupId) || pendingTiles.has(groupId)) return true;
+    if (deferredGroups.has(groupId) && deferredGroups.get(groupId).k !== k) clearDeferredGroup(groupId);
     if (!deferredGroups.has(groupId)) {
-      const entry = { ready: false, timer: 0 };
+      const entry = { k, ready: false, timer: 0 };
       deferredGroups.set(groupId, entry);
       entry.timer = setTimeout(async () => {
         if (!root.isConnected) { clearDeferredGroup(groupId); return; }
         try {
           // The page receiving the drop gets the first chance to save its rect.
-          const key = tileKey(tileId), stored = await api.storage.sync.get(key);
+          const key = tileKey(k, tileId), stored = await api.storage.sync.get(key);
           if (deferredGroups.get(groupId) !== entry || unloaded) return;
           entry.ready = stored[key] === undefined;
           // Re-read and publish through the normal interaction and write guards.
@@ -173,8 +180,8 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
           catch (error) { failed = true; throw error; }
         },
       }])) };
-      gridRead = Promise.all([loadLayout(readingApi), loadSettings(readingApi)])
-        .then(([layout, settings]) => ({ layout, ...settings, version, writeVersion, writable: !failed }));
+      gridRead = Promise.all([loadLayouts(readingApi), loadSettings(readingApi)])
+        .then(([layouts, settings]) => ({ ...layouts, ...settings, version, writeVersion, writable: !failed }));
     }
     const next = await gridRead;
     gridRead = null;
@@ -187,9 +194,16 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       enqueue();
       return false;
     }
+    if (next.writable) {
+      const widths = new Set(Object.keys(next.layouts).map(Number));
+      if (storedWidths.size && !widths.size) { pendingTiles.clear(); pendingWrites.clear(); heldWrites.clear(); }
+      for (const k of storedWidths) if (!widths.has(k)) discardTarget(k);
+      storedWidths = widths;
+      checkingTargets.clear();
+    }
     gridState = !next.writable && gridState ? { ...gridState, writable: false } : next;
     // Keep held user placements visible over intervening remote changes.
-    gridState.layout = [...new Map([...gridState.layout, ...heldWrites.values()].map(tile => [tile.id, tile])).values()];
+    for (const [k, writes] of heldWrites) gridState.layouts = withWrites(gridState.layouts, k, [...writes.values()]);
     loadedVersion = next.version;
     pendingGrid = false;
     return true;
@@ -327,7 +341,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       const nextBoard = buildBoard({ ...nextSnapshot, ...savedReply, otherWindows: gridState.synced.otherWindows });
       snapshot = nextSnapshot;
       const liveGroups = new Set(groups.map(group => group.id));
-      for (const id of pendingTiles.keys()) if (!liveGroups.has(id)) pendingTiles.delete(id);
+      for (const id of pendingTiles.keys()) if (!liveGroups.has(id)) { pendingTiles.delete(id); pendingWrites.removeGroup(id); }
       for (const id of deferredGroups.keys()) if (!liveGroups.has(id)) clearDeferredGroup(id);
       self = current;
       board = nextBoard;
@@ -354,50 +368,50 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     board = buildBoard({ ...snapshot, ...savedReply, otherWindows: gridState.synced.otherWindows });
     firstPaintGroups ??= new Set(board.columns.map(group => group.id));
     for (const id of deferredGroups.keys()) {
-      if (gridState.layout.some(tile => tile.id === `group:${savedReply.folders?.[id]}`)) clearDeferredGroup(id);
+      if (gridState.layouts[deferredGroups.get(id).k]?.tiles.some(tile => tile.id === `group:${savedReply.folders?.[id]}`)) clearDeferredGroup(id);
     }
     const options = { ...gridState, contentWidth: pageWidth(),
       folders: savedReply.folders ?? {} };
     view = buildGridView(options);
+    const inUse = view.k;
+    for (const [id, entry] of deferredGroups) {
+      if (entry.k !== inUse) {
+        const tileId = `group:${options.folders[id]}`;
+        if (view.newTiles.some(tile => tile.id === tileId)) maySaveNewGroup(id, tileId, inUse);
+        else clearDeferredGroup(id);
+      }
+    }
     const knowsFolders = hasValidSavedReply && validFoldersReply(savedReply);
     const writable = save && gridState.writable && knowsFolders;
-    let writes = [], prune = false;
+    const batches = new Map();
+    let prune = false, migrate = false;
+    function collect(k, tiles) {
+      if (!tiles.length) return;
+      const previous = batches.get(k) ?? [];
+      batches.set(k, mergeTiles(previous, tiles)
+        .map(({ id, x, y, w, h }) => ({ id, x, y, w, h })));
+    }
     if (writable) {
-      const groups = new Map(board.columns.map(group => [group.id, group]));
-      const mapped = [...pendingTiles.keys()].filter(id => groups.has(id) && savedReply.folders[id])
-        .map(id => groups.get(id));
-      // Start from the shown layout, not saved off-screen/hidden rectangles or
-      // pending display pushes. The new group takes priority over existing tiles.
-      const beforeView = view;
-      const mappedIds = new Set(mapped.map(group => `group:${savedReply.folders[group.id]}`));
-      const shownBefore = beforeView.tiles.filter(tile => !mappedIds.has(tile.id) && !tile.id.startsWith("local:"));
-      let shownAfter = shownBefore;
-      for (const group of mapped) {
-        shownAfter = place(shownAfter, `group:${savedReply.folders[group.id]}`, pendingTiles.get(group.id), view.cols);
-      }
-      const fresh = beforeView.newTiles.filter(tile => !mappedIds.has(tile.id));
-      const visibleIds = new Set(shownBefore.map(tile => tile.id));
-      const savedVisible = gridState.layout.filter(tile => visibleIds.has(tile.id));
-      const changed = mapped.length ? changedTiles(savedVisible, shownAfter).filter(tile => !tile.id.startsWith("local:")) : [];
-      writes = [...new Map([...fresh, ...heldWrites.values(), ...changed].map(tile => [tile.id, tile])).values()]
+      const mapped = pendingWrites.resolve(options.folders, checkingTargets);
+      const mappedIds = new Set([...pendingTiles.keys()].map(id => `group:${options.folders[id]}`));
+      const fresh = view.newTiles.filter(tile => !mappedIds.has(tile.id))
         .filter(tile => {
-          if (!tile.id.startsWith("group:") || gridState.layout.some(saved => saved.id === tile.id)) return true;
+          if (!tile.id.startsWith("group:")) return true;
           const group = board.columns.find(group => tile.id === `group:${options.folders[group.id]}`);
-          return maySaveNewGroup(group.id, tile.id);
-        })
-        .map(({ id, x, y, w, h }) => ({ id, x, y, w, h }));
-      // Hold placements in memory even on a storage failure, without retrying in
-      // a loop or writing twice before storage.onChanged is delivered.
-      if (writes.length) {
-        gridState.layout = [...new Map([...gridState.layout, ...writes].map(tile => [tile.id, tile])).values()];
-        // A gesture can start before the next render; it compares against this.
-        view.saved = gridState.layout;
-      }
-      heldWrites.clear();
-      for (const group of mapped) pendingTiles.delete(group.id);
-      if (mapped.length) view = buildGridView({ ...options, layout: gridState.layout });
+          return maySaveNewGroup(group.id, tile.id, view.k);
+        });
+      if (!checkingTargets.has(view.k)) collect(view.k, fresh);
+      for (const [k, writes] of heldWrites) if (!checkingTargets.has(k)) collect(k, [...writes.values()]);
+      for (const [k, writes] of mapped.batches) collect(k, writes);
+      for (const [k, writes] of batches) gridState.layouts = withWrites(gridState.layouts, k, writes);
+      for (const k of batches.keys()) heldWrites.delete(k);
+      for (const id of mapped.groups) pendingTiles.delete(id);
+      // Saved comparisons and display must use the just-committed target layout.
+      view = buildGridView({ ...options, layouts: gridState.layouts });
       prune = !pruned;
       if (prune) pruned = true;
+      migrate = !!gridState.legacy;
+      if (migrate) gridState.legacy = null;
     }
     // Pending rectangles have placement priority for display too, but local ids
     // and any tiles they push are never written until a valid mapping arrives.
@@ -425,14 +439,14 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       renderSettings(settingsPane, { synced: gridState.synced, device: gridState.device,
         railMax: railLimits(view.total).max }, paneHandlers);
     }
-    if (writes.length || prune) {
+    {
       const keep = new Set([...Object.values(savedReply.folders ?? {}),
         ...board.saved.map(group => group.folderId), ...board.missing.map(group => group.folderId)]);
+      const evict = writable && Object.keys(gridState.layouts).length > 4;
       persistence = persistence.then(async () => {
-        try { await saveTiles(api, writes); }
-        finally { if (writes.length) ++tileWriteVersion; }
-        if (prune) await pruneTiles(api, keep);
-      }).catch(() => {}); // The stores log each failed write with the Foxy prefix.
+        try { await persistLayouts(api, { inUse, batches, migrate, prune, keep, evict }); }
+        finally { if (batches.size || migrate) ++tileWriteVersion; }
+      }).catch(() => {}); // Stores log failed writes with the Foxy prefix.
     }
   }
 
@@ -500,8 +514,10 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
         ]);
         if (reply?.ok !== true) throw new Error(`${message.type} was not accepted`);
         if (deleting) {
-          await api.storage.sync.remove(tileKey(`group:${id}`));
-          gridState.layout = gridState.layout.filter(tile => tile.id !== `group:${id}`);
+          await removeGroupTiles(api, id);
+          for (const layout of Object.values(gridState.layouts)) {
+            layout.tiles = layout.tiles.filter(tile => tile.id !== `group:${id}`);
+          }
         }
         return reply;
       } finally {
@@ -567,12 +583,19 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
         console.debug("Foxy: ignored drop of a tab not on the board", tabId);
         return;
       }
+      const source = view ?? buildGridView({ ...gridState, contentWidth: pageWidth(), folders: savedReply.folders ?? {} });
+      const before = { ...source, tiles: source.tiles.map(tile => ({ ...tile })) };
       return action(async () => {
         const target = resolveTabTarget(board, { ...drop, tabId }, self.windowId);
         const result = await dropTab(api, tabId, target);
         if (result.ok && result.groupId != null) {
           requestedEditGroupId = result.groupId;
-          if (result.rect) pendingTiles.set(result.groupId, result.rect);
+          if (result.rect) {
+            const id = `local:${result.groupId}`, placed = place(before.tiles, id, result.rect, before.cols);
+            const target = targetLayout(before.tiles, before.saved, placed, before.k, before.cols);
+            pendingWrites.capture(target);
+            pendingTiles.set(result.groupId, pendingPlacement(result.rect, before, target.k));
+          }
         }
         return result;
       });
@@ -592,25 +615,12 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     },
   };
 
-  function buildGridView(options, pending = pendingTiles) {
-    // Pending groups enter through place after fit, never at phantom first-free
-    // spots or through fit's overlap repair, which may move a neighbour sideways.
-    return buildView({ ...board, columns: board.columns.filter(group => !pending.has(group.id)) }, options);
-  }
+  const buildGridView = (options, pending = pendingTiles) => buildPendingView(board, options, pending);
+  const displayPending = (next, pending = pendingTiles) => showPending(board, savedReply.folders ?? {}, next, pending);
 
-  function displayPending(next, pending = pendingTiles) {
-    const metadata = new Map(next.tiles.map(tile => [tile.id, tile]));
-    for (const [groupId, rect] of pending) {
-      const group = board.columns.find(group => group.id === groupId);
-      if (!group) continue;
-      const folder = savedReply.folders?.[groupId], id = folder ? `group:${folder}` : `local:${groupId}`;
-      metadata.set(id, { id, kind: "group", group });
-      next.tiles = place(next.tiles, id, rect, next.cols);
-    }
-    const order = ["clock", "pinned", ...board.columns.map(group => savedReply.folders?.[group.id]
-      ? `group:${savedReply.folders[group.id]}` : `local:${group.id}`), "saved"];
-    next.tiles = next.tiles.map(tile => ({ ...metadata.get(tile.id), ...tile }))
-      .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  function discardTarget(k) {
+    heldWrites.delete(k); pendingWrites.discard(k);
+    for (const [id, rect] of pendingTiles) if (rect.k === k) pendingTiles.delete(id);
   }
 
   function previewTiles(tiles) {
@@ -625,16 +635,17 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   function tileChangeState(changed) {
     const rectangles = changed.map(({ id, x, y, w, h }) => ({ id, x, y, w, h }));
     const pending = new Map(pendingTiles);
-    for (const tile of rectangles) {
+    const before = gestureView ?? view;
+    const placed = mergeTiles(before.tiles, rectangles);
+    const target = targetLayout(before.tiles, before.saved, placed, before.k, before.cols);
+    for (const tile of target.writes) {
       if (tile.id.startsWith("local:")) {
         const group = board.columns.find(group => tile.id === `local:${group.id}`);
-        if (group) pending.set(group.id, tile);
+        if (group) pending.set(group.id, pendingPlacement(tile, before, target.k));
       }
     }
-    // An unmapped tile and its pushes follow the pending-placement write rule.
-    const writes = draggedTileId?.startsWith("local:") ? [] : rectangles.filter(tile => !tile.id.startsWith("local:"));
-    const layout = [...new Map([...gridState.layout, ...writes].map(tile => [tile.id, tile])).values()];
-    return { pending, writes, layout };
+    const writes = draggedTileId?.startsWith("local:") ? [] : target.writes.filter(tile => !tile.id.startsWith("local:"));
+    return { pending, writes, k: target.k, placed, target };
   }
 
   const detachGridDrag = attachGridDrag(root, {
@@ -644,29 +655,37 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       catch { return false; }
     },
     onState: (active, id) => {
-      if (active) draggedTileId = id;
+      if (active) {
+        draggedTileId = id;
+        gestureView = { ...view, tiles: view.tiles.map(tile => ({ ...tile })) };
+      }
       interaction("gridDragging", active);
-      if (!active) draggedTileId = undefined;
+      if (!active) { draggedTileId = undefined; gestureView = undefined; }
     },
     onPreview: changed => {
-      const { pending, layout } = tileChangeState(changed);
-      const preview = buildGridView({ ...gridState, layout, contentWidth: pageWidth(),
+      const { pending, writes, k } = tileChangeState(changed);
+      const layouts = withWrites(gridState.layouts, k, writes);
+      const preview = buildGridView({ ...gridState, layouts, contentWidth: pageWidth(),
         folders: savedReply.folders ?? {} }, pending);
       displayPending(preview, pending);
       previewTiles(preview.tiles);
     },
     onCancel: () => { pendingView = true; },
     onCommit: changed => {
-      const { pending, writes, layout } = tileChangeState(changed);
+      const { pending, writes, k, target } = tileChangeState(changed);
+      pendingWrites.capture(target);
       for (const [groupId, rect] of pending) pendingTiles.set(groupId, rect);
-      gridState.layout = layout;
       if (!writes.length) return;
-      if (!gridState.writable || !hasValidSavedReply || !validFoldersReply(savedReply)) {
-        for (const tile of writes) heldWrites.set(tile.id, tile);
+      gridState.layouts = withWrites(gridState.layouts, k, writes);
+      if (!gridState.writable || checkingTargets.has(k) || !hasValidSavedReply || !validFoldersReply(savedReply)) {
+        const previous = heldWrites.get(k) ?? new Map();
+        for (const tile of writes) previous.set(tile.id, tile);
+        heldWrites.set(k, previous);
         return;
       }
+      const inUse = gestureView.k;
       persistence = persistence.then(async () => {
-        try { await saveTiles(api, writes); }
+        try { await saveTiles(api, k, writes, { inUse }); }
         finally { ++tileWriteVersion; }
       }).catch(() => {});
     },
@@ -684,7 +703,13 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     },
   });
 
-  watchStorage(api, () => {
+  watchStorage(api, (keys, changes) => {
+    for (const key of keys) {
+      const k = parseTileKey(key)?.k ?? (/^layout:[1-9]\d*$/.test(key) ? Number(key.slice(7)) : null);
+      if (k === null) continue;
+      if (changes[key].newValue === undefined) checkingTargets.add(k);
+      else storedWidths.add(k);
+    }
     ++storageVersion;
     pendingGrid = true;
     enqueue();
@@ -705,6 +730,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
 
   const onGroupRemoved = group => {
     pendingTiles.delete(group.id);
+    pendingWrites.removeGroup(group.id);
     clearDeferredGroup(group.id);
     if (group.id === ui.editGroupId) releaseMissingEdit();
     schedule();
