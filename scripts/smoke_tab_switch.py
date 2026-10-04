@@ -109,6 +109,12 @@ def run(root=ROOT):
         with (profile / "user.js").open("a") as prefs:
             prefs.write('user_pref("extensions.background.idle.timeout", 3000);\n')
         with firefox_environment(scratch) as env, (scratch / "firefox.log").open("wb") as log:
+            # An open native port keeps the background awake, so the idle-wake
+            # check runs without the agent host: its socket directory cannot be
+            # created (a file), the host exits and the port closes.
+            blocker = scratch / "no-agent"
+            blocker.write_text("")
+            env = {**env, "FOXY_AGENT_SOCK": str(blocker / "s")}
             process = subprocess.Popen([smoke.FIREFOX, "--headless", "--no-remote", "--marionette",
                 "--remote-allow-system-access", "-profile", str(profile), "about:blank"],
                 env=env, start_new_session=True, stdout=log, stderr=log)
