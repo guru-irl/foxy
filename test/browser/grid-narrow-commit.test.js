@@ -24,7 +24,9 @@ async function setup(width, settings = {}) {
   const layout = { ...narrowLayout,
     "tile:20:saved": { x: 14, y: 0, w: 5, h: 10 },
     "tile:20:group:closed": { x: 15, y: 0, w: 5, h: 10 } };
-  await ff.browser.storage.sync.set({ ...layout, settings }); await ff.settle();
+  // These geometry fixtures use Custom 80, independent of the S default.
+  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
+  await ff.browser.storage.sync.set({ ...layout, settings: { railCells: 3, ...settings } }); await ff.settle();
   const root = document.createElement("div"); root.className = "board";
   root.style.cssText = `width:${width}px;height:600px`;
   fixture().append(root);

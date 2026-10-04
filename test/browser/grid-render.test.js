@@ -81,7 +81,8 @@ async function controller({ layout = {}, settings = {}, beforeStart = () => {} }
       { id: 20, windowId: 2, groupId: 2 }, { id: 21, windowId: 2, pinned: true }, { id: 22, windowId: 2 },
       { id: 99, windowId: 1 }] }, message => message.type === "foxy:reconcile" ? { ok: true }
       : message.type === "foxy:saved" ? { folders: { 1: "open", 2: "remote" }, saved: board.saved, missing: [{ folderId: "missing" }] } : undefined);
-  await ff.browser.storage.sync.set({ ...layout, settings }); await ff.settle();
+  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
+  await ff.browser.storage.sync.set({ ...layout, settings: { railCells: 3, ...settings } }); await ff.settle();
   beforeStart(ff);
   const node = await root(); const { createController } = await import("../../extension/src/main.js");
   const control = createController(node, ff.browser); await control.refresh(); await flush(ff);
@@ -147,7 +148,7 @@ for (const delay of [80, 650]) {
       tabs: [{ id: 10, windowId: 1, groupId: 1 }, { id: 99, windowId: 1 }] },
       message => message.type === "foxy:reconcile" ? { ok: true }
         : message.type === "foxy:saved" ? reply : undefined);
-    await ff.browser.storage.sync.set({ "tile:10:pinned": { x: 5, y: 0, w: 3, h: 4 },
+    await ff.browser.storage.sync.set({ settings: { railCells: 3 }, "tile:10:pinned": { x: 5, y: 0, w: 3, h: 4 },
       "tile:10:group:open": { x: 0, y: 0, w: 3, h: 4 } });
     await ff.settle();
     const node = await root(), paints = [];
@@ -163,6 +164,7 @@ for (const delay of [80, 650]) {
       return set(entries);
     };
     const { createController } = await import("../../extension/src/main.js");
+    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
     const control = createController(node, ff.browser);
     const timer = setTimeout(() => release({ folders: { 1: "open" }, saved: [], missing: [] }), delay);
     try {
@@ -283,7 +285,8 @@ test("the user's arrangement survives one- and five-cell narrowing and restores 
       { id: 90, windowId: 1, pinned: true }, { id: 99, windowId: 1 }] },
     message => message.type === "foxy:reconcile" ? { ok: true }
       : message.type === "foxy:saved" ? { folders: narrowFolders, saved: [], missing: [] } : undefined);
-  await ff.browser.storage.sync.set(narrowLayout); await ff.settle();
+  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
+  await ff.browser.storage.sync.set({ ...narrowLayout, settings: { railCells: 3 } }); await ff.settle();
   const node = await root(); node.style.width = "2192px"; // 23 total, 20 grid columns.
   const { createController } = await import("../../extension/src/main.js");
   const control = createController(node, ff.browser); await control.refresh(); await flush(ff);
@@ -461,6 +464,7 @@ test("a failed saved-groups reply writes no tiles, since group places are unknow
   const warn = console.warn; console.warn = () => {};
   try {
     const node = await root(); const { createController } = await import("../../extension/src/main.js");
+    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
     const control = createController(node, ff.browser); await control.refresh(); await flush(ff);
     await new Promise(resolve => setTimeout(resolve, 600)); await flush(ff);
     assert.ok(node.querySelector(".grid .tile"), "the board still paints");

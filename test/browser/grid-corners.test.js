@@ -22,11 +22,13 @@ async function setup({ rect = original, width = 1232, widgets = false,
     message => message.type === "foxy:reconcile" ? { ok: true }
       : message.type === "foxy:saved" ? { folders: { 1: "a", 2: "b" }, missing: [],
         saved: widgets ? [{ folderId: "closed", title: "Closed" }] : [] } : undefined);
+  // These geometry fixtures use Custom 80, independent of the S default.
+  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
   await ff.browser.storage.sync.set({
     "tile:10:group:a": rect, "tile:10:group:b": neighbour,
     "tile:10:clock": { x: 6, y: 0, w: 4, h: 2 }, "tile:10:pinned": { x: 6, y: 2, w: 4, h: 2 },
     "tile:10:saved": { x: 6, y: 4, w: 4, h: 2 },
-    settings: { showClock: widgets, showPinned: widgets, showSaved: widgets },
+    settings: { railCells: 3, showClock: widgets, showPinned: widgets, showSaved: widgets },
   });
   await ff.settle();
   const root = document.createElement("div"); root.className = "board";
@@ -228,7 +230,7 @@ for (const { corner, dx, dy, target } of corners) {
           pointer("pointermove", document, shifted(start, dx * 140, dy * 123)); await Promise.resolve();
           assert.equal(changes.length, 0, "same target leaves neighbours and dots untouched");
         } finally { observer.disconnect(); }
-        await ff.browser.storage.sync.set({ settings: { transparency: "high", showClock: false, showPinned: false, showSaved: false } });
+        await ff.browser.storage.sync.set({ settings: { railCells: 3, transparency: "high", showClock: false, showPinned: false, showSaved: false } });
         await flush(ff); ff.calls.length = 0;
         assert.equal(tile(root), node); assert.equal(root.style.getPropertyValue("--card-alpha-dark"), "0.6");
         assert.equal(control.ui.gridDragging, true);

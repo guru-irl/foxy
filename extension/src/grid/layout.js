@@ -1,5 +1,5 @@
 export const GAP = 16;
-export const CELL_PRESETS = { S: 48, M: 80, L: 112, XL: 144 };
+export const CELL_PRESETS = { S: 48 };
 
 export function kindOf(id) {
   return ["pinned", "saved", "clock"].includes(id) ? id : "group";

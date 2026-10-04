@@ -22,6 +22,8 @@ async function setup({ folders = { 1: "one", 2: "two" }, width = 1232, railCells
   const host = document.createElement("div"), node = document.createElement("div"), pane = document.createElement("aside");
   host.className = "page"; host.style.cssText = `position:fixed;top:0;right:0;width:${width}px`;
   node.className = "board";
+  // These geometry fixtures use Custom 80, independent of the S default.
+  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
   await ff.browser.storage.sync.set({ settings: { railCells } }); await ff.settle();
   pane.className = "settings-pane"; pane.hidden = true;
   host.append(node, pane); fixture().append(host);
@@ -161,8 +163,6 @@ test("settings buttons have distinct neutral focus fills in both schemes without
 // Each row catches a wrong storage scope/key/value or missing live board apply.
 for (const [key, value, scope, apply] of [
   ["cellSize", "S", "device", node => assert.equal(node.querySelector(".grid").style.getPropertyValue("--cell"), `${1248 / 19 - 16}px`)],
-  ["cellSize", "L", "device", node => assert.equal(node.querySelector(".grid").style.getPropertyValue("--cell"), "122.66666666666666px")],
-  ["cellSize", "XL", "device", node => assert.equal(node.querySelector(".grid").style.getPropertyValue("--cell"), `${1248 / 7 - 16}px`)],
   ["density", "compact", "device", node => assert.equal(node.style.getPropertyValue("--row"), "24px")],
   ["timeFormat", "12", "synced", node => assert.ok(/AM|PM/.test(node.querySelector(".clock-time").textContent))],
   ["transparency", "low", "synced", node => assert.equal(node.style.getPropertyValue("--card-alpha-dark"), "0.75")],
@@ -292,9 +292,12 @@ test("custom cell validates integer bounds and rail stepper stays within whole-c
   for (let i = 0; i < 12; i++) { plus.click(); await flush(ff); }
   assert.equal(plus.disabled, true);
   assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 11);
-  choice(pane, "cellSize", "XL").click(); await flush(ff);
+  field.value = "144"; field.dispatchEvent(new Event("change")); await flush(ff);
   assert.equal(pane.querySelector('[data-rail="value"]').textContent, "3");
-  assert.equal(plus.disabled, true); assert.equal(field.hidden, true);
+  assert.equal(plus.disabled, true); assert.equal(field.hidden, false);
+  choice(pane, "cellSize", "S").click(); await flush(ff);
+  assert.equal(field.hidden, true); assert.equal(plus.disabled, true);
+  assert.equal(pane.querySelector('[data-rail="value"]').textContent, "9");
 });
 test("a failed save restores the stored control, logs Foxy and never applies to board", async () => {
   const { ff, node, pane } = await setup(); node.querySelector(".settings-cell").click();
@@ -367,7 +370,7 @@ test("a failed reset logs and keeps tile keys, with the reset button usable agai
 test("reset removes tile keys and layouts once, and an open board places visible tiles in spec order", async () => {
   const { ff, node, pane } = await setup();
   await ff.browser.storage.sync.set({ "tile:10:hidden": { x: 0, y: 70, w: 3, h: 4 }, keep: 7,
-    settings: { showPinned: false }, "tile:10:clock": { x: 0, y: 70, w: 5, h: 2 } }); await flush(ff);
+    settings: { railCells: 3, showPinned: false }, "tile:10:clock": { x: 0, y: 70, w: 5, h: 2 } }); await flush(ff);
   node.querySelector(".settings-cell").click(); const reset = pane.querySelector(".settings-reset");
   const before = ff.calls.length; reset.click(); assert.equal(reset.textContent, "Confirm reset");
   assert.equal(ff.calls.slice(before).filter(c => c.api === "storage.sync.remove").length, 0);
@@ -563,7 +566,7 @@ async function newtab(ff, width, height = 720) {
 
 // The controller must persist target-setting defaults, not viewport-dependent
 // stretched defaults, when the same group is first mapped on a new device.
-test("new groups save the same XL default size at 1600 and 1000 px", async () => {
+test("new groups save the same Custom 144 default size at 1600 and 1000 px", async () => {
   const sizes = [];
   for (const width of [1600, 1000]) {
     const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], selfTabId: 99,
@@ -571,7 +574,8 @@ test("new groups save the same XL default size at 1600 and 1000 px", async () =>
       tabs: [{ id: 10, windowId: 1, groupId: 1 }, { id: 99, windowId: 1 }] },
       message => message.type === "foxy:reconcile" ? { ok: true } : message.type === "foxy:saved"
         ? { folders: { 1: "one" }, saved: [], missing: [] } : undefined);
-    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "XL" } });
+    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 144 } });
+    await ff.browser.storage.sync.set({ settings: { railCells: 3 } });
     const frame = await newtab(ff, width);
     try {
       const k = Math.floor((width + 16) / 160) - 3;
@@ -586,13 +590,13 @@ test("new groups save the same XL default size at 1600 and 1000 px", async () =>
 
 // Keeping the old page minimum while measuring makes a second narrow resize
 // reuse the previous overflow floor instead of the new viewport width.
-test("XL narrowing from 401 to 300 px matches a fresh 300 px render", async () => {
+test("Custom 144 narrowing from 401 to 300 px matches a fresh 300 px render", async () => {
   const makeFirefox = async () => {
     const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], selfTabId: 99,
       groups: [], tabs: [{ id: 99, windowId: 1 }] },
       message => message.type === "foxy:reconcile" ? { ok: true } : message.type === "foxy:saved"
         ? { folders: {}, saved: [], missing: [] } : undefined);
-    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "XL" } });
+    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 144 } });
     return ff;
   };
   const ff = await makeFirefox(), frame = await newtab(ff, 401);
@@ -603,7 +607,7 @@ test("XL narrowing from 401 to 300 px matches a fresh 300 px render", async () =
       cell: parseFloat(frame.contentWindow.getComputedStyle(board).getPropertyValue("--cell")) };
   };
   try {
-    assert.equal(geometry(frame).cell, 192.5, "initial XL stretch at 401 px");
+    assert.equal(geometry(frame).cell, 192.5, "initial Custom 144 stretch at 401 px");
     const before = await ff.browser.storage.sync.get(null);
     frame.style.width = "300px"; await flush(ff); await flush(ff);
     const freshFirefox = await makeFirefox();
@@ -724,6 +728,38 @@ for (const width of [175, 240]) {
     assert.ok(Math.abs(wideGrid.width + 16 + wideRail.width - widePage.width) < 0.5,
       `widened cells meet the page edge: ${wideGrid.width} + 16 + ${wideRail.width} vs ${widePage.width}`);
     assert.deepEqual(await ff.browser.storage.sync.get(null), before);
+  });
+}
+
+// Removed presets must not be selectable in either settings surface. A
+// legacy value is display-only until a device change, not a load-time write.
+for (const page of ["board", "options"]) {
+  test(`${page} offers only S and Custom and applies a legacy cell migration lazily`, async () => {
+    const f = await setup();
+    await f.ff.browser.storage.local.set({ deviceSettings: { cellSize: "XL", customCell: 144 } });
+    await flush(f.ff);
+    const before = writes(f.ff).length;
+    let pane = f.pane;
+    if (page === "board") f.node.querySelector(".settings-cell").click();
+    else pane = (await options(f.ff)).contentDocument.querySelector(".settings-pane");
+    assert.deepEqual([...pane.querySelectorAll('[data-key="cellSize"] button')].map(n => n.textContent), ["S", "Custom"]);
+    assert.equal(choice(pane, "cellSize", "S").getAttribute("aria-pressed"), "true");
+    const field = pane.querySelector('input[data-key="customCell"]');
+    assert.equal(field.hidden, true);
+    assert.equal(f.node.querySelector(".grid").style.getPropertyValue("--cell"), `${1248 / 19 - 16}px`);
+    assert.equal(writes(f.ff).length, before);
+    assert.equal((await f.ff.browser.storage.local.get("deviceSettings")).deviceSettings.cellSize, "XL");
+    choice(pane, "density", "compact").click(); await flush(f.ff);
+    assert.equal((await f.ff.browser.storage.local.get("deviceSettings")).deviceSettings.cellSize, "S");
+    choice(pane, "cellSize", "custom").click(); await flush(f.ff);
+    assert.equal(field.hidden, false); assert.equal(field.value, "144");
+    assert.equal(f.node.querySelector(".grid").style.getPropertyValue("--cell"), `${1248 / 7 - 16}px`);
+    field.value = "80"; field.dispatchEvent(new field.ownerDocument.defaultView.Event("change")); await flush(f.ff);
+    assert.equal(f.node.querySelector(".grid").style.getPropertyValue("--cell"), "80px");
+    choice(pane, "cellSize", "S").click(); await flush(f.ff);
+    assert.equal(field.hidden, true);
+    assert.equal(f.node.querySelector(".grid").style.getPropertyValue("--cell"), `${1248 / 19 - 16}px`);
+    assert.equal((await f.ff.browser.storage.local.get("deviceSettings")).deviceSettings.cellSize, "S");
   });
 }
 

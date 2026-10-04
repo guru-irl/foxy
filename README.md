@@ -31,10 +31,12 @@ Version 3.2.0. Distributed as an unlisted add-on. Design: `docs/superpowers/spec
 Open the gear in the bottom right corner. Changes apply immediately; Escape or the gear closes the pane.
 The same settings are in about:addons, Foxy, Options.
 
+After updating, boards saved with M, L or XL cells show smaller tiles; resize them or use Reset layout.
+
 | Setting | Values | Scope |
 |---|---|---|
-| Cell size | S 48, M 80, L 112, XL 144; custom 40 to 240 px (cells stretch a little to fill the width) | Per device |
-| TABS rail width | 2 cells to half the available width; default 3 | Synced |
+| Cell size | S 48 px (default); Custom 40 to 240 px (cells stretch a little to fill the width) | Per device |
+| TABS rail width | 2 cells to half the available width; default 5 | Synced |
 | Show clock, pinned, saved | On or off for each | Synced |
 | Reset layout | Click twice within 3 seconds; clears saved tile places for every width | Synced |
 | Time format | 24-hour or 12-hour | Synced |

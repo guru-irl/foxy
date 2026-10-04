@@ -82,7 +82,9 @@ function luminance(rgb) {
 async function flush(ff) { await ff.settle(); await nextFrame(); await nextFrame(); }
 async function controller(set = setup(), listener, layout = {}, options = {}) {
   const ff = createFirefox(set, listener), root = await makeRoot();
-  await ff.browser.storage.sync.set(layout); await ff.settle();
+  // These geometry fixtures use Custom 80, independent of the S default.
+  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
+  await ff.browser.storage.sync.set({ ...layout, settings: { railCells: 3, ...layout.settings } }); await ff.settle();
   const { createController } = await import("../../extension/src/main.js");
   const control = createController(root, ff.browser, undefined, options);
   await control.refresh();
@@ -470,7 +472,7 @@ test("empty-cell drop shows the unmapped tile at its rect, opens its editor and 
     assert.deepEqual(rectOf(tile), { x: 4, y: 2, w: 3, h: 4 });
     assert.ok(tile.querySelector(".name-editor"), "new group opens its name editor");
     assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set"), [], "unmapped placement is display-only");
-    assert.deepEqual(tileEntries(await ff.browser.storage.sync.get(null)), dropLayout);
+    assert.deepEqual(tileEntries(await ff.browser.storage.sync.get(null)), { ...dropLayout, settings: { railCells: 3 } });
     setReply({ saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote", [groupId]: "new" } });
     ff.fire("bookmarks.onCreated", "new", { id: "new", type: "folder" }); await flush(ff);
     assert.ok(root.querySelector(`[data-tile-id="local:${groupId}"]`), "mapping update is held by the editor");
@@ -483,7 +485,7 @@ test("empty-cell drop shows the unmapped tile at its rect, opens its editor and 
       "tile:13:pinned": { x: 5, y: 6, w: 3, h: 4 },
       "tile:13:group:remote": { x: 3, y: 10, w: 3, h: 4 },
     });
-    assert.deepEqual(await ff.browser.storage.sync.get(null), { ...dropLayout, ...writes[0].args[0] });
+    assert.deepEqual(await ff.browser.storage.sync.get(null), { ...dropLayout, settings: { railCells: 3 }, ...writes[0].args[0] });
     await control.refresh(); await flush(ff); await flush(ff);
     assert.equal(ff.calls.filter(c => c.api === "storage.sync.set").length, 1, "mapped pending entry is consumed once");
     assert.deepEqual(ff.errors, []);
@@ -523,7 +525,8 @@ for (const order of ["dropper-first", "dropper-second"]) {
     const { createController } = await import("../../extension/src/main.js");
     const pages = [];
     try {
-      await ff.browser.storage.sync.set(dropLayout); await ff.settle();
+      await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
+      await ff.browser.storage.sync.set({ ...dropLayout, settings: { railCells: 3 } }); await ff.settle();
       for (let i = 0; i < 2; i++) {
         const root = await makeRoot();
         const control = createController(root, ff.browser, undefined, timer.options);
@@ -1055,9 +1058,9 @@ test("a failed key check for a post-paint group retries on a later render instea
   } finally { console.warn = warn; if (root) { endName(root); root.remove(); } timer.restore(); }
 });
 
-// Using the stretched cell for defaults loses a row except at the exact XL pitch.
+// Using the stretched cell for defaults loses a row except at the exact Custom 144 pitch.
 for (const [width, pitch] of [[1000, 1016 / 6], [1366, 1382 / 8], [1584, 160], [1600, 161.6]]) {
-  test(`XL tab drop at ${width}px previews and saves the setting's 2 by 3 default`, async () => {
+  test(`Custom 144 tab drop at ${width}px previews and saves the setting's 2 by 3 default`, async () => {
     let reply = { folders: {}, saved: [], missing: [] };
     const set = { windows: [{ id: 1, focused: true }], selfTabId: 99, groups: [],
       tabs: [{ id: 15, windowId: 1 }, { id: 99, windowId: 1 }] };
@@ -1065,7 +1068,7 @@ for (const [width, pitch] of [[1000, 1016 / 6], [1366, 1382 / 8], [1584, 160], [
       ? { ok: true } : message.type === "foxy:saved" ? reply : undefined,
       { settings: { showClock: false, showPinned: false, showSaved: false } });
     root.style.width = `${width}px`;
-    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "XL" } });
+    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 144 } });
     await control.refresh(); await flush(ff); await flush(ff);
     const grid = root.querySelector(".grid"), bounds = grid.getBoundingClientRect();
     const coords = { clientX: bounds.left + 1.2 * pitch, clientY: bounds.top + 1.2 * pitch };

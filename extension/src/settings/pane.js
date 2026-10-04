@@ -94,7 +94,7 @@ export function renderSettings(container, state, handlers) {
       pane.controls.push(() => node.setAttribute("aria-checked", String(pane.state.synced[key])));
     }
     const grid = section("Grid");
-    segmented(grid, "Cell size", "device", "cellSize", [["S", "S"], ["M", "M"], ["L", "L"], ["XL", "XL"], ["custom", "Custom"]], true);
+    segmented(grid, "Cell size", "device", "cellSize", [["S", "S"], ["custom", "Custom"]], true);
     const custom = el("div", "setting setting-custom"), customLabel = el("label", "setting-label", "Cell size in px");
     const field = el("input", "settings-number"); field.type = "number"; field.min = "40"; field.max = "240"; field.step = "1";
     field.id = `setting-${++sequence}`; field.dataset.key = "customCell"; customLabel.htmlFor = field.id;

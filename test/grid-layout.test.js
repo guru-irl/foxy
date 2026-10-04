@@ -7,25 +7,25 @@ import {
 
 import * as geometry from "../extension/src/grid/layout.js";
 
-for (const [width, preset, want] of [
+for (const [width, target, want] of [
   [2560, 80, { total: 26, cell: 2576 / 26 - 16 }],
   [30, 80, { total: 1, cell: 30 }],
   [0, 80, { total: 1, cell: 0 }],
   [176, 80, { total: 2, cell: 80 }],
   [1237.5, 80, { total: 13, cell: 1253.5 / 13 - 16 }],
 ]) {
-  test(`fitCell(${width}, ${preset}) fills the width with whole columns`, () => {
+  test(`fitCell(${width}, ${target}) fills the width with whole columns`, () => {
     assert.equal(typeof geometry.fitCell, "function");
-    assert.deepEqual(geometry.fitCell(width, preset), want);
+    assert.deepEqual(geometry.fitCell(width, target), want);
   });
 }
 
 test("stretched cells never shrink below the target with multiple columns", () => {
   assert.equal(typeof geometry.fitCell, "function");
-  for (const preset of [40, 48, 80, 112, 144, 240]) {
+  for (const target of [40, 48, 80, 112, 144, 240]) {
     for (const width of [400, 700, 1237.5, 2560]) {
-      const { total, cell } = geometry.fitCell(width, preset);
-      if (total > 1) assert.ok(cell >= preset);
+      const { total, cell } = geometry.fitCell(width, target);
+      if (total > 1) assert.ok(cell >= target);
       assert.ok(Math.abs(total * (cell + 16) - 16 - width) < 1e-9);
     }
   }
@@ -44,14 +44,14 @@ function freezeTiles(tiles) {
 }
 
 for (const [width, cell, want] of [
-  [2560 - 2 * 48, CELL_PRESETS.M, 25],
-  [30, CELL_PRESETS.M, 1],
+  [2560 - 2 * 48, 80, 25],
+  [30, 80, 1],
   [0, CELL_PRESETS.S, 1],
-  [175, CELL_PRESETS.M, 1],
-  [176, CELL_PRESETS.M, 2],
+  [175, 80, 1],
+  [176, 80, 2],
   [240, CELL_PRESETS.S, 4],
-  [240, CELL_PRESETS.L, 2],
-  [304, CELL_PRESETS.XL, 2],
+  [240, 112, 2],
+  [304, 144, 2],
 ]) {
   test(`totalColumns(${width}, ${cell}) counts cells including ${GAP}px gaps`, () => {
     assert.equal(totalColumns(width, cell), want);
