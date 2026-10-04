@@ -82,6 +82,8 @@ function luminance(rgb) {
 async function flush(ff) { await ff.settle(); await nextFrame(); await nextFrame(); }
 async function controller(set = setup(), listener, layout = {}, options = {}) {
   const ff = createFirefox(set, listener), root = await makeRoot();
+  // These geometry fixtures use Custom 80, independent of the S default.
+  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
   await ff.browser.storage.sync.set(layout); await ff.settle();
   const { createController } = await import("../../extension/src/main.js");
   const control = createController(root, ff.browser, undefined, options);
@@ -523,6 +525,7 @@ for (const order of ["dropper-first", "dropper-second"]) {
     const { createController } = await import("../../extension/src/main.js");
     const pages = [];
     try {
+      await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
       await ff.browser.storage.sync.set(dropLayout); await ff.settle();
       for (let i = 0; i < 2; i++) {
         const root = await makeRoot();
@@ -1055,9 +1058,9 @@ test("a failed key check for a post-paint group retries on a later render instea
   } finally { console.warn = warn; if (root) { endName(root); root.remove(); } timer.restore(); }
 });
 
-// Using the stretched cell for defaults loses a row except at the exact XL pitch.
+// Using the stretched cell for defaults loses a row except at the exact Custom 144 pitch.
 for (const [width, pitch] of [[1000, 1016 / 6], [1366, 1382 / 8], [1584, 160], [1600, 161.6]]) {
-  test(`XL tab drop at ${width}px previews and saves the setting's 2 by 3 default`, async () => {
+  test(`Custom 144 tab drop at ${width}px previews and saves the setting's 2 by 3 default`, async () => {
     let reply = { folders: {}, saved: [], missing: [] };
     const set = { windows: [{ id: 1, focused: true }], selfTabId: 99, groups: [],
       tabs: [{ id: 15, windowId: 1 }, { id: 99, windowId: 1 }] };
@@ -1065,7 +1068,7 @@ for (const [width, pitch] of [[1000, 1016 / 6], [1366, 1382 / 8], [1584, 160], [
       ? { ok: true } : message.type === "foxy:saved" ? reply : undefined,
       { settings: { showClock: false, showPinned: false, showSaved: false } });
     root.style.width = `${width}px`;
-    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "XL" } });
+    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 144 } });
     await control.refresh(); await flush(ff); await flush(ff);
     const grid = root.querySelector(".grid"), bounds = grid.getBoundingClientRect();
     const coords = { clientX: bounds.left + 1.2 * pitch, clientY: bounds.top + 1.2 * pitch };

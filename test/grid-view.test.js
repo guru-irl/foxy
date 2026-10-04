@@ -11,7 +11,7 @@ const options = (overrides = {}) => {
   const k = Math.max(7, ...layout.map(t => t.x + t.w));
   return { layouts: layout.length ? { [k]: { lastWriteMs: 0, tiles: layout } } : {},
     synced: { ...DEFAULT_SETTINGS, showClock: false, showPinned: false },
-    device: DEFAULT_DEVICE, contentWidth: 944, folders: { 1: "a", 2: "b" }, ...rest };
+    device: { ...DEFAULT_DEVICE, cellSize: "custom", customCell: 80 }, contentWidth: 944, folders: { 1: "a", 2: "b" }, ...rest };
 };
 
 test("new tiles use clock, pinned, current tab-strip groups, remote groups, saved order", () => {
@@ -94,15 +94,15 @@ test("new defaults use the cell setting and save their full size before display 
 
 // Stretching cells must affect display geometry, not a new tile's stored size.
 for (const [device, expected] of [
-  [{ ...DEFAULT_DEVICE, cellSize: "XL" }, [["clock", 3, 2], ["pinned", 2, 3], ["group:a", 2, 3], ["saved", 2, 3]]],
+  [{ ...DEFAULT_DEVICE, cellSize: "custom", customCell: 144 }, [["clock", 3, 2], ["pinned", 2, 3], ["group:a", 2, 3], ["saved", 2, 3]]],
   [{ ...DEFAULT_DEVICE, cellSize: "custom", customCell: 90 }, [["clock", 5, 2], ["pinned", 3, 4], ["group:a", 3, 4], ["saved", 3, 4]]],
 ]) {
   for (const contentWidth of [1600, 1000]) {
-    test(`${device.cellSize} defaults at width ${contentWidth} use the setting for every kind`, () => {
+    test(`${device.customCell}px custom defaults at width ${contentWidth} use the setting for every kind`, () => {
       const model = { ...board, columns: [group(1)], saved: [{ folderId: "closed" }] };
       const view = buildView(model, options({ contentWidth, synced: DEFAULT_SETTINGS, device }));
       assert.deepEqual(view.newTiles.map(({ id, w, h }) => [id, w, h]), expected);
-      assert.ok(view.cell > (device.cellSize === "XL" ? 144 : 90), "the real cell is stretched");
+      assert.ok(view.cell > device.customCell, "the real cell is stretched");
     });
   }
 }
@@ -141,6 +141,17 @@ for (const [width, railCells, expected] of [[30, 100, [1, 2, 1]], [944, 100, [10
     assert.deepEqual([view.total, view.railCells, view.cols], expected);
   });
 }
+
+test("default S cells set geometry and full pixel-target tile sizes", () => {
+  const view = buildView(board, options({ device: DEFAULT_DEVICE, synced: DEFAULT_SETTINGS }));
+  assert.deepEqual([view.cell, view.total, view.cols], [48, 15, 12]);
+  assert.deepEqual(view.newTiles, [
+    { id: "clock", x: 0, y: 0, w: 8, h: 4 },
+    { id: "pinned", x: 0, y: 4, w: 5, h: 6 },
+    { id: "group:a", x: 5, y: 4, w: 5, h: 6 },
+    { id: "group:b", x: 0, y: 10, w: 5, h: 6 },
+  ]);
+});
 
 test("device cell size changes the geometry and default target in cells", () => {
   const view = buildView(board, options({ device: { ...DEFAULT_DEVICE, cellSize: "S" } }));

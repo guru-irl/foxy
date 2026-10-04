@@ -33,7 +33,7 @@ The same settings are in about:addons, Foxy, Options.
 
 | Setting | Values | Scope |
 |---|---|---|
-| Cell size | S 48, M 80, L 112, XL 144; custom 40 to 240 px (cells stretch a little to fill the width) | Per device |
+| Cell size | S 48 px (default); Custom 40 to 240 px (cells stretch a little to fill the width) | Per device |
 | TABS rail width | 2 cells to half the available width; default 3 | Synced |
 | Show clock, pinned, saved | On or off for each | Synced |
 | Reset layout | Click twice within 3 seconds; clears saved tile places for every width | Synced |

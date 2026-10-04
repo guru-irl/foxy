@@ -22,6 +22,8 @@ async function setup({ rect = original, width = 1232, widgets = false,
     message => message.type === "foxy:reconcile" ? { ok: true }
       : message.type === "foxy:saved" ? { folders: { 1: "a", 2: "b" }, missing: [],
         saved: widgets ? [{ folderId: "closed", title: "Closed" }] : [] } : undefined);
+  // These geometry fixtures use Custom 80, independent of the S default.
+  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
   await ff.browser.storage.sync.set({
     "tile:10:group:a": rect, "tile:10:group:b": neighbour,
     "tile:10:clock": { x: 6, y: 0, w: 4, h: 2 }, "tile:10:pinned": { x: 6, y: 2, w: 4, h: 2 },

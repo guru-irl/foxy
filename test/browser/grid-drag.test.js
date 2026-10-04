@@ -27,6 +27,8 @@ async function setup({ layout = initial, width = 1232, settings = {}, folders = 
       ...extraGroups.map(group => ({ id: group.id + 30, windowId: 1, groupId: group.id })), { id: 99, windowId: 1 }] },
     listener ?? (message => message.type === "foxy:reconcile" ? { ok: true }
       : message.type === "foxy:saved" ? { saved: [], missing: [], folders } : undefined));
+  // These geometry fixtures use Custom 80, independent of the S default.
+  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
   await ff.browser.storage.sync.set({ ...layout, settings }); await ff.settle();
   const root = document.createElement("div"); root.className = "board";
   root.style.cssText = `width:${width}px;height:600px`;

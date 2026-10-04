@@ -36,6 +36,8 @@ async function setup() {
     tabs: [{ id: 10, windowId: 1, groupId: 1 }, { id: 99, windowId: 1 }] },
     message => message.type === "foxy:reconcile" ? { ok: true }
       : message.type === "foxy:saved" ? gate.then(() => ({ saved: [], missing: [], folders: { 1: "a" } })) : undefined);
+  // These geometry fixtures use Custom 80, independent of the S default.
+  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
   await ff.browser.storage.sync.set({ "tile:10:clock": { x: 0, y: 0, w: 5, h: 2 } });
   const host = document.createElement("div"), node = document.createElement("div"), pane = document.createElement("aside");
   host.className = "page"; host.style.cssText = "width:1232px;height:600px";
