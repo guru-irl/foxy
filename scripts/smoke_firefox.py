@@ -105,6 +105,8 @@ def profile_prefs(port):
         "network.proxy.no_proxies_on": "127.0.0.1,localhost",
         "network.proxy.failover_direct": False,
         "network.trr.mode": 5,
+        # No location: Foxy's weather tile then has no place and requests nothing.
+        "geo.enabled": False,
     }
 
 

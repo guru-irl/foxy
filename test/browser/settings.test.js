@@ -44,7 +44,7 @@ test("the gear opens a sibling pane and Escape or gear closes it with focus rest
   const first = pane.querySelector("button"); assert.equal(document.activeElement, first);
   const box = pane.getBoundingClientRect(); assert.equal(box.width, 360); assert.equal(box.height, innerHeight - 96);
   assert.equal(getComputedStyle(pane).boxShadow, "none"); assert.equal(getComputedStyle(pane).borderTopWidth, "0px");
-  assert.equal(pane.querySelectorAll(".setting-caption").length, 2);
+  assert.equal(pane.querySelectorAll(".setting-caption").length, 3);
   const scroll = pane.querySelector(".settings-scroll"); assert.equal(scroll.tabIndex, -1);
   scroll.scrollTop = 100; scroll.dispatchEvent(new Event("scroll"));
   assert.ok(pane.classList.contains("scroll-start"));
@@ -467,7 +467,7 @@ test("options.html renders the shared pane, saves and resets tile keys and layou
   assert.equal(pane.querySelector('[data-rail="plus"]').disabled, true);
   assert.equal(pane.style.getPropertyValue("--card-alpha-dark"), "0.45");
   assert.equal(pane.style.getPropertyValue("--card-alpha-light"), "0.55");
-  assert.deepEqual([...pane.querySelectorAll("h2")].map(n => n.textContent), ["Grid", "Tiles", "Clock", "Cards", "Windows", "Pins"]);
+  assert.deepEqual([...pane.querySelectorAll("h2")].map(n => n.textContent), ["Grid", "Tiles", "Clock", "Weather", "Cards", "Windows", "Pins"]);
   const before = writes(ff).length; choice(pane, "density", "compact").click(); await flush(ff);
   assert.equal(writes(ff).length - before, 1); assert.equal(node.style.getPropertyValue("--row"), "24px");
   const reset = pane.querySelector(".settings-reset"), start = ff.calls.length; reset.click(); await waitForConfirm(); reset.click(); await flush(ff);
@@ -688,7 +688,10 @@ for (const width of [1600, 401]) {
 // it must not centre tiles off the left edge or strand its gear/pane controls.
 for (const width of [175, 240]) {
   test(`below three target columns (${width}px) tiles do not overlap and gear/pane remain reachable`, async () => {
-    const { ff } = await setup(); const before = await ff.browser.storage.sync.get(null);
+    const { ff } = await setup();
+    // The weather tile would be a new tile here; this test pins the existing ones.
+    await ff.browser.storage.sync.set({ settings: { railCells: 3, showWeather: false } }); await flush(ff);
+    const before = await ff.browser.storage.sync.get(null);
     const frame = await newtab(ff, width), doc = frame.contentDocument, win = frame.contentWindow;
     const root = doc.querySelector(".board"), grid = root.querySelector(".grid"), rail = root.querySelector(".rail"), gear = root.querySelector(".settings-cell"), pane = doc.querySelector(".settings-pane");
     const box = root.getBoundingClientRect(), page = doc.querySelector(".page").getBoundingClientRect();

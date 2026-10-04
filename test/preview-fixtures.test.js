@@ -73,7 +73,7 @@ for (const [name, cell, width] of [["grid-m", 1616 / 16 - 16, 1600], ["grid-xl",
     const view = buildView(board, { layouts: stored.layouts, ...settings, contentWidth: width,
       folders: reply.folders });
     assert.equal(view.cell, cell);
-    assert.equal(view.tiles.length, 6);
+    assert.equal(view.tiles.length, 7);
     assert.equal(view.newTiles.length, 0, "fixture has saved positions for every tile");
     for (const tile of view.tiles) assert.ok(tile.x + tile.w <= view.cols);
     if (name === "grid-narrow") {

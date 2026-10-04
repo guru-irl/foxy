@@ -129,3 +129,8 @@ test("concurrent edits at different widths preserve both independent metadata ke
     "tile:17:clock": rect, "layout:17": { t: 1 }, "tile:34:clock": { ...rect, y: 9 }, "layout:34": { t: 2 },
   });
 });
+test("loadLayouts keeps a saved weather tile", async () => {
+  const ff = createFirefox();
+  await ff.browser.storage.sync.set({ "layout:17": { t: 1 }, "tile:17:weather": { x: 2, y: 0, w: 1, h: 1 } });
+  assert.deepEqual((await store.loadLayouts(ff.browser)).layouts[17].tiles, [{ id: "weather", x: 2, y: 0, w: 1, h: 1 }]);
+});

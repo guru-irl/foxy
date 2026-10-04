@@ -56,6 +56,7 @@ function grid(cellSize = "M") {
       "group:preview-102": { x: 3, y: 4, w: 3, h: 4 },
       "group:preview-103": { x: 6, y: 4, w: 3, h: 4 },
       saved: { x: 0, y: 6, w: 3, h: 4 },
+      weather: { x: 3, y: 8, w: 3, h: 3 },
     },
   };
 }
@@ -64,7 +65,13 @@ function realGrid() {
   return { ...data, folders: Object.fromEntries(data.groups.map(g => [g.id, g.title.toLowerCase()])),
     layout: realLayout, layoutWidth: 34, syncedSettings: { railCells: 5 }, deviceSettings: { cellSize: "S" } };
 }
+// S cells with a tall weather tile beside the M preview layout.
+function weatherGrid() {
+  const data = grid("S");
+  return { ...data, layout: { ...data.layout, weather: { x: 9, y: 0, w: 5, h: 8 } } };
+}
 export const SCENARIOS = {
+  weather: weatherGrid(),
   "real-34": realGrid(), "real-33": realGrid(), "real-17": realGrid(),
   "grid-m": grid(),
   "grid-xl": grid("XL"),

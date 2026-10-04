@@ -9,7 +9,9 @@ export function renderBoard(root, board, ui, handlers, options = {}) {
   const { total } = fitCell(root.getBoundingClientRect().width, cellPx(options.device ?? DEFAULT_DEVICE));
   const rail = Math.max(2, Math.min(railLimits(total).max, (options.synced ?? DEFAULT_SETTINGS).railCells));
   const k = Math.max(1, total - rail, ...layout.map(t => t.x + t.w));
-  const view = buildView(board, { layouts: layout.length ? { [k]: { lastWriteMs: 0, tiles: layout } } : {}, synced: DEFAULT_SETTINGS, device: DEFAULT_DEVICE,
+  // Weather is opt-in here, as on a board without weather access.
+  const view = buildView(board, { layouts: layout.length ? { [k]: { lastWriteMs: 0, tiles: layout } } : {},
+    synced: { ...DEFAULT_SETTINGS, showWeather: false }, device: DEFAULT_DEVICE,
     contentWidth: root.getBoundingClientRect().width, folders: {}, ...rest });
   render(root, board, view, ui, handlers, options.synced ?? DEFAULT_SETTINGS);
   return view;

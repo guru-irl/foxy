@@ -14,7 +14,8 @@ Version 3.2.0. Distributed as an unlisted add-on. Design: `docs/superpowers/spec
 
 ## Board
 
-- **Tiles:** groups, PINNED, SAVED and a clock on a scrolling grid that fills the page edge to edge, with scrolling tab lists.
+- **Tiles:** groups, PINNED, SAVED, a clock and weather on a scrolling grid that fills the page edge to edge, with scrolling tab lists.
+- **Weather:** your location (rounded to about 1 km) or a city you pick in Settings. The tile shows more as it grows: temperature, then condition, place and high / low, then the next 24 hours, then 7 days. It refreshes every 15 minutes while a Foxy page is visible; offline it shows the last reading and when it was updated.
 - **TABS rail:** ungrouped tabs stay on the right, with their own scroll. The Settings gear has its own cell below it.
 - **Move and resize:** drag a tile's header, or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
 - **Window widths:** each width keeps its own layout (up to 4). A width without one shows the closest: tiles narrow slightly, or columns of tiles pack together in order. Resizing saves nothing. Moving a tile updates the layout shown if the result still fits it; otherwise it saves a new layout for this width.
@@ -35,10 +36,12 @@ The same settings are in about:addons, Foxy, Options.
 |---|---|---|
 | Cell size | S 48, M 80, L 112, XL 144; custom 40 to 240 px (cells stretch a little to fill the width) | Per device |
 | TABS rail width | 2 cells to half the available width; default 3 | Synced |
-| Show clock, pinned, saved | On or off for each | Synced |
+| Show clock, pinned, saved, weather | On or off for each | Synced |
 | Reset layout | Click twice within 3 seconds; clears saved tile places for every width | Synced |
 | Time format | 24-hour or 12-hour | Synced |
 | Show date | On or off | Synced |
+| Temperature | °C (wind in km/h) or °F (wind in mph) | Synced |
+| Location | Current location, or a city found by search (Enter picks the first match); Use my location goes back | Per device |
 | Transparency | Low, medium, high | Synced |
 | Row density | Normal 32 px, compact 24 px | Per device |
 | Other windows | Show or hide their tabs and groups | Synced |
@@ -84,9 +87,10 @@ Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their pl
 | `storage` | Remember mappings and pending changes; tile layout and settings (synced), device settings (local) |
 | `scripting` | Keep a renamed pin's title |
 | `nativeMessaging` | Connect the local agent CLI to Foxy |
+| `geolocation` | Weather for where you are, without a prompt; coordinates are rounded to 2 decimals before any request |
 | Site access (optional) | Requested per site when you rename a pin there |
 
-Foxy makes no network requests of its own.
+Foxy makes network requests only for weather: Open-Meteo (forecast and city search) and BigDataCloud (place name). No API keys, no account, no cookies.
 
 ## Limits
 

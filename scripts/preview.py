@@ -45,6 +45,8 @@ SCENARIOS = {
     "settings-open": ("scenario=settings-open&settings=open", 1600, 1000),
     "settings-open-light": ("scenario=settings-open&settings=open&scheme=light", 1600, 1000),
     "narrow": ("scenario=one-window", 900, 900),
+    "weather": ("scenario=weather", 1600, 1000),
+    "weather-light": ("scenario=weather&scheme=light", 1600, 1000),
 }
 
 

@@ -69,6 +69,7 @@ for (const [id, kind, size] of [
   ["pinned", "pinned", { w: 2, h: 2 }],
   ["saved", "saved", { w: 2, h: 2 }],
   ["clock", "clock", { w: 3, h: 2 }],
+  ["weather", "weather", { w: 1, h: 1 }],
 ]) {
   test(`${id} has the ${kind} minimum size`, () => {
     assert.equal(kindOf(id), kind);
@@ -86,6 +87,8 @@ for (const [kind, cell, cols, want] of [
   ["group", 80, 2, { w: 2, h: 4 }],
   ["clock", 80, 1, { w: 1, h: 2 }],
   ["saved", 240, 25, { w: 2, h: 2 }],
+  ["weather", 48, 25, { w: 5, h: 5 }],
+  ["weather", 80, 25, { w: 3, h: 3 }],
 ]) {
   test(`defaultSize(${kind}, ${cell}, ${cols}) converts pixel targets and caps width`, () => {
     assert.deepEqual(defaultSize(kind, cell, cols), want);

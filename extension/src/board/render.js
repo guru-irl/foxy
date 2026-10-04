@@ -3,6 +3,7 @@ import { normalizePinName } from "../sync/codec.js";
 import { colorKey, formatDate, formatTime } from "../model.js";
 import { attachDnd } from "./dnd.js";
 import { openNameEditor, openColorPicker } from "./edit.js";
+import { weatherTile, paintWeather } from "../tiles/weather.js";
 
 const editors = new WeakMap();
 const renameStarts = new WeakMap();
@@ -101,7 +102,8 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   for (const tile of view.tiles) {
     const node = tile.kind === "group" ? groupColumn(root, tile.group, handlers)
       : tile.kind === "pinned" ? fixedColumn(root, "pinned", "PINNED", board.pinned, handlers)
-      : tile.kind === "saved" ? savedColumn(root, board.saved, ui, handlers) : clockTile();
+      : tile.kind === "saved" ? savedColumn(root, board.saved, ui, handlers)
+      : tile.kind === "weather" ? weatherTile() : clockTile();
     node.classList.add("tile");
     node.dataset.tileId = tile.id;
     node.dataset.kind = tile.kind;
@@ -127,6 +129,7 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   gear.setAttribute("aria-expanded", "false");
   root.replaceChildren(grid, rail, gear);
   updateClock(root, settings);
+  paintWeather(root, settings);
   const previousBanner = banners.get(root);
   const missingCount = board.missing?.length ?? 0;
   if (missingCount && previousBanner?.dataset.count === String(missingCount)) {

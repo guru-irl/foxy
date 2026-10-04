@@ -1,6 +1,12 @@
 // Preview only: the same stateful Firefox fake used by Node and DOM tests.
 import { createFirefox } from "../test/fakes/firefox.js";
 import { SCENARIOS } from "./fixtures.js";
+import { forecastJson, fakeFetch, fakeGeolocation } from "../test/fakes/weather.js";
+
+// Weather from fixtures: no network and no real location in previews.
+const midnight = Math.floor(Date.now() / 86400000) * 86400;
+globalThis.fetch = fakeFetch({ forecast: forecastJson({ start: midnight, offset: -new Date().getTimezoneOffset() * 60 }) });
+Object.defineProperty(navigator, "geolocation", { configurable: true, value: fakeGeolocation() });
 
 const params = new URLSearchParams(location.search);
 const name = params.get("scenario") ?? "one-window";

@@ -2,7 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildView } from "../extension/src/grid/view.js";
 import { buildBoard } from "../extension/src/board/model.js";
-import { DEFAULT_SETTINGS, DEFAULT_DEVICE } from "../extension/src/settings/store.js";
+import { DEFAULT_SETTINGS as DEFAULTS, DEFAULT_DEVICE } from "../extension/src/settings/store.js";
+
+// These tests pin the other tile kinds; the weather tile has its own test below.
+const DEFAULT_SETTINGS = { ...DEFAULTS, showWeather: false };
 
 const group = (id, current = true) => ({ id, current, windowId: current ? 1 : 2, rows: [] });
 const board = { columns: [group(1), group(2)], saved: [], pinned: [], tabs: [] };
@@ -180,4 +183,14 @@ test("source qualification ignores closed groups and hidden kinds, not just tota
   assert.equal(view.k, 34, "visible wide group can keep its arrangement when capped; closed group must not force packing");
   assert.deepEqual(view.tiles.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })),
     [{ id: "group:a", x: 0, y: 0, w: 18, h: 9 }]);
+});
+
+test("showWeather adds a weather tile after the others; off reserves no space", () => {
+  const on = buildView({ ...board, columns: [], saved: [{ folderId: "c" }] },
+    options({ synced: { ...DEFAULTS, showWeather: true }, device: { ...DEFAULT_DEVICE, cellSize: "S" }, contentWidth: 1232 }));
+  assert.deepEqual(on.tiles.map(t => t.id), ["clock", "pinned", "saved", "weather"]);
+  assert.equal(on.tiles.at(-1).kind, "weather");
+  assert.deepEqual(on.newTiles.at(-1), { id: "weather", x: 5, y: 6, w: 5, h: 5 });
+  const off = buildView({ ...board, columns: [] }, options({ synced: { ...DEFAULTS, showWeather: false } }));
+  assert.equal(off.tiles.some(t => t.id === "weather"), false);
 });
