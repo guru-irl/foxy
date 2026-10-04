@@ -5,7 +5,7 @@ import { forecastJson, fakeFetch, fakeGeolocation } from "./fakes/weather.js";
 import { condition, GLYPHS } from "../extension/src/weather/codes.js";
 import { roundCoord, validPlace, locate, searchPlaces, reverseName } from "../extension/src/weather/location.js";
 import { forecastUrl, parseForecast, temperature, wind, updatedAgo, isFresh, loadWeather, REFRESH_MS, CACHE_KEY,
-  upcomingHours, upcomingDays } from "../extension/src/weather/data.js";
+  upcomingHours, upcomingDays, hourLabel, dayLabel } from "../extension/src/weather/data.js";
 import { hasConsent, requestConsent, watchConsent } from "../extension/src/weather/consent.js";
 import { settingActions } from "../extension/src/settings/pane.js";
 
@@ -77,6 +77,39 @@ test("hours start at the current hour and run for 24; days start today", () => {
   const days = upcomingDays(data, NOW);
   assert.equal(days.length, 7);
   assert.equal(upcomingDays(data, NOW + 2 * 86400000).length, 5, "an old cache shows the days that remain");
+});
+
+// Ireland leaves summer time on 2026-10-25 at 02:00 IST (01:00 UTC): that day has 25 hours.
+const OCT25 = 1792886400; // 2026-10-25 00:00 UTC
+function dstData(timezone = "Europe/Dublin") {
+  const day = (time, code) => ({ time: time * 1000, code, min: 5, max: 12, sunrise: null, sunset: null });
+  const hourly = Array.from({ length: 48 }, (_, i) => ({ time: (OCT25 - 3600 + i * 3600) * 1000, temp: 9, code: 3, pop: 0, isDay: true }));
+  return { offset: 3600, timezone, current: { time: OCT25 * 1000, temp: 9, feels: null, code: 3, isDay: true, wind: null, humidity: null, precipitation: null },
+    hourly, daily: [day(OCT25 - 3600, 3), day(OCT25 + 86400, 61), day(OCT25 + 2 * 86400, 0)] };
+}
+
+test("on a 25-hour fall-back day, today stays today until local midnight", () => {
+  const data = dstData();
+  const lastHour = (OCT25 + 86400 - 1800) * 1000; // 23:30 GMT on the 25th
+  assert.equal(upcomingDays(data, lastHour)[0].time, (OCT25 - 3600) * 1000);
+  assert.equal(upcomingDays(data, (OCT25 + 86400) * 1000)[0].time, (OCT25 + 86400) * 1000);
+  assert.equal(upcomingDays(data, (OCT25 - 7200) * 1000)[0].time, (OCT25 - 3600) * 1000, "before the first day: the first day");
+});
+
+test("hour and day labels follow the location's time zone across a DST change", () => {
+  const data = dstData();
+  const at = utc => (OCT25 + utc * 3600) * 1000;
+  assert.deepEqual([-1, 0, 1, 2].map(h => hourLabel(at(h), data, "24")), ["00", "01", "01", "02"]);
+  assert.equal(hourLabel(at(13), data, "12"), "1 PM");
+  assert.equal(hourLabel(at(-1), data, "12"), "12 AM");
+  assert.equal(dayLabel(at(23.5), data), "Sun");
+  assert.equal(dayLabel(at(24), data), "Mon");
+  // Without a usable time zone name the reply's offset is used.
+  for (const timezone of [null, "Not/AZone"]) {
+    assert.deepEqual([0, 1].map(h => hourLabel(at(h), dstData(timezone), "24")), ["01", "02"]);
+  }
+  assert.equal(parseForecast(forecastJson()).timezone, "Europe/Dublin");
+  assert.equal(parseForecast({ ...forecastJson(), timezone: 7 }).timezone, null);
 });
 
 test("temperatures and wind convert to the chosen unit", () => {
@@ -166,7 +199,7 @@ test("reverseName asks BigDataCloud's client endpoint with rounded coordinates",
 });
 
 function deps(overrides = {}) {
-  const ff = createFirefox({ dataCollection: overrides.dataCollection ?? ["locationInfo"] });
+  const ff = createFirefox({ dataCollection: overrides.dataCollection ?? ["locationInfo"], permissions: overrides.permissions ?? ["geolocation"] });
   return { ff, api: ff.browser, fetch: fakeFetch(), geolocation: fakeGeolocation(), place: "auto", now: NOW, ...overrides };
 }
 
@@ -229,6 +262,35 @@ test("geolocation denied or missing gives the set-a-location state without any r
   }
 });
 
+test("a geolocation timeout with nothing cached is an error to retry, not set-a-location", async () => {
+  for (const geolocation of [fakeGeolocation({ error: 2 }), fakeGeolocation({ error: 3 })]) {
+    const d = deps({ geolocation });
+    assert.deepEqual(await loadWeather(d), { status: "error", want: "auto" });
+    assert.equal(d.fetch.calls.length, 0);
+  }
+});
+
+test("auto location needs the optional geolocation permission too; a searched city needs only locationInfo", async () => {
+  const auto = deps({ permissions: [] });
+  assert.deepEqual(await loadWeather(auto), { status: "consent", want: "auto" });
+  assert.equal(auto.geolocation.calls, 0);
+  assert.equal(auto.fetch.calls.length, 0);
+  const city = deps({ permissions: [], place: { name: "Berlin", lat: 52.52, lon: 13.41 } });
+  assert.equal((await loadWeather(city)).status, "ok");
+  assert.equal(city.geolocation.calls, 0);
+});
+
+test("a revoke while a refresh is in flight writes nothing to storage", async () => {
+  const d = deps();
+  const fetch = fakeFetch();
+  d.fetch = async (url, options) => {
+    if (url.includes("api.open-meteo.com")) await d.api.permissions.remove({ data_collection: ["locationInfo"] });
+    return fetch(url, options);
+  };
+  assert.deepEqual(await loadWeather(d), { status: "consent", want: "auto" });
+  assert.deepEqual(await d.api.storage.local.get(CACHE_KEY), {});
+});
+
 test("a chosen place skips geolocation and uses its rounded coordinates and name", async () => {
   const place = { name: "Berlin", lat: 52.524371, lon: 13.410534 };
   const d = deps({ place });
@@ -277,6 +339,27 @@ test("consent: contains, request from user input only, and grant / revoke events
   await d.ff.withUserInput(() => d.api.permissions.request({ origins: ["https://example.com/*"] }));
   await d.ff.settle();
   assert.deepEqual(seen, [true, false]);
+});
+
+test("consent for my location asks geolocation and locationInfo in one request; a city asks locationInfo only", async () => {
+  const d = deps({ dataCollection: [], permissions: [] });
+  const seen = [];
+  const unwatch = watchConsent(d.api, (granted, which) => seen.push([granted, [...which].sort()]), ["locationInfo", "geolocation"]);
+  assert.equal(await hasConsent(d.api, "auto"), false);
+  assert.equal(await d.ff.withUserInput(() => requestConsent(d.api, "52.52,13.41")), true);
+  assert.deepEqual(d.ff.calls.filter(call => call.api === "permissions.request").at(-1).args, [{ data_collection: ["locationInfo"] }]);
+  assert.equal(await hasConsent(d.api, "52.52,13.41"), true);
+  assert.equal(await hasConsent(d.api, "auto"), false, "my location also needs geolocation");
+  assert.equal(await d.ff.withUserInput(() => requestConsent(d.api, "auto")), true);
+  assert.deepEqual(d.ff.calls.filter(call => call.api === "permissions.request").at(-1).args,
+    [{ permissions: ["geolocation"], data_collection: ["locationInfo"] }]);
+  assert.equal(await hasConsent(d.api, "auto"), true);
+  await d.api.permissions.remove({ permissions: ["geolocation"] });
+  await d.ff.settle();
+  assert.equal(await hasConsent(d.api, "auto"), false);
+  assert.equal(await hasConsent(d.api), true, "the city search needs only locationInfo");
+  assert.deepEqual(seen, [[true, ["locationInfo"]], [true, ["geolocation"]], [false, ["geolocation"]]]);
+  unwatch();
 });
 
 test("city search asks nothing until locationInfo is granted", async () => {

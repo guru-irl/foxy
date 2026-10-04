@@ -15,9 +15,9 @@ Version 3.2.0. Distributed as an unlisted add-on. Design: `docs/superpowers/spec
 ## Board
 
 - **Tiles:** groups, PINNED, SAVED, a clock and weather on a scrolling grid that fills the page edge to edge, with scrolling tab lists.
-- **Weather:** your location (rounded to about 1 km) or a city you pick in Settings. The tile shows more as it grows: temperature, then condition, place and high / low, then the next 24 hours, then 7 days. It refreshes every 15 minutes while a Foxy page is visible; offline it shows the last reading and when it was updated.
+- **Weather:** your location (rounded to about 1 km) or a city you pick in Settings. The tile shows more as it grows: temperature, then condition, place and high / low, then the next 24 hours (scroll them with the wheel, the arrow keys or a swipe), then 7 days. It refreshes every 15 minutes while a Foxy page is visible; offline it shows the last reading and when it was updated.
 - **TABS rail:** ungrouped tabs stay on the right, with their own scroll. The Settings gear has its own cell below it.
-- **Move and resize:** drag a tile's header, or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
+- **Move and resize:** drag a tile's header (the weather tile by its body), or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
 - **Window widths:** each width keeps its own layout (up to 4). A width without one shows the closest: tiles narrow slightly, or columns of tiles pack together in order. Resizing saves nothing. Moving a tile updates the layout shown if the result still fits it; otherwise it saves a new layout for this width.
 - **Windows:** this window comes first; others are labelled. Tile places do not change tab order.
 - **Open a tab:** click it. A pin from another window moves here unless that setting is off.
@@ -87,8 +87,8 @@ Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their pl
 | `storage` | Remember mappings and pending changes; tile layout and settings (synced), device settings (local) |
 | `scripting` | Keep a renamed pin's title |
 | `nativeMessaging` | Connect the local agent CLI to Foxy |
-| `geolocation` | Weather for where you are, without a prompt; coordinates are rounded to 2 decimals before any request |
-| Location data collection (optional) | Asked by "Allow weather"; until you allow it, weather sends nothing. Turn it off in about:addons |
+| `geolocation` (optional) | Weather for where you are. Asked together with location data collection by "Allow weather" while Location is Current location; a searched city does not need it. Firefox may use your system's or a network location service to find you; coordinates are rounded to 2 decimals before any request |
+| Location data collection (optional) | Asked by "Allow weather"; until you allow it, weather sends nothing. Turn either off in about:addons: the tile asks again and the cached forecast and place name are deleted |
 | Site access (optional) | Requested per site when you rename a pin there |
 
 Foxy makes network requests only for weather, and only after you allow location data collection ("Allow weather"): Open-Meteo (forecast and city search) and BigDataCloud (place name). No API keys, no account, no cookies.

@@ -151,8 +151,8 @@ test("consent: an Allow weather pill and nothing else, at any size", async () =>
     const allow = weather.querySelector("button.weather-allow");
     assert.ok(shown(allow), `${w}x${h} shows the pill`);
     assert.equal(allow.textContent, "Allow weather");
-    assert.equal(getComputedStyle(allow).borderRadius, w === 1 ? "10px" : "999px");
-    assert.ok(allow.scrollWidth <= allow.clientWidth, `${w}x${h} pill text is not clipped`);
+    assert.equal(allow.getAttribute("aria-label"), "Allow weather");
+    assert.equal(getComputedStyle(allow).borderRadius, "999px");
     assert.equal(weather.querySelector(".weather-temp"), null);
     inside(weather);
   }
@@ -170,7 +170,8 @@ test("controller: without locationInfo nothing is located or fetched; the pill a
     const before = deps.ff.calls.length;
     deps.ff.withUserInput(() => node.querySelector(".weather-allow").click());
     assert.equal(deps.ff.calls[before].api, "permissions.request", "request must run in the click, before any await");
-    assert.deepEqual(deps.ff.calls[before].args, [{ data_collection: ["locationInfo"] }]);
+    assert.deepEqual(deps.ff.calls[before].args, [{ permissions: ["geolocation"], data_collection: ["locationInfo"] }],
+      "my location: geolocation and locationInfo in one prompt");
     await deps.ff.settle(); await settle();
     assert.equal(node.querySelector(".weather").dataset.state, "ok");
     assert.equal(deps.fetch.calls.filter(url => url.includes("api.open-meteo.com")).length, 1);
@@ -211,8 +212,151 @@ test("controller: revoking locationInfo (about:addons) returns the tile to the p
   } finally { control.stop(); }
 });
 
+test("controller: a searched city asks only for locationInfo; my location without geolocation shows the pill", async () => {
+  const deps = weatherDeps({ dataCollection: [], permissions: [] }), node = await withTile(deps);
+  deps.current.device.weatherPlace = { name: "Berlin", lat: 52.52, lon: 13.41 };
+  const control = startWeather(node, deps);
+  try {
+    control.wake(); await settle();
+    assert.equal(node.querySelector(".weather").dataset.state, "consent");
+    const before = deps.ff.calls.length;
+    deps.ff.withUserInput(() => node.querySelector(".weather-allow").click());
+    assert.deepEqual(deps.ff.calls[before].args, [{ data_collection: ["locationInfo"] }]);
+    await deps.ff.settle(); await settle();
+    assert.equal(node.querySelector(".weather").dataset.state, "ok");
+    assert.equal(deps.geolocation.calls, 0);
+    // Back to my location: geolocation is still missing, so the pill returns and nothing is located.
+    deps.current.device.weatherPlace = "auto";
+    control.wake(); await settle();
+    assert.equal(node.querySelector(".weather").dataset.state, "consent");
+    assert.equal(deps.geolocation.calls, 0);
+  } finally { control.stop(); }
+});
+
+test("controller: revoking clears the cached place and forecast; revoking geolocation matters only for my location", async () => {
+  const deps = weatherDeps(), node = await withTile(deps);
+  await deps.api.storage.local.set({ deviceSettings: { weatherPlace: { name: "Berlin", lat: 52.52, lon: 13.41 } } });
+  const control = startWeather(node, deps);
+  try {
+    control.wake(); await settle();
+    assert.ok((await deps.api.storage.local.get("weather")).weather, "cached");
+    await deps.api.permissions.remove({ permissions: ["geolocation"] });
+    await deps.ff.settle(); await settle();
+    assert.equal(node.querySelector(".weather").dataset.state, "consent", "my location needs geolocation");
+    assert.deepEqual(await deps.api.storage.local.get("weather"), {});
+    // A city keeps working without geolocation; revoking locationInfo clears it again.
+    deps.current.device.weatherPlace = { name: "Berlin", lat: 52.52, lon: 13.41 };
+    control.wake(); await settle();
+    assert.equal(node.querySelector(".weather").dataset.state, "ok");
+    assert.ok((await deps.api.storage.local.get("weather")).weather);
+    await deps.api.permissions.remove({ data_collection: ["locationInfo"] });
+    await deps.ff.settle(); await settle();
+    assert.equal(node.querySelector(".weather").dataset.state, "consent");
+    assert.deepEqual(await deps.api.storage.local.get("weather"), {});
+    assert.deepEqual((await deps.api.storage.local.get("deviceSettings")).deviceSettings.weatherPlace.name, "Berlin", "the chosen city stays");
+  } finally { control.stop(); }
+});
+
+test("controller: offline with nothing cached retries every 15 minutes, not on every render", async () => {
+  const deps = weatherDeps({ fetch: fakeFetch({ fail: true }) }), node = await withTile(deps);
+  deps.current.device.weatherPlace = { name: "Berlin", lat: 52.52, lon: 13.41 };
+  const control = startWeather(node, deps);
+  const forecasts = () => deps.fetch.calls.filter(url => url.includes("api.open-meteo.com")).length;
+  try {
+    for (let i = 0; i < 20; i++) { control.wake(); await settle(); }
+    assert.equal(node.querySelector(".weather").dataset.state, "error");
+    assert.equal(forecasts(), 1);
+    deps.advance(REFRESH_MS); control.wake(); await settle();
+    assert.equal(forecasts(), 2);
+  } finally { control.stop(); }
+});
+
+test("controller: a hidden page keeps no refresh timer", async () => {
+  let hidden = false;
+  const deps = weatherDeps({ hidden: () => hidden }), node = await withTile(deps);
+  const realSet = window.setTimeout, realClear = window.clearTimeout, long = new Set(), cleared = new Set();
+  window.setTimeout = (fn, ms, ...rest) => { const id = realSet(fn, ms, ...rest); if (ms >= 60000) long.add(id); return id; };
+  window.clearTimeout = id => { cleared.add(id); realClear(id); };
+  const control = startWeather(node, deps);
+  try {
+    control.wake(); await settle();
+    assert.ok(long.size >= 1, "a refresh timer is set while visible");
+    hidden = true; document.dispatchEvent(new Event("visibilitychange"));
+    assert.deepEqual([...long].filter(id => !cleared.has(id)), [], "hidden: no pending refresh timer");
+  } finally { window.setTimeout = realSet; window.clearTimeout = realClear; control.stop(); }
+});
+
+test("hourly strip: a vertical wheel scrolls it sideways only while it can scroll that way; arrow keys scroll it; touch pans it", async () => {
+  const weather = await tile(5, 5), strip = weather.querySelector(".weather-hours");
+  const wheel = deltaY => { const event = new WheelEvent("wheel", { deltaY, deltaMode: 0, bubbles: true, cancelable: true }); strip.dispatchEvent(event); return event.defaultPrevented; };
+  assert.equal(wheel(-60), false, "at the start, scrolling back leaves the wheel to the board");
+  assert.equal(wheel(60), true);
+  assert.ok(strip.scrollLeft > 0, "scrolled sideways");
+  const sideways = new WheelEvent("wheel", { deltaX: 60, deltaY: 10, bubbles: true, cancelable: true });
+  strip.dispatchEvent(sideways);
+  assert.equal(sideways.defaultPrevented, false, "a sideways wheel stays native");
+  strip.scrollLeft = strip.scrollWidth;
+  assert.equal(wheel(60), false, "at the end the board scrolls");
+  assert.equal(strip.tabIndex, 0);
+  strip.scrollLeft = 0; strip.focus();
+  strip.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+  const right = strip.scrollLeft;
+  assert.ok(right > 0, "ArrowRight scrolls");
+  strip.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }));
+  assert.ok(strip.scrollLeft < right, "ArrowLeft scrolls back");
+  assert.equal(getComputedStyle(strip).overflowX, "auto");
+  assert.equal(getComputedStyle(strip).touchAction, "pan-x");
+});
+
+test("accessibility: no label sits on a hidden node; day icons are labelled images", async () => {
+  const weather = await tile(5, 8);
+  for (const node of weather.querySelectorAll(".weather-body [aria-label]")) assert.ok(!node.closest("[aria-hidden='true']"), `${node.className.baseVal ?? node.className} is hidden`);
+  const icon = weather.querySelector(".weather-day .weather-day-glyph");
+  assert.equal(icon.getAttribute("role"), "img");
+  assert.equal(icon.getAttribute("aria-label"), "Partly cloudy");
+});
+
+test("board re-renders keep the hourly strip's scroll and the focus on Allow weather and RETRY", async () => {
+  await styles();
+  const start = Math.floor(Date.now() / 86400000) * 86400;
+  async function board({ dataCollection = ["locationInfo"], fail = false } = {}) {
+    const fetch = fakeFetch({ forecast: forecastJson({ start, offset: 0 }), fail });
+    const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], selfTabId: 99, dataCollection, permissions: ["geolocation"],
+      tabs: [{ id: 99, windowId: 1 }, { id: 5, windowId: 1, url: "https://a.example/", title: "A" }] });
+    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "S", weatherPlace: { name: "Dublin", lat: 53.35, lon: -6.27 } } });
+    const node = document.createElement("div"); node.className = "board"; node.style.cssText = "width:1232px;height:900px";
+    fixture().append(node);
+    const control = createController(node, ff.browser, undefined, { weather: { fetch, geolocation: fakeGeolocation() } });
+    await control.refresh();
+    const flush = async () => { for (let i = 0; i < 8; i++) { await ff.settle(); await nextFrame(); await settle(); } };
+    await flush();
+    return { ff, node, flush };
+  }
+  const ok = await board();
+  const strip = ok.node.querySelector(".tile.weather .weather-hours");
+  assert.ok(shown(strip) && strip.scrollWidth - strip.clientWidth > 200, "the strip can scroll");
+  strip.scrollLeft = 200; strip.dispatchEvent(new Event("scroll"));
+  ok.ff.commitExternal(5, "https://b.example/"); await ok.flush();
+  const after = ok.node.querySelector(".tile.weather .weather-hours");
+  assert.ok(Math.abs(after.scrollLeft - 200) <= 1, `strip scroll kept: ${after.scrollLeft}`);
+  // A cache update from another Foxy page repaints the tile and keeps it too.
+  const entry = (await ok.ff.browser.storage.local.get("weather")).weather;
+  await ok.ff.browser.storage.local.set({ weather: { ...entry, fetchedAt: entry.fetchedAt + 1000 } }); await ok.flush();
+  assert.ok(Math.abs(ok.node.querySelector(".tile.weather .weather-hours").scrollLeft - 200) <= 1, "kept after a repaint");
+  for (const [setup, selector] of [[{ dataCollection: [] }, ".weather-allow"], [{ fail: true }, ".weather-retry"]]) {
+    const { ff, node, flush } = await board(setup);
+    const button = node.querySelector(`.tile.weather ${selector}`);
+    assert.ok(button, selector);
+    button.focus();
+    ff.commitExternal(5, `https://c.example/${selector.slice(1)}`); await flush();
+    assert.ok(document.activeElement?.matches(`.tile.weather ${selector}`), `${selector} keeps focus: ${document.activeElement?.className}`);
+    assert.ok(document.activeElement !== button, "the board was re-rendered");
+  }
+});
+
 function weatherDeps(overrides = {}) {
-  const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], tabs: [], dataCollection: overrides.dataCollection ?? ["locationInfo"] });
+  const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], tabs: [], dataCollection: overrides.dataCollection ?? ["locationInfo"],
+    permissions: overrides.permissions ?? ["geolocation"] });
   let now = NOW;
   const settings = { synced: { ...SYNCED }, device: { ...DEFAULT_DEVICE } };
   return { ff, api: ff.browser, fetch: fakeFetch(), geolocation: fakeGeolocation(), settings: () => settings,
@@ -396,7 +540,8 @@ test("pane: Enter picks the first result; Use my location resets to auto", async
 test("board with weather access but no location shows set-a-location and makes no request", async () => {
   await styles();
   const fetch = fakeFetch();
-  const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], tabs: [{ id: 99, windowId: 1 }], selfTabId: 99, dataCollection: ["locationInfo"] });
+  const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], tabs: [{ id: 99, windowId: 1 }], selfTabId: 99, dataCollection: ["locationInfo"],
+    permissions: ["geolocation"] });
   const node = document.createElement("div"); node.className = "board"; node.style.cssText = "width:1232px;height:800px";
   fixture().append(node);
   const control = createController(node, ff.browser, undefined, { weather: { fetch, geolocation: undefined } });

@@ -48,6 +48,7 @@ export function parseForecast(json) {
       sunrise: number(d.sunrise[i]) ? d.sunrise[i] * 1000 : null, sunset: number(d.sunset[i]) ? d.sunset[i] * 1000 : null }));
   return {
     offset: number(json.utc_offset_seconds) ? json.utc_offset_seconds : 0,
+    timezone: zoneName(json.timezone),
     current: { time: c.time * 1000, temp: c.temperature_2m, feels: optional(c.apparent_temperature), code: c.weather_code,
       isDay: c.is_day !== 0, wind: optional(c.wind_speed_10m), humidity: optional(c.relative_humidity_2m),
       precipitation: optional(c.precipitation) },
@@ -60,10 +61,39 @@ export function upcomingHours(data, now) {
   return data.hourly.filter(hour => hour.time + 3600000 > now).slice(0, 24);
 }
 
-/** Up to 7 days from today at the location. */
+/** Up to 7 days from today at the location: today is the last day that has started. */
 export function upcomingDays(data, now) {
-  return data.daily.filter(day => day.time + 86400000 > now).slice(0, 7);
+  const started = data.daily.findLastIndex(day => day.time <= now);
+  return data.daily.slice(Math.max(0, started), Math.max(0, started) + 7);
 }
+
+function zoneName(value) {
+  if (typeof value !== "string" || !value) return null;
+  if (formats.has(value)) return value;
+  try { new Intl.DateTimeFormat("en", { timeZone: value }); return value; } catch { return null; }
+}
+
+// Wall-clock fields at the location: its time zone (right across DST changes),
+// or the reply's fixed offset when there is no usable zone name.
+const formats = new Map();
+function wall(ms, data) {
+  const zone = zoneName(data.timezone);
+  if (zone) {
+    if (!formats.has(zone)) formats.set(zone, new Intl.DateTimeFormat("en", { timeZone: zone, hourCycle: "h23", hour: "numeric", weekday: "short" }));
+    const parts = formats.get(zone).formatToParts(ms);
+    const part = type => parts.find(p => p.type === type)?.value;
+    return { hour: Number(part("hour")) % 24, weekday: part("weekday") };
+  }
+  const local = new Date(ms + (data.offset ?? 0) * 1000);
+  return { hour: local.getUTCHours(), weekday: local.toLocaleDateString("en", { weekday: "short", timeZone: "UTC" }) };
+}
+
+export function hourLabel(ms, data, format) {
+  const { hour } = wall(ms, data);
+  return format === "12" ? `${hour % 12 || 12} ${hour < 12 ? "AM" : "PM"}` : String(hour).padStart(2, "0");
+}
+
+export const dayLabel = (ms, data) => wall(ms, data).weekday;
 
 export function temperature(celsius, unit) {
   return Math.round(unit === "F" ? celsius * 9 / 5 + 32 : celsius) + 0;
@@ -105,22 +135,22 @@ export async function readCache(api) {
 }
 
 /**
- * One refresh. States: consent (locationInfo not granted: nothing is located,
- * fetched or shown), ok (data, maybe stale), no-place (no position and no
- * chosen place: no request is made), error (nothing to show).
+ * One refresh. States: consent (locationInfo, and for my location geolocation,
+ * not granted: nothing is located, fetched or shown), ok (data, maybe stale),
+ * no-place (geolocation denied and no chosen place: no request is made),
+ * error (nothing to show; a retry may help).
  */
 export async function loadWeather({ api, fetch, geolocation, place = "auto", now, force = false }) {
   const want = wantOf(place);
-  if (!(await hasConsent(api))) return { status: "consent", want };
+  if (!(await hasConsent(api, want))) return { status: "consent", want };
   const cache = await readCache(api);
   const cached = cache?.want === want ? cache : null;
   if (!force && isFresh(cached, want, now)) return { status: "ok", stale: false, ...cached };
   let coords, name = null;
   if (want === "auto") {
     const found = await locate(geolocation);
-    if (found.error) {
-      return found.error !== "denied" && cached ? { status: "ok", stale: true, ...cached } : { status: "no-place", want };
-    }
+    if (found.error === "denied") return { status: "no-place", want };
+    if (found.error) return cached ? { status: "ok", stale: true, ...cached } : { status: "error", want };
     coords = found;
   } else {
     coords = { lat: roundCoord(place.lat), lon: roundCoord(place.lon) };
@@ -134,6 +164,8 @@ export async function loadWeather({ api, fetch, geolocation, place = "auto", now
     return cached ? { status: "ok", stale: true, ...cached } : { status: "error", want };
   }
   if (want === "auto") name = cached?.key === key && cached.place ? cached.place : await reverseName(coords, fetch);
+  // A revoke while the requests ran: keep nothing.
+  if (!(await hasConsent(api, want))) return { status: "consent", want };
   const entry = { want, key, place: name, fetchedAt: now, data };
   try { await api.storage.local.set({ [CACHE_KEY]: entry }); }
   catch (error) { console.warn("Foxy: could not save weather", error); }

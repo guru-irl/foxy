@@ -404,9 +404,11 @@ body {
   font: normal 500 12px / 20px "Foxy Sans", system-ui, sans-serif;
   letter-spacing: 0.01em;
   white-space: nowrap;
-  text-overflow: ellipsis;
 }
 .weather-allow:hover { background: var(--pressed); }
+.weather .weather-allow-glyph,
+.weather .weather-retry-glyph { display: none; }
+.weather .weather-retry-glyph { width: 16px; height: 16px; stroke-width: 1.75px; color: currentColor; }
 .weather[data-state="consent"] .weather-body { gap: 10px; }
 .weather[data-state="consent"] .weather-message { max-width: 22ch; }
 .weather:not([data-state="ok"]) .weather-body {
@@ -450,7 +452,11 @@ body {
     overflow-y: hidden;
     scrollbar-width: none;
     outline: none;
+    /* Touch swipes pan the strip natively instead of moving the tile. */
+    touch-action: pan-x;
+    border-radius: 10px;
   }
+  .weather-hours:focus-visible { background: var(--hover); }
   .weather-hours[data-scroll-start] { --fade-start: 24px; }
   .weather-hours[data-scroll-end] { --fade-end: 24px; }
   .weather-hours[data-scroll-start],
@@ -478,8 +484,18 @@ body {
   .weather-hour-pop { min-height: 12px; color: var(--weather-rain); font-size: 9px; line-height: 12px; }
 }
 
-@container (height >= 260px) and (150px <= width < 260px) {
+/* Tall below 300 px wide: the summary stays under the reading, and the
+   reading follows the width, so 101° and -13° fit 3-column tiles. */
+@container (height >= 260px) and (150px <= width < 300px) {
   .weather-details { display: none; }
+  .weather-now { grid-template-columns: auto 1fr; }
+  .weather-summary { grid-column: 1 / -1; text-align: left; }
+  .weather-temp { font-size: min(56px, 21cqw); }
+}
+
+/* Medium below 260 px wide: the reading follows the width too. */
+@container (100px <= height < 260px) and (150px <= width < 260px) {
+  .weather-temp { font-size: min(40px, 19cqw, calc(100cqh - 70px)); }
 }
 
 /* Taller: seven days with a shared min / max scale. */
@@ -532,6 +548,15 @@ body {
   }
 }
 
+/* Narrow taller tiles: no day glyph, tighter gaps, and the bar keeps room. */
+@container (height >= 460px) and (150px <= width < 220px) {
+  .weather-day {
+    grid-template-columns: auto auto minmax(20px, 1fr) auto;
+    gap: 6px;
+  }
+  .weather .weather-day-glyph { display: none; }
+}
+
 /* Small: glyph and temperature only, centred; side by side when wide. */
 @container (width < 150px) or (height < 100px) {
   .weather-body {
@@ -566,9 +591,39 @@ body {
 @container (width < 80px) or (height < 80px) {
   .weather-temp { font-weight: 500; }
 }
+/* Narrow: Allow under a small cloud; the full words stay in the label. */
+@container (width < 100px) {
+  .weather .weather-allow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    min-height: 0;
+    padding: 4px 6px;
+    font-size: 11px;
+    font-stretch: 100%;
+    line-height: 13px;
+    letter-spacing: 0;
+  }
+  .weather .weather-allow-glyph { display: block; width: min(18px, 30cqh); height: min(18px, 30cqh); color: currentColor; }
+  .weather-allow-more { display: none; }
+}
+@container (width < 50px) {
+  .weather .weather-allow { padding-inline: 4px; font-size: 10px; }
+}
+/* Narrow: RETRY becomes a small round icon button. */
 @container (width < 80px) {
-  /* Two short lines fit a 1 x 1 tile. */
-  .weather-allow { width: 100%; padding: 5px 0; border-radius: 10px; font-size: 9px; font-stretch: 80%; line-height: 11px; letter-spacing: 0; white-space: normal; text-overflow: clip; }
+  .weather .weather-retry {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    min-height: 0;
+    padding: 0;
+    border-radius: 50%;
+  }
+  .weather .weather-retry-glyph { display: block; }
+  .weather-retry-text { display: none; }
 }
 
 /* Resolve the alpha variables here, so live settings inherited from the board

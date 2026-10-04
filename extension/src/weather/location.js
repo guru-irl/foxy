@@ -15,7 +15,7 @@ export function validPlace(value) {
     && finite(value.lat, 90) && finite(value.lon, 180);
 }
 
-/** The current position, rounded; or why there is none. Never prompts (manifest permission). */
+/** The current position, rounded; or why there is none. Call only with the geolocation permission granted, so it never prompts. */
 export function locate(geolocation, { timeout = 15000 } = {}) {
   if (!geolocation?.getCurrentPosition) return Promise.resolve({ error: "denied" });
   return new Promise(resolve => {

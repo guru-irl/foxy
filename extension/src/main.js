@@ -801,6 +801,7 @@ function captureView(root) {
     } else if (active.matches(".rows")) focus = { rowsKey: rowsKey(active) };
     else if (active.matches(".grid")) focus = { grid: true };
     else if (active.matches(".settings-cell")) focus = { gear: true };
+    else if (active.closest(".weather")) focus = { weather: active.className };
     else if (group) focus = { groupId: group.dataset.groupId, className: active.className,
       index: [...root.querySelectorAll(".column[data-group-id]")].indexOf(group) };
   }
@@ -814,6 +815,9 @@ function restoreView(root, { focus, top, tops }) {
     let active;
     const list = [...root.querySelectorAll(".rows")].find(list => rowsKey(list) === focus.rowsKey);
     if (focus.gear) active = root.querySelector(".settings-cell");
+    else if (focus.weather !== undefined) {
+      active = [...root.querySelectorAll(".weather button, .weather [tabindex]")].find(node => node.className === focus.weather);
+    }
     else if (focus.grid) active = root.querySelector(".grid");
     else if (focus.tabId === undefined && focus.rowsKey !== undefined) active = list;
     else {

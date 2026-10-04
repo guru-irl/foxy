@@ -2,13 +2,21 @@
 // refresh loop. Network, clock, geolocation and visibility are injected.
 import { condition, GLYPHS } from "../weather/codes.js";
 import { loadWeather, readCache, wantOf, validCache, temperature, wind, updatedAgo, upcomingHours, upcomingDays,
-  REFRESH_MS, CACHE_KEY } from "../weather/data.js";
+  hourLabel, dayLabel, REFRESH_MS, CACHE_KEY } from "../weather/data.js";
 import { hasConsent, requestConsent, watchConsent } from "../weather/consent.js";
 
 const SVG = "http://www.w3.org/2000/svg";
 const states = new WeakMap();
 const controllers = new WeakMap();
 const observers = new WeakMap();
+// Per board: the hourly strip's scroll position, kept across repaints while
+// the strip starts at the same hour.
+const scrolls = new WeakMap();
+// Interface glyphs, drawn like the weather glyphs.
+const ICONS = {
+  // A clockwise arc from the right round to the top right, with its arrowhead there.
+  retry: [["path", { d: "M19 12a7 7 0 1 1-2.05-4.95" }], ["path", { d: "M16.95 2.55v4.5h-4.5" }]],
+};
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -25,7 +33,7 @@ export function glyph(name, className = "weather-glyph") {
   svg.setAttribute("aria-hidden", "true");
   svg.dataset.glyph = name;
   let mask = null;
-  for (const [tag, { accent, fill, behind, ...attributes }] of GLYPHS[name] ?? GLYPHS.cloudy) {
+  for (const [tag, { accent, fill, behind, ...attributes }] of GLYPHS[name] ?? ICONS[name] ?? GLYPHS.cloudy) {
     if (tag === "cutout") {
       // Everything except the cloud and a margin around its outline.
       mask = `foxy-glyph-${++masks}`;
@@ -55,36 +63,44 @@ export function weatherTile() {
   return tile;
 }
 
-// Wall-clock fields at the forecast location.
-const local = (ms, offset) => new Date(ms + offset * 1000);
-function hourLabel(ms, offset, format) {
-  const hour = local(ms, offset).getUTCHours();
-  return format === "12" ? `${hour % 12 || 12} ${hour < 12 ? "AM" : "PM"}` : String(hour).padStart(2, "0");
-}
-const dayName = (ms, offset) => local(ms, offset).toLocaleDateString("en", { weekday: "short", timeZone: "UTC" });
 const degrees = (celsius, unit) => `${temperature(celsius, unit)}°`;
 
 function message(body, text, retry) {
   body.append(el("p", "weather-message", text));
   if (retry) {
-    const button = el("button", "weather-retry settings-pill", "RETRY");
+    // Below 80 px wide only the round glyph shows (CSS).
+    const button = el("button", "weather-retry settings-pill");
     button.type = "button";
-    button.setAttribute("aria-label", "Retry loading the weather");
+    button.setAttribute("aria-label", "Retry");
+    button.title = "Retry";
+    button.append(glyph("retry", "weather-retry-glyph"), el("span", "weather-retry-text", "RETRY"));
     body.append(button);
   }
 }
 
-/** Fill one tile from a state; pure DOM, no requests. */
+/** Fill one tile from a state; pure DOM, no requests. Focus inside the tile stays on the same control. */
 export function renderWeather(tile, state, settings = {}, now = Date.now()) {
-  const unit = settings.tempUnit === "F" ? "F" : "C";
   const body = tile.querySelector(".weather-body") ?? tile.appendChild(el("div", "weather-body tile-grab"));
+  const focused = body.contains(document.activeElement) ? document.activeElement.className : null;
+  fill(tile, body, state, settings, now);
+  if (focused !== null) [...body.querySelectorAll("button, [tabindex]")].find(node => node.className === focused)?.focus();
+}
+
+function fill(tile, body, state, settings, now) {
+  const unit = settings.tempUnit === "F" ? "F" : "C";
   body.replaceChildren();
   tile.dataset.state = state?.status ?? "loading";
   tile.toggleAttribute("data-stale", !!state?.stale);
   if (state?.status === "consent") {
-    body.append(el("p", "weather-message", "Uses your approximate location"));
-    const allow = el("button", "weather-allow settings-pill", "Allow weather");
+    body.append(el("p", "weather-message", state.want === "auto" ? "Uses your approximate location" : "Uses your chosen location"));
+    // Below 100 px wide only "Allow" shows, under a small cloud (CSS).
+    const allow = el("button", "weather-allow settings-pill");
     allow.type = "button";
+    allow.setAttribute("aria-label", "Allow weather");
+    allow.title = "Allow weather";
+    const label = el("span", "weather-allow-label", "Allow");
+    label.append(el("span", "weather-allow-more", " weather"));
+    allow.append(glyph("cloudy", "weather-allow-glyph"), label);
     body.append(allow);
     return;
   }
@@ -92,7 +108,7 @@ export function renderWeather(tile, state, settings = {}, now = Date.now()) {
   if (state?.status === "error") { message(body, "Weather is unavailable", true); return; }
   if (state?.status !== "ok") { body.append(el("p", "weather-message weather-loading", "Loading weather")); return; }
 
-  const { data } = state, current = data.current, offset = data.offset;
+  const { data } = state, current = data.current;
   const now_ = condition(current.code, current.isDay);
   const days = upcomingDays(data, now), today = days[0];
 
@@ -129,12 +145,15 @@ export function renderWeather(tile, state, settings = {}, now = Date.now()) {
   }
 
   const hours = el("div", "weather-hours");
-  hours.tabIndex = -1;
+  // Focusable so the arrow keys can scroll it; a vertical wheel scrolls it too.
+  hours.tabIndex = 0;
   hours.setAttribute("aria-label", "Next 24 hours");
-  for (const [i, hour] of upcomingHours(data, now).entries()) {
+  const upcoming = upcomingHours(data, now);
+  hours.dataset.first = String(upcoming[0]?.time ?? "");
+  for (const [i, hour] of upcoming.entries()) {
     // The first slot is now: it shows the current reading, as the hero does.
     const item = el("div", "weather-hour"), shown = i === 0 ? current : hour;
-    item.append(el("div", "weather-hour-time", i === 0 ? "Now" : hourLabel(hour.time, offset, settings.timeFormat)),
+    item.append(el("div", "weather-hour-time", i === 0 ? "Now" : hourLabel(hour.time, data, settings.timeFormat)),
       glyph(condition(shown.code, shown.isDay).glyph, "weather-hour-glyph"),
       el("div", "weather-hour-temp", degrees(shown.temp, unit)));
     const pop = el("div", "weather-hour-pop", hour.pop >= 20 ? `${Math.round(hour.pop / 10) * 10}%` : "");
@@ -158,8 +177,10 @@ export function renderWeather(tile, state, settings = {}, now = Date.now()) {
       }
       const { label, glyph: name } = condition(day.code, true);
       const icon = glyph(name, "weather-day-glyph");
+      icon.removeAttribute("aria-hidden");
+      icon.setAttribute("role", "img");
       icon.setAttribute("aria-label", label);
-      row.append(el("span", "weather-day-name", i === 0 ? "Today" : dayName(day.time, offset)), icon,
+      row.append(el("span", "weather-day-name", i === 0 ? "Today" : dayLabel(day.time, data)), icon,
         el("span", "weather-day-min", degrees(day.min, unit)), bar, el("span", "weather-day-max", degrees(day.max, unit)));
       list.append(row);
     }
@@ -167,6 +188,31 @@ export function renderWeather(tile, state, settings = {}, now = Date.now()) {
   body.append(top, hero, details, hours, list);
   edges(hours);
   hours.addEventListener("scroll", () => edges(hours), { passive: true });
+  hours.addEventListener("wheel", wheel);
+  hours.addEventListener("keydown", keys);
+}
+
+const SLOT = 42; // one hour: 40 px slot and 2 px gap
+
+// A vertical wheel scrolls the strip sideways while it can move that way;
+// otherwise the event is left alone and the board scrolls.
+function wheel(event) {
+  const strip = event.currentTarget;
+  if (event.ctrlKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+  const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? strip.clientWidth : 1);
+  const extent = strip.scrollWidth - strip.clientWidth;
+  if (delta > 0 ? strip.scrollLeft >= extent - 0.5 : strip.scrollLeft <= 0.5) return;
+  event.preventDefault();
+  strip.scrollLeft += delta;
+}
+
+function keys(event) {
+  const strip = event.currentTarget;
+  const step = { ArrowRight: SLOT, ArrowLeft: -SLOT, PageDown: strip.clientWidth, PageUp: -strip.clientWidth }[event.key];
+  if (event.key === "Home" || event.key === "End") strip.scrollLeft = event.key === "Home" ? 0 : strip.scrollWidth;
+  else if (step) strip.scrollLeft += step;
+  else return;
+  event.preventDefault();
 }
 
 function edges(node) {
@@ -175,11 +221,21 @@ function edges(node) {
   node.toggleAttribute("data-scroll-end", extent > 0 && extent - node.scrollLeft >= 1);
 }
 
+/** Paint `state` into the board's tile, keeping the strip's scroll for the same first hour. */
+function paintTile(root, tile, state, settings, now) {
+  renderWeather(tile, state, settings, now);
+  const strip = tile.querySelector(".weather-hours");
+  if (!strip) return;
+  const kept = scrolls.get(root);
+  if (kept && kept.first === strip.dataset.first && kept.left > 0) { strip.scrollLeft = kept.left; edges(strip); }
+  strip.addEventListener("scroll", () => scrolls.set(root, { first: strip.dataset.first, left: strip.scrollLeft }), { passive: true });
+}
+
 /** Remember a state for this board and paint it. */
 export function showWeatherState(root, state, settings, now) {
   states.set(root, state);
   const tile = root.querySelector(".weather");
-  if (tile) renderWeather(tile, state, settings, now ?? Date.now());
+  if (tile) paintTile(root, tile, state, settings, now ?? Date.now());
 }
 
 /** Called after every board render: repaint the new tile and let the loop catch up. */
@@ -188,7 +244,7 @@ export function paintWeather(root, settings = {}) {
   const control = controllers.get(root);
   observers.get(root)?.disconnect();
   if (tile) {
-    renderWeather(tile, states.get(root), settings, control?.now() ?? Date.now());
+    paintTile(root, tile, states.get(root), settings, control?.now() ?? Date.now());
     // Resizing the tile changes which hours fit, so the edge fade follows it.
     const observer = new ResizeObserver(() => { const strip = tile.querySelector(".weather-hours"); if (strip) edges(strip); });
     observer.observe(tile);
@@ -210,7 +266,14 @@ export function startWeather(root, { api, fetch, geolocation, settings, now = Da
     const s = current();
     showWeatherState(root, states.get(root), s?.synced ?? {}, now());
   };
-  const askConsent = () => { states.set(root, { status: "consent", want: placeWant() }); paint(); };
+  // Without the permissions nothing is kept either: cached coordinates, place
+  // name and forecast go (the chosen city setting stays).
+  const askConsent = () => {
+    states.set(root, { status: "consent", want: placeWant() });
+    paint();
+    Promise.resolve().then(() => api.storage.local.remove(CACHE_KEY))
+      .catch(error => console.warn("Foxy: could not clear weather", error));
+  };
   async function wake(force = false) {
     clearTimeout(timer);
     const s = current();
@@ -225,8 +288,13 @@ export function startWeather(root, { api, fetch, geolocation, settings, now = Da
     busy = { want };
     const epoch = revoked;
     try {
-      // Nothing is shown, located or fetched until locationInfo is granted.
-      if (!(await hasConsent(api))) { if (!stopped) askConsent(); return; }
+      // Nothing is shown, located or fetched until locationInfo (and, for my
+      // location, geolocation) is granted.
+      if (!(await hasConsent(api, want))) {
+        if (!stopped && epoch === revoked) askConsent();
+        if (again) { again = false; queueMicrotask(() => wake()); }
+        return;
+      }
       if (stopped || epoch !== revoked) return;
       lastAttempt = now();
       if (!state || state.want !== want || waiting) {
@@ -254,19 +322,21 @@ export function startWeather(root, { api, fetch, geolocation, settings, now = Da
     states.set(root, { status: "ok", stale: false, ...entry });
     paint();
   };
-  const onVisible = () => { if (!hidden()) wake(); };
+  const onVisible = () => { if (hidden()) clearTimeout(timer); else wake(); };
   const onClick = event => {
     if (event.target.closest?.(".weather-retry")) wake(true);
     // permissions.request needs the click: it runs here, before any await.
-    if (event.target.closest?.(".weather-allow")) requestConsent(api).then(granted => { if (granted) wake(); });
+    if (event.target.closest?.(".weather-allow")) requestConsent(api, placeWant()).then(granted => { if (granted) wake(); });
   };
-  // Granted or revoked anywhere, including about:addons.
-  const unwatch = watchConsent(api, granted => {
+  // Granted or revoked anywhere, including about:addons. Geolocation matters
+  // only for my location.
+  const unwatch = watchConsent(api, (granted, which) => {
     if (stopped) return;
     if (granted) { wake(); return; }
+    if (!which.has("locationInfo") && placeWant() !== "auto") return;
     revoked++; again = false; clearTimeout(timer);
     askConsent();
-  });
+  }, ["locationInfo", "geolocation"]);
   api.storage.onChanged.addListener(onStorage);
   document.addEventListener("visibilitychange", onVisible);
   root.addEventListener("click", onClick);
