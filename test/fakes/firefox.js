@@ -720,20 +720,30 @@ export function createFirefox(setup = {}) {
           (match[2].startsWith("*.") && (url.hostname === match[2].slice(2) || url.hostname.endsWith(match[2].slice(1)))));
     } catch { return false; }
   }
-  api("permissions", "contains", props => (props.origins ?? []).every(origin => [...origins].some(grant => covers(grant, origin))));
-  api("permissions", "getAll", () => ({ permissions: [], origins: [...origins] }));
+  // Optional data collection grants, as declared in data_collection_permissions.optional.
+  const collection = new Set(setup.dataCollection ?? []);
+  const OPTIONAL_COLLECTION = ["locationInfo"];
+  api("permissions", "contains", props => (props.origins ?? []).every(origin => [...origins].some(grant => covers(grant, origin)))
+    && (props.data_collection ?? []).every(perm => collection.has(perm)));
+  api("permissions", "getAll", () => ({ permissions: [], origins: [...origins], data_collection: [...collection] }));
   api("permissions", "request", props => {
     if (!userInput) throw new Error("permissions.request requires handling user input");
+    for (const perm of props.data_collection ?? []) {
+      if (!OPTIONAL_COLLECTION.includes(perm)) throw new Error(`Cannot request data collection permission ${perm}`);
+    }
     if (setup.requestPending) return new Promise(() => {});
     if (setup.requestGranted === false) return false;
     const added = (props.origins ?? []).filter(origin => !origins.has(origin));
     for (const origin of added) origins.add(origin);
-    if (added.length) queue("permissions.onAdded", { permissions: [], origins: added });
+    const granted = (props.data_collection ?? []).filter(perm => !collection.has(perm));
+    for (const perm of granted) collection.add(perm);
+    if (added.length || granted.length) queue("permissions.onAdded", { permissions: [], origins: added, data_collection: granted });
     return true;
   });
   api("permissions", "remove", props => {
     const removed = (props.origins ?? []).filter(origin => origins.delete(origin));
-    if (removed.length) queue("permissions.onRemoved", { permissions: [], origins: removed });
+    const dropped = (props.data_collection ?? []).filter(perm => collection.delete(perm));
+    if (removed.length || dropped.length) queue("permissions.onRemoved", { permissions: [], origins: removed, data_collection: dropped });
     return true;
   });
   api("scripting", "executeScript", details => {

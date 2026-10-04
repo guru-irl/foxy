@@ -6,6 +6,8 @@ import { condition, GLYPHS } from "../extension/src/weather/codes.js";
 import { roundCoord, validPlace, locate, searchPlaces, reverseName } from "../extension/src/weather/location.js";
 import { forecastUrl, parseForecast, temperature, wind, updatedAgo, isFresh, loadWeather, REFRESH_MS, CACHE_KEY,
   upcomingHours, upcomingDays } from "../extension/src/weather/data.js";
+import { hasConsent, requestConsent, watchConsent } from "../extension/src/weather/consent.js";
+import { settingActions } from "../extension/src/settings/pane.js";
 
 const NOW = (1790985600 - 3600 + 13 * 3600 + 1200) * 1000; // 13:20 local on the fixture's first day
 
@@ -164,7 +166,7 @@ test("reverseName asks BigDataCloud's client endpoint with rounded coordinates",
 });
 
 function deps(overrides = {}) {
-  const ff = createFirefox();
+  const ff = createFirefox({ dataCollection: overrides.dataCollection ?? ["locationInfo"] });
   return { ff, api: ff.browser, fetch: fakeFetch(), geolocation: fakeGeolocation(), place: "auto", now: NOW, ...overrides };
 }
 
@@ -240,6 +242,51 @@ test("a chosen place skips geolocation and uses its rounded coordinates and name
   const auto = deps({ api: d.api });
   await loadWeather(auto);
   assert.equal(auto.fetch.calls.length, 2);
+});
+
+test("without the locationInfo permission nothing is located, fetched or shown, even from a fresh cache", async () => {
+  const granted = deps();
+  await loadWeather(granted);
+  for (const place of ["auto", { name: "Berlin", lat: 52.52, lon: 13.41 }]) {
+    const d = deps({ dataCollection: [], place });
+    if (place === "auto") await d.api.storage.local.set(await granted.api.storage.local.get(CACHE_KEY));
+    assert.deepEqual(await loadWeather({ ...d, force: true }), { status: "consent", want: place === "auto" ? "auto" : "52.52,13.41" });
+    assert.deepEqual(await loadWeather(d), { status: "consent", want: place === "auto" ? "auto" : "52.52,13.41" });
+    assert.equal(d.fetch.calls.length, 0);
+    assert.equal(d.geolocation.calls, 0);
+  }
+});
+
+test("consent: contains, request from user input only, and grant / revoke events", async () => {
+  const d = deps({ dataCollection: [] });
+  const seen = [];
+  const unwatch = watchConsent(d.api, granted => seen.push(granted));
+  assert.equal(await hasConsent(d.api), false);
+  assert.equal(await requestConsent(d.api), false, "a request outside user input fails");
+  const asked = d.ff.withUserInput(() => requestConsent(d.api));
+  assert.equal(await asked, true);
+  assert.deepEqual(d.ff.calls.find(call => call.api === "permissions.request").args, [{ data_collection: ["locationInfo"] }]);
+  assert.equal(await hasConsent(d.api), true);
+  await d.api.permissions.remove({ data_collection: ["locationInfo"] });
+  await d.ff.settle();
+  assert.deepEqual(seen, [true, false]);
+  assert.equal(await hasConsent(d.api), false);
+  unwatch();
+  assert.equal(await hasConsent(undefined), false);
+  // Other permission changes are not about weather.
+  await d.ff.withUserInput(() => d.api.permissions.request({ origins: ["https://example.com/*"] }));
+  await d.ff.settle();
+  assert.deepEqual(seen, [true, false]);
+});
+
+test("city search asks nothing until locationInfo is granted", async () => {
+  const denied = deps({ dataCollection: [] });
+  assert.deepEqual(await settingActions(denied.api, () => {}, denied.fetch).searchPlaces("Dublin"), []);
+  assert.equal(denied.fetch.calls.length, 0);
+  const granted = deps();
+  const places = await settingActions(granted.api, () => {}, granted.fetch).searchPlaces("Dublin");
+  assert.equal(places.length, 3);
+  assert.equal(granted.fetch.calls.length, 1);
 });
 
 test("force refreshes even a fresh cache", async () => {

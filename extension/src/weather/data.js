@@ -1,6 +1,7 @@
 // Weather data: Open-Meteo forecast, parsing, units and the shared cache in
 // storage.local. Every dependency (fetch, clock, geolocation) is passed in.
 import { roundCoord, placeKey, locate, reverseName, getJson } from "./location.js";
+import { hasConsent } from "./consent.js";
 
 export const REFRESH_MS = 15 * 60000;
 export const CACHE_KEY = "weather";
@@ -104,11 +105,13 @@ export async function readCache(api) {
 }
 
 /**
- * One refresh. States: ok (data, maybe stale), no-place (no position and no
+ * One refresh. States: consent (locationInfo not granted: nothing is located,
+ * fetched or shown), ok (data, maybe stale), no-place (no position and no
  * chosen place: no request is made), error (nothing to show).
  */
 export async function loadWeather({ api, fetch, geolocation, place = "auto", now, force = false }) {
   const want = wantOf(place);
+  if (!(await hasConsent(api))) return { status: "consent", want };
   const cache = await readCache(api);
   const cached = cache?.want === want ? cache : null;
   if (!force && isFresh(cached, want, now)) return { status: "ok", stale: false, ...cached };

@@ -47,6 +47,8 @@ SCENARIOS = {
     "narrow": ("scenario=one-window", 900, 900),
     "weather": ("scenario=weather", 1600, 1000),
     "weather-light": ("scenario=weather&scheme=light", 1600, 1000),
+    "weather-allow": ("scenario=weather&weather=ask&settings=open", 1600, 1000),
+    "weather-allow-light": ("scenario=weather&weather=ask&settings=open&scheme=light", 1600, 1000),
 }
 
 

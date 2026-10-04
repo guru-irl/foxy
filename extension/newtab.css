@@ -211,6 +211,8 @@ body {
 .weather-result-name { flex: none; }
 .weather-result-detail { overflow: hidden; color: var(--text-muted); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
 .weather-auto { margin-top: 8px; background: var(--hover); }
+.weather-search [hidden] { display: none; }
+.weather-search .weather-allow { display: block; margin-top: 6px; background: var(--hover); }
 .settings-reset { background: var(--hover); }
 .settings-pane button:focus-visible { background: var(--thumb); }
 .options-page .settings-pane {
@@ -353,7 +355,8 @@ body {
 }
 .weather-glyph { width: 32px; height: 32px; }
 .weather-temp {
-  font: normal 700 40px / 1 "Foxy Serif", serif;
+  font: normal 300 40px / 1 "Foxy Sans", system-ui, sans-serif;
+  letter-spacing: -0.02em;
   font-variant-numeric: lining-nums tabular-nums;
   white-space: nowrap;
 }
@@ -384,7 +387,8 @@ body {
   line-height: 16px;
   text-align: center;
 }
-.weather-retry {
+.weather-retry,
+.weather-allow {
   padding: 4px 12px;
   border-radius: 999px;
   background: var(--hover);
@@ -393,6 +397,18 @@ body {
   font-stretch: 80%;
   letter-spacing: 0.08em;
 }
+.weather-allow {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text);
+  font: normal 500 12px / 20px "Foxy Sans", system-ui, sans-serif;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.weather-allow:hover { background: var(--pressed); }
+.weather[data-state="consent"] .weather-body { gap: 10px; }
+.weather[data-state="consent"] .weather-message { max-width: 22ch; }
 .weather:not([data-state="ok"]) .weather-body {
   align-items: center;
   justify-content: center;
@@ -528,9 +544,11 @@ body {
   .weather-top, .weather-summary, .weather-details, .weather-hours, .weather-days { display: none; }
   .weather-now { display: flex; flex-direction: column; align-items: center; gap: min(6px, 4cqh); }
   .weather-glyph { width: min(44cqh, 52cqw); height: min(44cqh, 52cqw); }
-  .weather-temp { font-size: min(30cqh, 30cqw); }
+  .weather-temp { font-size: min(30cqh, 30cqw); font-weight: 400; }
   .weather-message { font-size: min(12px, 18cqw); line-height: 1.2; }
   .weather-retry { padding: 2px 8px; }
+  .weather-allow { padding: 2px 8px; font-size: min(11px, 16cqw); line-height: 18px; }
+  .weather[data-state="consent"] .weather-message,
   .weather[data-state="no-place"] .weather-message,
   .weather[data-state="error"] .weather-message { display: none; }
   .weather[data-state="no-place"] .weather-body::after {
@@ -544,6 +562,13 @@ body {
   .weather-now { flex-direction: row; gap: min(10px, 4cqw); }
   .weather-glyph { width: min(60cqh, 26cqw); height: min(60cqh, 26cqw); }
   .weather-temp { font-size: min(52cqh, 22cqw); }
+}
+@container (width < 80px) or (height < 80px) {
+  .weather-temp { font-weight: 500; }
+}
+@container (width < 80px) {
+  /* Two short lines fit a 1 x 1 tile. */
+  .weather-allow { width: 100%; padding: 5px 0; border-radius: 10px; font-size: 9px; font-stretch: 80%; line-height: 11px; letter-spacing: 0; white-space: normal; text-overflow: clip; }
 }
 
 /* Resolve the alpha variables here, so live settings inherited from the board

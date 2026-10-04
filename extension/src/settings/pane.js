@@ -1,5 +1,6 @@
 import { saveSetting, cardAlpha } from "./store.js";
 import { searchPlaces } from "../weather/location.js";
+import { hasConsent, requestConsent, watchConsent } from "../weather/consent.js";
 
 const panes = new WeakMap();
 let sequence = 0;
@@ -20,7 +21,11 @@ export function settingActions(api, onReset, fetch) {
   return {
     onChange(scope, key, value) { return saveSetting(api, scope, key, value); },
     onReset,
-    searchPlaces: query => searchPlaces(query, fetch),
+    // A searched city is location data too: nothing is sent before the grant.
+    searchPlaces: async query => (await hasConsent(api) ? searchPlaces(query, fetch) : []),
+    weatherAllowed: () => hasConsent(api),
+    allowWeather: () => requestConsent(api),
+    watchWeather: listener => watchConsent(api, listener),
   };
 }
 
@@ -180,15 +185,30 @@ export function renderSettings(container, state, handlers) {
       input.setAttribute("aria-label", "Search a city"); input.setAttribute("aria-describedby", caption.id);
       const results = el("div", "weather-results"); results.setAttribute("role", "group"); results.setAttribute("aria-label", "Matching places");
       const auto = el("button", "weather-auto settings-pill", "Use my location"); auto.type = "button";
-      search.append(input, results);
+      // A searched city is location data: until locationInfo is granted the field is a pill that asks.
+      const allow = el("button", "weather-allow settings-pill", "Allow weather"); allow.type = "button";
+      search.append(allow, input, results);
       row.append(current, search, auto);
-      let timer = 0, token = 0, found = { query: null, places: [] };
+      let timer = 0, token = 0, found = { query: null, places: [] }, allowed = !pane.handlers.weatherAllowed;
+      const setAllowed = value => {
+        allowed = value === true;
+        allow.hidden = allowed; input.hidden = !allowed;
+        if (!allowed) { clearTimeout(timer); ++token; results.replaceChildren(); found = { query: null, places: [] }; }
+      };
+      setAllowed(allowed);
+      pane.handlers.weatherAllowed?.().then(setAllowed, () => setAllowed(false));
+      pane.handlers.watchWeather?.(setAllowed);
+      // permissions.request needs the click: it runs here, before any await.
+      allow.addEventListener("click", () => {
+        pane.handlers.allowWeather?.().then(granted => { if (granted) { setAllowed(true); input.focus(); } });
+      });
       const pick = place => {
         clearTimeout(timer); ++token;
         input.value = ""; results.replaceChildren(); found = { query: null, places: [] };
         change("device", "weatherPlace", { name: place.name, lat: place.lat, lon: place.lon });
       };
       async function run(query) {
+        if (!allowed) return null;
         const mine = ++token;
         let places = [];
         try { places = await pane.handlers.searchPlaces?.(query) ?? []; }
@@ -213,7 +233,7 @@ export function renderSettings(container, state, handlers) {
         if (event.key !== "Enter" || event.isComposing) return;
         event.preventDefault();
         const query = input.value.trim();
-        if (query.length < 2) return;
+        if (query.length < 2 || !allowed) return;
         clearTimeout(timer);
         const places = found.query === query ? found.places : await run(query);
         if (places?.length && input.value.trim() === query) pick(places[0]);

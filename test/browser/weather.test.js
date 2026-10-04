@@ -76,6 +76,17 @@ for (const [w, h, tier] of [[1, 1, "small"], [2, 2, "small"], [3, 2, "medium"], 
   }
 }
 
+test("every weather text uses Foxy Sans; Foxy Serif is for the clock only", async () => {
+  for (const [w, h] of [[1, 1], [3, 2], [5, 8]]) {
+    const weather = await tile(w, h);
+    for (const node of [weather, ...weather.querySelectorAll(".weather-body *")]) {
+      if (node instanceof SVGElement || !shown(node)) continue;
+      const family = getComputedStyle(node).fontFamily;
+      assert.ok(family.startsWith('"Foxy Sans"') && !family.includes("Serif"), `${w}x${h} .${node.className}: ${family}`);
+    }
+  }
+});
+
 test("medium tier shows condition, place and high / low; tall adds the hourly strip from now", async () => {
   const weather = await tile(5, 5);
   assert.equal(weather.querySelector(".weather-condition").textContent, "Partly cloudy");
@@ -133,8 +144,75 @@ test("error with nothing cached: a message and a retry button that refreshes", a
   assert.equal(getComputedStyle(retry).borderRadius, "999px");
 });
 
+test("consent: an Allow weather pill and nothing else, at any size", async () => {
+  for (const [w, h] of [[1, 1], [2, 2], [3, 2], [5, 5]]) {
+    const weather = await tile(w, h, { status: "consent", want: "auto" });
+    assert.equal(weather.dataset.state, "consent");
+    const allow = weather.querySelector("button.weather-allow");
+    assert.ok(shown(allow), `${w}x${h} shows the pill`);
+    assert.equal(allow.textContent, "Allow weather");
+    assert.equal(getComputedStyle(allow).borderRadius, w === 1 ? "10px" : "999px");
+    assert.ok(allow.scrollWidth <= allow.clientWidth, `${w}x${h} pill text is not clipped`);
+    assert.equal(weather.querySelector(".weather-temp"), null);
+    inside(weather);
+  }
+});
+
+test("controller: without locationInfo nothing is located or fetched; the pill asks from the click, then loads", async () => {
+  const deps = weatherDeps({ dataCollection: [] }), node = await withTile(deps);
+  const control = startWeather(node, deps);
+  try {
+    control.wake(); await settle();
+    control.wake(true); await settle();
+    assert.equal(node.querySelector(".weather").dataset.state, "consent");
+    assert.deepEqual(deps.fetch.calls, []);
+    assert.equal(deps.geolocation.calls, 0);
+    const before = deps.ff.calls.length;
+    deps.ff.withUserInput(() => node.querySelector(".weather-allow").click());
+    assert.equal(deps.ff.calls[before].api, "permissions.request", "request must run in the click, before any await");
+    assert.deepEqual(deps.ff.calls[before].args, [{ data_collection: ["locationInfo"] }]);
+    await deps.ff.settle(); await settle();
+    assert.equal(node.querySelector(".weather").dataset.state, "ok");
+    assert.equal(deps.fetch.calls.filter(url => url.includes("api.open-meteo.com")).length, 1);
+  } finally { control.stop(); }
+});
+
+test("controller: a refused request keeps the pill and makes no request", async () => {
+  const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], tabs: [], requestGranted: false });
+  const deps = weatherDeps({ ff, api: ff.browser }), node = await withTile(deps);
+  const control = startWeather(node, deps);
+  try {
+    control.wake(); await settle();
+    ff.withUserInput(() => node.querySelector(".weather-allow").click());
+    await ff.settle(); await settle();
+    assert.equal(node.querySelector(".weather").dataset.state, "consent");
+    assert.deepEqual(deps.fetch.calls, []);
+  } finally { control.stop(); }
+});
+
+test("controller: revoking locationInfo (about:addons) returns the tile to the pill and stops requests", async () => {
+  const deps = weatherDeps(), node = await withTile(deps);
+  const control = startWeather(node, deps);
+  try {
+    control.wake(); await settle();
+    assert.equal(node.querySelector(".weather").dataset.state, "ok");
+    await deps.api.permissions.remove({ data_collection: ["locationInfo"] });
+    await deps.ff.settle(); await settle();
+    assert.equal(node.querySelector(".weather").dataset.state, "consent");
+    assert.ok(node.querySelector(".weather-allow"));
+    const calls = deps.fetch.calls.length;
+    deps.advance(REFRESH_MS); control.wake(true); await settle();
+    assert.equal(deps.fetch.calls.length, calls);
+    assert.equal(node.querySelector(".weather").dataset.state, "consent");
+    // Granting it again elsewhere (another page or about:addons) loads without a click here.
+    await deps.ff.withUserInput(() => deps.api.permissions.request({ data_collection: ["locationInfo"] }));
+    await deps.ff.settle(); await settle();
+    assert.equal(node.querySelector(".weather").dataset.state, "ok");
+  } finally { control.stop(); }
+});
+
 function weatherDeps(overrides = {}) {
-  const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], tabs: [] });
+  const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], tabs: [], dataCollection: overrides.dataCollection ?? ["locationInfo"] });
   let now = NOW;
   const settings = { synced: { ...SYNCED }, device: { ...DEFAULT_DEVICE } };
   return { ff, api: ff.browser, fetch: fakeFetch(), geolocation: fakeGeolocation(), settings: () => settings,
@@ -230,15 +308,45 @@ test("controller picks up weather another Foxy page cached", async () => {
 });
 
 // Settings pane: units, TILES toggle and the city search.
-async function pane(searchPlaces) {
+async function pane(searchPlaces, consent = {}) {
   await styles();
   const container = document.createElement("aside"); container.className = "settings-pane";
   fixture().append(container);
   const changes = [];
-  const handlers = { onChange: async (scope, key, value) => { changes.push([scope, key, value]); }, onReset() {}, searchPlaces };
+  const handlers = { onChange: async (scope, key, value) => { changes.push([scope, key, value]); }, onReset() {}, searchPlaces, ...consent };
   renderSettings(container, { synced: { ...DEFAULT_SETTINGS }, device: { ...DEFAULT_DEVICE }, railMax: 4 }, handlers);
   return { container, changes };
 }
+
+test("pane: without locationInfo the city search is an Allow weather pill; granting shows the field, revoking brings the pill back", async () => {
+  let allowed = false, watcher = null;
+  const asked = [], queries = [];
+  const { container } = await pane(async query => { queries.push(query); return []; }, {
+    weatherAllowed: async () => allowed,
+    allowWeather: () => { asked.push("request"); allowed = true; return Promise.resolve(true); },
+    watchWeather: listener => { watcher = listener; return () => {}; },
+  });
+  await settle();
+  const allow = container.querySelector(".weather-search .weather-allow");
+  const input = container.querySelector(".weather-search input");
+  assert.ok(shown(allow)); assert.equal(allow.textContent, "Allow weather");
+  assert.ok(!shown(input), "no search field before the grant");
+  allow.click();
+  assert.deepEqual(asked, ["request"], "asked from the click");
+  await settle();
+  assert.ok(shown(input)); assert.ok(!shown(allow));
+  input.value = "Dub"; input.dispatchEvent(new Event("input", { bubbles: true }));
+  allowed = false; watcher(false); await settle();
+  assert.ok(shown(allow)); assert.ok(!shown(input));
+  await new Promise(resolve => setTimeout(resolve, 400)); await settle();
+  assert.deepEqual(queries, [], "a pending search is dropped after a revoke");
+  // Enter while not allowed searches nothing either.
+  input.value = "Berlin"; input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await settle();
+  assert.deepEqual(queries, []);
+  allowed = true; watcher(true); await settle();
+  assert.ok(shown(input));
+});
 
 test("pane: Show weather toggle, temperature unit and a device-only location", async () => {
   const { container, changes } = await pane(async () => []);
@@ -288,7 +396,7 @@ test("pane: Enter picks the first result; Use my location resets to auto", async
 test("board with weather access but no location shows set-a-location and makes no request", async () => {
   await styles();
   const fetch = fakeFetch();
-  const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], tabs: [{ id: 99, windowId: 1 }], selfTabId: 99 });
+  const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], tabs: [{ id: 99, windowId: 1 }], selfTabId: 99, dataCollection: ["locationInfo"] });
   const node = document.createElement("div"); node.className = "board"; node.style.cssText = "width:1232px;height:800px";
   fixture().append(node);
   const control = createController(node, ff.browser, undefined, { weather: { fetch, geolocation: undefined } });
@@ -296,6 +404,21 @@ test("board with weather access but no location shows set-a-location and makes n
   for (let i = 0; i < 5; i++) { await ff.settle(); await nextFrame(); await settle(); }
   assert.equal(node.querySelector(".tile.weather")?.dataset.state, "no-place");
   assert.deepEqual(fetch.calls, []);
+});
+
+test("board without locationInfo shows the Allow weather pill and never geolocates or fetches", async () => {
+  await styles();
+  const fetch = fakeFetch(), geolocation = fakeGeolocation();
+  const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], tabs: [{ id: 99, windowId: 1 }], selfTabId: 99 });
+  const node = document.createElement("div"); node.className = "board"; node.style.cssText = "width:1232px;height:800px";
+  fixture().append(node);
+  const control = createController(node, ff.browser, undefined, { weather: { fetch, geolocation } });
+  await control.refresh();
+  for (let i = 0; i < 5; i++) { await ff.settle(); await nextFrame(); await settle(); }
+  assert.equal(node.querySelector(".tile.weather")?.dataset.state, "consent");
+  assert.ok(node.querySelector(".tile.weather .weather-allow"));
+  assert.deepEqual(fetch.calls, []);
+  assert.equal(geolocation.calls, 0);
 });
 
 test("board without weather access shows no weather tile", async () => {

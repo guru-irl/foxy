@@ -3,6 +3,7 @@
 import { condition, GLYPHS } from "../weather/codes.js";
 import { loadWeather, readCache, wantOf, validCache, temperature, wind, updatedAgo, upcomingHours, upcomingDays,
   REFRESH_MS, CACHE_KEY } from "../weather/data.js";
+import { hasConsent, requestConsent, watchConsent } from "../weather/consent.js";
 
 const SVG = "http://www.w3.org/2000/svg";
 const states = new WeakMap();
@@ -80,6 +81,13 @@ export function renderWeather(tile, state, settings = {}, now = Date.now()) {
   body.replaceChildren();
   tile.dataset.state = state?.status ?? "loading";
   tile.toggleAttribute("data-stale", !!state?.stale);
+  if (state?.status === "consent") {
+    body.append(el("p", "weather-message", "Uses your approximate location"));
+    const allow = el("button", "weather-allow settings-pill", "Allow weather");
+    allow.type = "button";
+    body.append(allow);
+    return;
+  }
   if (state?.status === "no-place") { message(body, "Set a location in Settings"); return; }
   if (state?.status === "error") { message(body, "Weather is unavailable", true); return; }
   if (state?.status !== "ok") { body.append(el("p", "weather-message weather-loading", "Loading weather")); return; }
@@ -195,36 +203,43 @@ export function paintWeather(root, settings = {}) {
  * the place changes or the user retries.
  */
 export function startWeather(root, { api, fetch, geolocation, settings, now = Date.now, hidden = () => document.hidden }) {
-  let timer = 0, busy = null, lastAttempt = -Infinity, stopped = false, again = false;
+  let timer = 0, busy = null, lastAttempt = -Infinity, stopped = false, again = false, revoked = 0;
   const current = () => settings() ?? null;
+  const placeWant = () => wantOf(current()?.device?.weatherPlace ?? "auto");
   const paint = () => {
     const s = current();
     showWeatherState(root, states.get(root), s?.synced ?? {}, now());
   };
+  const askConsent = () => { states.set(root, { status: "consent", want: placeWant() }); paint(); };
   async function wake(force = false) {
     clearTimeout(timer);
     const s = current();
     if (stopped || !s?.synced?.showWeather || !root.isConnected || !root.querySelector(".weather") || hidden()) return;
     const place = s.device?.weatherPlace ?? "auto", want = wantOf(place);
     if (busy) { if (busy.want !== want || force) again = true; return; }
-    const state = states.get(root), age = now() - lastAttempt;
-    if (!force && state && state.want === want && age < REFRESH_MS) {
+    const state = states.get(root), age = now() - lastAttempt, waiting = state?.status === "consent";
+    if (!force && state && !waiting && state.want === want && age < REFRESH_MS) {
       timer = setTimeout(() => wake(), REFRESH_MS - age);
       return;
     }
     busy = { want };
-    lastAttempt = now();
+    const epoch = revoked;
     try {
-      if (!state || state.want !== want) {
+      // Nothing is shown, located or fetched until locationInfo is granted.
+      if (!(await hasConsent(api))) { if (!stopped) askConsent(); return; }
+      if (stopped || epoch !== revoked) return;
+      lastAttempt = now();
+      if (!state || state.want !== want || waiting) {
         // Show a cached reading for this place at once, then refresh it.
         const cache = await readCache(api);
-        if (stopped) return;
+        if (stopped || epoch !== revoked) return;
         states.set(root, cache?.want === want ? { status: "ok", stale: false, ...cache } : { status: "loading", want });
         paint();
       }
       const result = await loadWeather({ api, fetch, geolocation, place, now: now(), force });
-      if (stopped) return;
-      if (wantOf(current()?.device?.weatherPlace ?? "auto") === want) { states.set(root, result); paint(); }
+      if (stopped || epoch !== revoked) return;
+      if (placeWant() === want) { states.set(root, result); paint(); }
+      if (result.status === "consent") return;
     } catch (error) {
       console.warn("Foxy: weather refresh failed", error);
     } finally { busy = null; }
@@ -234,13 +249,24 @@ export function startWeather(root, { api, fetch, geolocation, settings, now = Da
   const onStorage = (changes, area) => {
     if (area !== "local" || !changes[CACHE_KEY]) return;
     const entry = changes[CACHE_KEY].newValue, state = states.get(root);
-    if (!validCache(entry) || entry.want !== wantOf(current()?.device?.weatherPlace ?? "auto")) return;
+    if (!validCache(entry) || entry.want !== placeWant() || state?.status === "consent") return;
     if (state?.status === "ok" && state.fetchedAt >= entry.fetchedAt) return;
     states.set(root, { status: "ok", stale: false, ...entry });
     paint();
   };
   const onVisible = () => { if (!hidden()) wake(); };
-  const onClick = event => { if (event.target.closest?.(".weather-retry")) wake(true); };
+  const onClick = event => {
+    if (event.target.closest?.(".weather-retry")) wake(true);
+    // permissions.request needs the click: it runs here, before any await.
+    if (event.target.closest?.(".weather-allow")) requestConsent(api).then(granted => { if (granted) wake(); });
+  };
+  // Granted or revoked anywhere, including about:addons.
+  const unwatch = watchConsent(api, granted => {
+    if (stopped) return;
+    if (granted) { wake(); return; }
+    revoked++; again = false; clearTimeout(timer);
+    askConsent();
+  });
   api.storage.onChanged.addListener(onStorage);
   document.addEventListener("visibilitychange", onVisible);
   root.addEventListener("click", onClick);
@@ -249,6 +275,7 @@ export function startWeather(root, { api, fetch, geolocation, settings, now = Da
     now,
     stop() {
       stopped = true; clearTimeout(timer);
+      unwatch();
       api.storage.onChanged.removeListener(onStorage);
       document.removeEventListener("visibilitychange", onVisible);
       root.removeEventListener("click", onClick);

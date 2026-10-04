@@ -88,9 +88,10 @@ Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their pl
 | `scripting` | Keep a renamed pin's title |
 | `nativeMessaging` | Connect the local agent CLI to Foxy |
 | `geolocation` | Weather for where you are, without a prompt; coordinates are rounded to 2 decimals before any request |
+| Location data collection (optional) | Asked by "Allow weather"; until you allow it, weather sends nothing. Turn it off in about:addons |
 | Site access (optional) | Requested per site when you rename a pin there |
 
-Foxy makes network requests only for weather: Open-Meteo (forecast and city search) and BigDataCloud (place name). No API keys, no account, no cookies.
+Foxy makes network requests only for weather, and only after you allow location data collection ("Allow weather"): Open-Meteo (forecast and city search) and BigDataCloud (place name). No API keys, no account, no cookies.
 
 ## Limits
 
