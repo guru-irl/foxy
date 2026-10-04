@@ -9,6 +9,13 @@ function boardMessages(message) {
 // to override this stub, or null to exercise an unavailable background.
 export function createBoardFirefox(setup, listener = boardMessages) {
   const ff = createFirefox(setup);
+  // Existing geometry fixtures opt out of optional memory unless explicitly on.
+  const get = ff.browser.storage.sync.get;
+  ff.browser.storage.sync.get = async keys => {
+    const result = await get(keys);
+    if (keys === "settings") result.settings = { showMemory: false, ...result.settings };
+    return result;
+  };
   if (listener) ff.browser.runtime.onMessage.addListener(listener);
   return ff;
 }

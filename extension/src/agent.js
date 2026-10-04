@@ -123,7 +123,29 @@ export function createAgentHandler({ api, saved, mark = markOwn }) {
 }
 
 /** The factory and scheduler let tests exercise the real request dispatch. */
-export async function connectAgent({ api, handle, portFactory = name => api.runtime.connectNative(name), schedule = setTimeout, now = Date.now }) {
+export async function connectAgent({ api, handle, portFactory = name => api.runtime.connectNative(name), schedule = setTimeout, cancel = clearTimeout, now = Date.now }) {
+  let nativePort, sequence = 0;
+  const memoryPending = new Map();
+  function finish(rid, reply) {
+    const item = memoryPending.get(rid);
+    if (!item) return;
+    memoryPending.delete(rid);
+    cancel(item.timer);
+    item.resolve(reply);
+  }
+  // Register before the platform await so MV3 can wake on page requests.
+  api.runtime.onMessage.addListener(message => {
+    if (message?.type !== 'foxy:memory') return undefined;
+    if (!nativePort) return Promise.resolve({ unavailable: true });
+    return new Promise(resolve => {
+      const rid = `memory:${++sequence}`;
+      const timer = schedule(() => finish(rid, { unavailable: true }), 3000);
+      timer?.unref?.();
+      memoryPending.set(rid, { resolve, timer });
+      try { nativePort.postMessage({ type: 'memory', rid }); }
+      catch { finish(rid, { unavailable: true }); }
+    });
+  });
   if ((await api.runtime.getPlatformInfo()).os === 'win') return;
   // Firefox timers are numbers; Node timers must not retain a test process.
   const retry = delay => schedule(() => connect(false), delay)?.unref?.();
@@ -131,11 +153,16 @@ export async function connectAgent({ api, handle, portFactory = name => api.runt
     let port;
     try { port = portFactory('foxy_agent'); }
     catch { retry(first ? 5000 : 60000); return; }
+    nativePort = port;
     let connected = true;
     const started = now();
     let queue = Promise.resolve();
     port.onMessage.addListener(request => {
       first = true;
+      if (request?.type === 'memory') {
+        if (connected) finish(request.rid, request);
+        return;
+      }
       queue = queue.then(async () => {
         const reply = await handle(request);
         if (connected) {
@@ -152,6 +179,8 @@ export async function connectAgent({ api, handle, portFactory = name => api.runt
     port.onDisconnect.addListener(() => {
       if (!connected) return;
       connected = false;
+      if (nativePort === port) nativePort = undefined;
+      for (const rid of memoryPending.keys()) finish(rid, { unavailable: true });
       // A host that ran for a while (or answered) was working: come back quickly.
       retry(first || now() - started >= 5000 ? 5000 : 60000);
     });

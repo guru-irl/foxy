@@ -2,8 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildView } from "../extension/src/grid/view.js";
 import { buildBoard } from "../extension/src/board/model.js";
-import { DEFAULT_SETTINGS, DEFAULT_DEVICE } from "../extension/src/settings/store.js";
+import { DEFAULT_SETTINGS as ALL_SETTINGS, DEFAULT_DEVICE } from "../extension/src/settings/store.js";
 
+// These fixtures pin existing group geometry independently of optional widgets.
+const DEFAULT_SETTINGS = { ...ALL_SETTINGS, showMemory: false };
 const group = (id, current = true) => ({ id, current, windowId: current ? 1 : 2, rows: [] });
 const board = { columns: [group(1), group(2)], saved: [], pinned: [], tabs: [] };
 const options = (overrides = {}) => {

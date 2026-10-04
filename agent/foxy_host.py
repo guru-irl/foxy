@@ -1,20 +1,120 @@
 #!/usr/bin/env python3
 """Firefox native messaging host for the Foxy agent CLI (standard library only)."""
 
+import ctypes
 import errno
 import fcntl
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import stat
 import struct
+import subprocess
 import sys
 import threading
 import uuid
 
 MAX_MESSAGE = 1024 * 1024
 REPLY_TIMEOUT = 10
+
+
+class RusageInfoV2(ctypes.Structure):
+    # sys/resource.h ABI, RUSAGE_INFO_V2. Sizes and footprint are bytes.
+    _fields_ = [('ri_uuid', ctypes.c_uint8 * 16)] + [
+        (name, ctypes.c_uint64) for name in (
+            'ri_user_time', 'ri_system_time', 'ri_pkg_idle_wkups',
+            'ri_interrupt_wkups', 'ri_pageins', 'ri_wired_size',
+            'ri_resident_size', 'ri_phys_footprint', 'ri_proc_start_abstime',
+            'ri_proc_exit_abstime', 'ri_child_user_time', 'ri_child_system_time',
+            'ri_child_pkg_idle_wkups', 'ri_child_interrupt_wkups',
+            'ri_child_pageins', 'ri_child_elapsed_abstime',
+            'ri_diskio_bytesread', 'ri_diskio_byteswritten')]
+
+
+def mac_footprint(pid):
+    lib = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
+    usage = RusageInfoV2()
+    if lib.proc_pid_rusage(pid, 2, ctypes.byref(usage)) != 0:
+        raise OSError(ctypes.get_errno(), 'Process footprint unavailable')
+    return usage.ri_phys_footprint
+
+
+def mac_process_table():
+    text = subprocess.check_output(['/bin/ps', '-axo', 'pid=,ppid=,rss='], text=True, timeout=1)
+    return {int(pid): (int(parent), int(rss) * 1024)
+            for pid, parent, rss in (line.split() for line in text.splitlines() if line.strip())}
+
+
+def mac_system_memory():
+    total = int(subprocess.check_output(['/usr/sbin/sysctl', '-n', 'hw.memsize'], text=True, timeout=1))
+    text = subprocess.check_output(['/usr/bin/vm_stat'], text=True, timeout=1)
+    page_size = int(re.search(r'page size of (\d+) bytes', text).group(1))
+    pages = sum(int(re.search(r'^' + re.escape(key) + r':\s+(\d+)', text, re.M).group(1))
+                for key in ('Pages active', 'Pages wired down', 'Pages occupied by compressor'))
+    return {'total': total, 'used': min(total, pages * page_size)}
+
+
+def proc_values(path):
+    return {key: int(value.split()[0]) for key, value in
+            (line.split(':', 1) for line in path.read_text().splitlines() if ':' in line)
+            if value.strip().split()[0].isdigit()}
+
+
+def linux_process_table(proc):
+    table = {}
+    for path in proc.iterdir():
+        if not path.name.isdigit():
+            continue
+        try:
+            values = proc_values(path / 'status')
+            table[int(path.name)] = (values['PPid'], values.get('VmRSS', 0) * 1024)
+        except (OSError, KeyError, ValueError):
+            continue
+    return table
+
+
+def measure_memory(*, root_pid=None, host_pid=None, platform=None, proc=Path('/proc')):
+    root_pid = os.getppid() if root_pid is None else root_pid
+    host_pid = os.getpid() if host_pid is None else host_pid
+    platform = sys.platform if platform is None else platform
+    if platform == 'darwin':
+        table = mac_process_table()
+        system = mac_system_memory()
+    elif platform.startswith('linux'):
+        table = linux_process_table(proc)
+        values = proc_values(proc / 'meminfo')
+        system = {'total': values['MemTotal'] * 1024,
+                  'used': max(0, values['MemTotal'] - values['MemAvailable']) * 1024}
+    else:
+        raise ValueError('Memory measurement is unavailable on this platform')
+    if root_pid not in table:
+        raise ValueError('Firefox process is unavailable')
+    children = {}
+    for pid, (parent, _) in table.items():
+        children.setdefault(parent, []).append(pid)
+    pending, seen, total = [root_pid], set(), 0
+    while pending:
+        pid = pending.pop()
+        # Exclude the helper branch, including temporary measurement commands.
+        if pid == host_pid or pid in seen:
+            continue
+        seen.add(pid)
+        pending.extend(children.get(pid, []))
+        amount = table[pid][1]
+        if platform == 'darwin':
+            try:
+                amount = mac_footprint(pid)
+            except OSError:
+                pass
+        else:
+            try:
+                amount = proc_values(proc / str(pid) / 'smaps_rollup')['Pss'] * 1024
+            except (OSError, KeyError, ValueError):
+                pass  # Restricted smaps or an exiting process: fall back to RSS.
+        total += amount
+    return {'firefox': total, 'processes': len(seen), 'system': system}
 
 
 def socket_path():
@@ -84,6 +184,15 @@ class Relay:
                     continue
                 if reply is None:
                     break
+                if isinstance(reply, dict) and reply.get('type') == 'memory':
+                    response = {'type': 'memory', 'rid': reply.get('rid')}
+                    try:
+                        response.update(measure_memory())
+                    except Exception as error:
+                        response['error'] = str(error)
+                    with self.write_lock:
+                        write_message(self.writer, response)
+                    continue
                 if not isinstance(reply, dict) or not isinstance(reply.get('id'), str):
                     continue
                 with self.lock:

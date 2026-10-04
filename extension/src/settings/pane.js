@@ -130,6 +130,7 @@ export function renderSettings(container, state, handlers) {
     });
     const tiles = section("Tiles");
     toggle(tiles, "Show clock", "showClock"); toggle(tiles, "Show pinned", "showPinned"); toggle(tiles, "Show saved", "showSaved");
+    toggle(tiles, "Show memory", "showMemory");
     const reset = button("Reset layout"); reset.className = "settings-reset settings-pill"; tiles.append(reset);
     const clearConfirm = () => { clearTimeout(pane.timer); pane.confirmed = false; reset.textContent = "Reset layout"; };
     reset.addEventListener("keydown", event => {

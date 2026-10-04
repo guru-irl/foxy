@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createFirefox } from "./fakes/firefox.js";
 import { DEFAULT_SETTINGS, DEFAULT_DEVICE, loadSettings, saveSetting, cellPx, cardAlpha } from "../extension/src/settings/store.js";
 
-const syncedDefaults = { railCells: 3, showClock: true, showPinned: true, showSaved: true,
+const syncedDefaults = { railCells: 3, showClock: true, showPinned: true, showSaved: true, showMemory: true,
   timeFormat: "24", showDate: true, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true };
 const deviceDefaults = { cellSize: "M", customCell: 80, density: "normal" };
 
@@ -25,7 +25,7 @@ test("loadSettings falls back per key, keeps valid values and ignores unknown ke
   await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 500,
     density: "compact", extra: true } });
   assert.deepEqual(await loadSettings(ff.browser), {
-    synced: { railCells: 3, showClock: true, showPinned: false, showSaved: true,
+    synced: { railCells: 3, showClock: true, showPinned: false, showSaved: true, showMemory: true,
       timeFormat: "12", showDate: false, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true },
     device: { cellSize: "custom", customCell: 80, density: "compact" },
   });
@@ -104,7 +104,7 @@ test("saveSetting preserves other valid settings and writes only the selected sc
   ff.calls.length = 0;
   const loaded = await saveSetting(ff.browser, "synced", "showPinned", false);
   assert.deepEqual(loaded, {
-    synced: { railCells: 4, showClock: false, showPinned: false, showSaved: true, timeFormat: "24",
+    synced: { railCells: 4, showClock: false, showPinned: false, showSaved: true, showMemory: true, timeFormat: "24",
       showDate: true, transparency: "high", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true },
     device: { cellSize: "S", customCell: 120, density: "compact" },
   });

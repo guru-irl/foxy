@@ -2,7 +2,7 @@ export const GAP = 16;
 export const CELL_PRESETS = { S: 48, M: 80, L: 112, XL: 144 };
 
 export function kindOf(id) {
-  return ["pinned", "saved", "clock"].includes(id) ? id : "group";
+  return ["pinned", "saved", "clock", "memory"].includes(id) ? id : "group";
 }
 
 export function totalColumns(contentWidth, cell) {
@@ -19,6 +19,7 @@ export function railLimits(total) {
 }
 
 export function minSize(kind) {
+  if (kind === "memory") return { w: 3, h: 3 };
   return { w: kind === "clock" ? 3 : 2, h: 2 };
 }
 
@@ -35,6 +36,7 @@ function whole(value) {
 export function defaultSize(kind, cell, cols) {
   cols = columns(cols);
   const min = minSize(kind);
+  if (kind === "memory") return { w: Math.min(cols, 5), h: 6 };
   const width = kind === "clock" ? 480 : 288;
   const height = kind === "clock" ? 208 : 384;
   return {

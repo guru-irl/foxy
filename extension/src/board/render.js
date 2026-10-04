@@ -1,3 +1,4 @@
+import { createMemoryTile } from "../tiles/memory.js";
 import { pinOrigin } from "../sync/names.js";
 import { normalizePinName } from "../sync/codec.js";
 import { colorKey, formatDate, formatTime } from "../model.js";
@@ -101,7 +102,8 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   for (const tile of view.tiles) {
     const node = tile.kind === "group" ? groupColumn(root, tile.group, handlers)
       : tile.kind === "pinned" ? fixedColumn(root, "pinned", "PINNED", board.pinned, handlers)
-      : tile.kind === "saved" ? savedColumn(root, board.saved, ui, handlers) : clockTile();
+      : tile.kind === "saved" ? savedColumn(root, board.saved, ui, handlers)
+      : tile.kind === "memory" ? createMemoryTile() : clockTile();
     node.classList.add("tile");
     node.dataset.tileId = tile.id;
     node.dataset.kind = tile.kind;

@@ -262,7 +262,7 @@ test("rail edge previews whole cells and grid fit, clamps and saves only changed
   assert.equal(root.querySelector(".rail").getBoundingClientRect().width, 464);
   assert.equal(root.querySelector(".grid").style.getPropertyValue("--cols"), "8"); assert.deepEqual(writes(ff), []);
   pointer("pointerup", document, target); await flush(ff);
-  assert.deepEqual(writes(ff), [{ settings: { railCells: 5 } }]);
+  assert.deepEqual(writes(ff), [{ settings: { showMemory: false, railCells: 5 } }]);
   ff.calls.length = 0; source = root.querySelector(".rail-resize"); start = down(source);
   pointer("pointermove", document, shifted(start, -4000, 0)); assert.equal(root.querySelector(".rail").style.getPropertyValue("--rail-cells"), "6");
   pointer("pointermove", document, shifted(start, 4000, 0)); assert.equal(root.querySelector(".rail").style.getPropertyValue("--rail-cells"), "2");
@@ -277,8 +277,8 @@ for (const { offset, cells } of [{ offset: 4000, cells: 2 }, { offset: -4000, ce
     pointer("pointermove", document, target);
     assert.equal(root.querySelector(".rail").style.getPropertyValue("--rail-cells"), String(cells));
     pointer("pointerup", document, target); await flush(ff);
-    assert.deepEqual(writes(ff), [{ settings: { railCells: cells } }]);
-    assert.deepEqual((await ff.browser.storage.sync.get("settings")).settings, { railCells: cells });
+    assert.deepEqual(writes(ff), [{ settings: { showMemory: false, railCells: cells } }]);
+    assert.deepEqual((await ff.browser.storage.sync.get("settings")).settings, { showMemory: false, railCells: cells });
   });
 }
 
@@ -299,7 +299,7 @@ for (const kind of ["move", "resize", "rail"]) {
       assert.equal(root.style.getPropertyValue("--card-alpha-dark"), "0.45");
       const localWrites = writes(ff).slice(1);
       assert.ok(localWrites.every(entry => !("tile:10:pinned" in entry)), "an unrelated remote tile must not be written back");
-      if (kind === "rail" && end === "release") assert.deepEqual(localWrites, [{ settings: { transparency: "high", railCells: 4 } }]);
+      if (kind === "rail" && end === "release") assert.deepEqual(localWrites, [{ settings: { showMemory: false, transparency: "high", railCells: 4 } }]);
       if (end === "cancel") assert.deepEqual(localWrites, []);
     });
   }

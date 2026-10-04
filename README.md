@@ -14,7 +14,8 @@ Version 3.2.0. Distributed as an unlisted add-on. Design: `docs/superpowers/spec
 
 ## Board
 
-- **Tiles:** groups, PINNED, SAVED and a clock on a scrolling grid that fills the page edge to edge, with scrolling tab lists.
+- **Tiles:** groups, PINNED, SAVED, a clock and MEMORY on a scrolling grid that fills the page edge to edge, with scrolling tab lists.
+- **Memory:** the helper measures Firefox's process total and system use, with a five-minute sparkline. Loaded sites are grouped by host; UNLOAD discards inactive tabs. Firefox cannot report per-site memory. Without the helper, the tile shows installation guidance.
 - **TABS rail:** ungrouped tabs stay on the right, with their own scroll. The Settings gear has its own cell below it.
 - **Move and resize:** drag a tile's header, or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
 - **Window widths:** each width keeps its own layout (up to 4). A width without one shows the closest: tiles narrow slightly, or columns of tiles pack together in order. Resizing saves nothing. Moving a tile updates the layout shown if the result still fits it; otherwise it saves a new layout for this width.
@@ -35,7 +36,7 @@ The same settings are in about:addons, Foxy, Options.
 |---|---|---|
 | Cell size | S 48, M 80, L 112, XL 144; custom 40 to 240 px (cells stretch a little to fill the width) | Per device |
 | TABS rail width | 2 cells to half the available width; default 3 | Synced |
-| Show clock, pinned, saved | On or off for each | Synced |
+| Show clock, pinned, saved, memory | On or off for each | Synced |
 | Reset layout | Click twice within 3 seconds; clears saved tile places for every width | Synced |
 | Time format | 24-hour or 12-hour | Synced |
 | Show date | On or off | Synced |
@@ -103,7 +104,7 @@ To remove: uninstall in about:addons. The `Foxy` bookmark folders stay; delete t
 
 ## Agents
 
-- **What:** agents list groups and add URLs through your running Firefox (Foxy 3.2.0 or newer). macOS and Linux; Python 3, no packages.
+- **What:** agents list groups and add URLs through your running Firefox (Foxy 3.2.0 or newer). macOS and Linux; Python 3, no packages. The same helper powers the MEMORY tile in Foxy 3.3.0, using macOS physical footprint (RSS fallback) or Linux PSS (RSS fallback). Windows has no helper memory measurement.
 - **Install once** (keep this repo in place):
   - `python3 scripts/install_agent.py` registers the native host;
   - `ln -s "$PWD/skills/foxy-tabs" ~/.agents/skills/foxy-tabs` registers the skill.
@@ -137,7 +138,7 @@ The add-on lives in `extension/`; scripts and tests are at the repo root. No npm
 | `npm test` | Node and Python tests |
 | `npm run test:browser` | DOM tests in headless Firefox |
 | `npm run test:smoke` | Real add-on and duplicate-tab checks in headless Firefox |
-| `python3 scripts/smoke_agent.py` | Agent CLI end to end in headless Firefox (needs the native host installed) |
+| `python3 scripts/smoke_agent.py` | Agent CLI and memory end to end in headless Firefox (disposable native manifest) |
 | `python3 scripts/preview.py` | Headless screenshots in `dist/preview/` |
 | `python3 scripts/check_private.py` | Scan for private data; run after committing, before pushing |
 

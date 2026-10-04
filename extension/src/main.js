@@ -1,3 +1,4 @@
+import { createMemoryController } from "./tiles/memory.js";
 import { msUntilNextMinute } from "./model.js";
 import { buildBoard } from "./board/model.js";
 import { renderBoard, updateScrollEdges, updateClock, positionTiles } from "./board/render.js";
@@ -42,6 +43,7 @@ function startClock(root, settings) {
 /** All board interactions share this state; DnD and editors set it via handlers. */
 export function createController(root, api, ui = { editGroupId: null, dragging: false, editing: false },
   { maxWait = 30000, newGroupDelay = 1000 } = {}) {
+  const memory = createMemoryController(root, api);
   ui.confirmFolderId ??= null;
   ui.gridDragging ??= false;
   ui.busy ??= new Set();
@@ -427,6 +429,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       root.style.setProperty("--card-alpha-light", cardAlpha(gridState.synced.transparency, "light"));
       root.style.setProperty("--row", gridState.device.density === "compact" ? "24px" : "32px");
       renderBoard(root, board, view, ui, handlers, gridState.synced);
+      memory.update();
       gear()?.setAttribute("aria-expanded", String(settingsPane ? !settingsPane.hidden : false));
       if (settingsPane?.id) gear()?.setAttribute("aria-controls", settingsPane.id);
       restoreView(root, saved);
@@ -724,6 +727,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   const onChange = () => schedule();
   window.addEventListener("pagehide", () => {
     unloaded = true;
+    memory.stop();
     detachGridDrag();
     for (const id of deferredGroups.keys()) clearDeferredGroup(id);
   }, { once: true });

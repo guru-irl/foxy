@@ -70,7 +70,8 @@ for (const [name, cell, width] of [["grid-m", 1616 / 16 - 16, 1600], ["grid-xl",
     assert.equal(board.saved.length, 3);
     const stored = await loadLayouts(api), layout = stored.layouts[9].tiles;
     const settings = await loadSettings(api);
-    const view = buildView(board, { layouts: stored.layouts, ...settings, contentWidth: width,
+    const view = buildView(board, { layouts: stored.layouts, ...settings,
+      synced: { ...settings.synced, showMemory: false }, contentWidth: width,
       folders: reply.folders });
     assert.equal(view.cell, cell);
     assert.equal(view.tiles.length, 6);
