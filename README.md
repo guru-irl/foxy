@@ -20,7 +20,7 @@ Version 3.2.0. Distributed as an unlisted add-on. Design: `docs/superpowers/spec
 - **Window widths:** each width keeps its own layout (up to 4). A width without one shows the closest: tiles narrow slightly, or columns of tiles pack together in order. Resizing saves nothing. Moving a tile updates the layout shown if the result still fits it; otherwise it saves a new layout for this width.
 - **Windows:** this window comes first; others are labelled. Tile places do not change tab order.
 - **Open a tab:** click it. A pin from another window moves here unless that setting is off.
-- **Move tabs:** drag to a group, TABS or PINNED. Drop on empty grid space to create and name a group.
+- **Move tabs:** drag to a group, UNGROUPED TABS or PINNED. Drop on empty grid space to create and name a group.
 - **Groups:** click the name to rename or the dot to recolour, use the arrow to bring a group here, × to close it on this device.
 - **Close a tab:** × on its row.
 - **Rename a pin:** the pencil or F2. Enter or click away saves, Escape cancels, an empty name removes it.
@@ -34,7 +34,7 @@ The same settings are in about:addons, Foxy, Options.
 | Setting | Values | Scope |
 |---|---|---|
 | Cell size | S 48, M 80, L 112, XL 144; custom 40 to 240 px (cells stretch a little to fill the width) | Per device |
-| TABS rail width | 2 cells to half the available width; default 3 | Synced |
+| Ungrouped tabs rail width | 2 cells to half the available width; default 3 | Synced |
 | Show clock, pinned, saved | On or off for each | Synced |
 | Reset layout | Click twice within 3 seconds; clears saved tile places for every width | Synced |
 | Time format | 24-hour or 12-hour | Synced |

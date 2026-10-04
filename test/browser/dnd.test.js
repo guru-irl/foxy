@@ -188,6 +188,62 @@ for (const [zone, slot] of [["pinned", 0], ["pinned", 1], ["pinned", 2], ["tabs"
     } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
   });
 }
+// Treat the footer as the list's bottom edge, not as heading padding.
+// Removing the footer placement/scroll mapping must break these real drag events.
+async function longRail() {
+  const set = setup();
+  set.tabs = set.tabs.filter(t => t.id !== 15 && t.id !== 23);
+  for (let i = 0; i < 30; i++) set.tabs.push({ id: 1000 + i, windowId: 1 });
+  const result = await draw(set);
+  result.renderBoard(result.root, result.board, {}, result.handlers, {
+    device: { cellSize: "S", density: "normal" }, synced: { railCells: 2 },
+  });
+  await nextFrame(); await nextFrame();
+  return result;
+}
+function footerPoint(root, location) {
+  const gear = root.querySelector(".settings-gear"), rail = root.querySelector(".rail");
+  return location === "gear" ? { target: gear, ...point(gear) }
+    : { target: rail, clientX: rail.getBoundingClientRect().left + 20, clientY: point(gear).clientY };
+}
+for (const location of ["gear", "strip"]) {
+  test(`drop on rail footer ${location} inserts at the end with a bottom insertion line`, async () => {
+    const { root, calls } = await longRail(), rows = root.querySelector('.rail .rows');
+    rows.scrollTop = rows.scrollHeight;
+    await nextFrame(); await nextFrame();
+    const source = root.querySelector('[data-tab-id="12"]'), dt = start(source);
+    const { target, ...coords } = footerPoint(root, location), opts = { dataTransfer: dt, ...coords };
+    try {
+      assert.ok(dispatchDrag("dragover", target, opts).defaultPrevented);
+      const line = root.querySelector(".drop-line").getBoundingClientRect();
+      dispatchDrag("drop", target, opts);
+      assert.deepEqual(calls.tabs, [[12, { zone: "tabs", slot: 30, tabId: 12 }]]);
+      assert.ok(Math.abs(line.top + 1 - rows.getBoundingClientRect().bottom) <= 1,
+        "footer feedback is at the list bottom, not its top");
+    } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
+    clean(root);
+  });
+  test(`rail footer ${location} keeps edge scrolling until dragend`, async () => {
+    const { root } = await longRail(), rows = root.querySelector('.rail .rows');
+    const source = root.querySelector('[data-tab-id="12"]'), dt = start(source);
+    const { target, ...coords } = footerPoint(root, location), opts = { dataTransfer: dt, ...coords };
+    try {
+      dispatchDrag("dragover", rows, { dataTransfer: dt, ...point(rows, 0.5, 0.99) });
+      dispatchDrag("dragleave", rows, { ...opts, relatedTarget: target });
+      dispatchDrag("dragover", target, opts);
+      await nextFrame(); await nextFrame();
+      assert.ok(rows.scrollTop > 0, "a pointer beside or on the gear scrolls the list down");
+      const before = rows.scrollTop;
+      await nextFrame(); await nextFrame();
+      assert.ok(rows.scrollTop > before, "scrolling continues across animation frames");
+    } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
+    const stopped = rows.scrollTop;
+    await nextFrame(); await nextFrame();
+    assert.equal(rows.scrollTop, stopped, "dragend stops footer scrolling");
+    clean(root);
+  });
+}
+
 for (const zone of ["pinned", "tabs"]) {
   for (const slot of [1, 2]) {
     test(`${zone} window-boundary marker at slot ${slot} sits at the preceding row bottom`, async () => {

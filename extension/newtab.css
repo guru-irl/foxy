@@ -433,7 +433,8 @@ button.dot {
   display: flex;
   justify-content: flex-start;
   flex: 1;
-  min-height: 0;
+  /* Title, one tab row, footer gap and gear, with the rail's padding. */
+  min-height: calc(2 * var(--column-padding) + 2 * var(--row) + var(--gap) + var(--settings-gear-size));
   position: relative;
   gap: var(--gap);
 }

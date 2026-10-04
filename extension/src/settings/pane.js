@@ -108,11 +108,11 @@ export function renderSettings(container, state, handlers) {
       custom.hidden = field.hidden = pane.state.device.cellSize !== "custom";
       field.value = pane.state.device.customCell;
     });
-    const { row: rail, title: railLabel } = label(grid, "TABS rail width"), stepper = el("div", "settings-stepper");
+    const { row: rail, title: railLabel } = label(grid, "Ungrouped tabs rail width"), stepper = el("div", "settings-stepper");
     stepper.setAttribute("role", "group"); stepper.setAttribute("aria-labelledby", railLabel.id);
     const minus = button("−"), plus = button("+"), count = el("output", "", "");
     minus.dataset.rail = "minus"; plus.dataset.rail = "plus"; count.dataset.rail = "value";
-    minus.setAttribute("aria-label", "Decrease TABS rail width"); plus.setAttribute("aria-label", "Increase TABS rail width");
+    minus.setAttribute("aria-label", "Decrease ungrouped tabs rail width"); plus.setAttribute("aria-label", "Increase ungrouped tabs rail width");
     const railCells = () => Math.max(2, Math.min(pane.state.railMax, pane.state.synced.railCells));
     function showRail(value) {
       const cells = Math.max(2, Math.min(pane.state.railMax, value));

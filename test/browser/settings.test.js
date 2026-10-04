@@ -629,20 +629,24 @@ async function missingNewtab(width, height) {
   return newtab(ff, width, height);
 }
 
-// The old gear cell must not impose a board height floor in a short window.
-test("a 700 by 140 newtab keeps its gear inside the rail without reserving a cell below it", async () => {
+// Short windows scroll the page rather than hiding the rail's title or first row.
+test("a 700 by 140 newtab fits its rail contents and keeps the gear reachable by scrolling", async () => {
   const frame = await missingNewtab(700, 140), doc = frame.contentDocument, win = frame.contentWindow;
   try {
     assert.ok(doc.querySelector(".banner"));
     const rail = doc.querySelector(".rail").getBoundingClientRect();
     const gear = doc.querySelector(".settings-gear"), box = gear.getBoundingClientRect();
     const board = doc.querySelector(".board").getBoundingClientRect();
-    assert.ok(rail.height >= 0, "rail height cannot be negative");
+    const title = doc.querySelector(".rail .column-title").getBoundingClientRect();
+    const rows = doc.querySelector(".rail .rows").getBoundingClientRect();
+    assert.ok(rows.height >= 32 - 0.5, "at least one normal-density tab row fits");
+    assert.ok(title.bottom <= rows.top + 0.5, "title ends above the tab list");
+    assert.ok(rows.bottom + 16 <= box.top + 0.5, "list ends one gap above the gear");
+    assert.ok(title.bottom <= box.top, "gear does not cover the title");
     assert.ok(Math.abs(rail.bottom - board.bottom) < 0.5, "rail reaches the board bottom");
     assert.ok(Math.abs(box.bottom + 8 - rail.bottom) < 0.5, "gear is inset inside the rail");
     assert.ok(Math.abs(box.height - 32) < 0.5, "gear stays a 32 px button");
-    assert.equal(doc.scrollingElement.scrollHeight, doc.scrollingElement.clientHeight,
-      "the removed gear cell must not force document scrolling");
+
     gear.scrollIntoView({ block: "end", inline: "nearest" });
     await nextFrame(); await nextFrame();
     const visible = gear.getBoundingClientRect();
@@ -734,6 +738,18 @@ for (const width of [175, 240]) {
 
 // Catches a missing shared control, wrong scope, or stale values after Sync.
 for (const page of ["board", "options"]) {
+  test(`${page} names the rail width control for ungrouped tabs`, async () => {
+    const f = await setup();
+    let pane = f.pane;
+    if (page === "board") f.node.querySelector(".settings-gear").click();
+    else pane = (await options(f.ff)).contentDocument.querySelector(".settings-pane");
+    const minus = pane.querySelector('[data-rail="minus"]'), plus = pane.querySelector('[data-rail="plus"]');
+    const group = plus.closest('[role="group"]');
+    assert.equal(pane.ownerDocument.getElementById(group.getAttribute("aria-labelledby")).textContent,
+      "Ungrouped tabs rail width");
+    assert.equal(minus.getAttribute("aria-label"), "Decrease ungrouped tabs rail width");
+    assert.equal(plus.getAttribute("aria-label"), "Increase ungrouped tabs rail width");
+  });
   test(`${page} WINDOWS pane syncs the duplicate-switch toggle and follows remote changes`, async () => {
     const f = await setup();
     let pane = f.pane;
