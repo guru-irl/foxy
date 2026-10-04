@@ -19,7 +19,7 @@ export function railLimits(total) {
 }
 
 export function minSize(kind) {
-  if (kind === "memory") return { w: 3, h: 3 };
+  if (kind === "memory") return { w: 4, h: 5 };
   return { w: kind === "clock" ? 3 : 2, h: 2 };
 }
 

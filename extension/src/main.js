@@ -789,7 +789,11 @@ function captureView(root) {
   if (root.contains(active)) {
     const row = active.closest("[data-tab-id]");
     const group = active.closest(".column[data-group-id]");
-    if (row) {
+    const memoryRow = active.closest('[data-kind="memory"] .memory-row');
+    if (memoryRow) {
+      focus = { memoryHost: memoryRow.dataset.host,
+        index: [...memoryRow.parentElement.querySelectorAll('.memory-row')].indexOf(memoryRow) };
+    } else if (row) {
       const list = row.closest(".rows");
       focus = { tabId: row.dataset.tabId, className: active.className,
         rowsKey: rowsKey(list), index: [...list.querySelectorAll(".row")].indexOf(row) };
@@ -808,7 +812,12 @@ function restoreView(root, { focus, top, tops }) {
   if (focus && !editor) {
     let active;
     const list = [...root.querySelectorAll(".rows")].find(list => rowsKey(list) === focus.rowsKey);
-    if (focus.gear) active = root.querySelector(".settings-cell");
+    if (focus.memoryHost !== undefined) {
+      const sites = root.querySelector('[data-kind="memory"] .memory-sites');
+      const rows = [...(sites?.querySelectorAll('.memory-row') ?? [])];
+      const row = rows.find(row => row.dataset.host === focus.memoryHost) ?? rows[Math.min(focus.index, rows.length - 1)];
+      active = row?.querySelector('.memory-unload') ?? sites ?? root.querySelector('.grid');
+    } else if (focus.gear) active = root.querySelector(".settings-cell");
     else if (focus.grid) active = root.querySelector(".grid");
     else if (focus.tabId === undefined && focus.rowsKey !== undefined) active = list;
     else {

@@ -18,7 +18,7 @@ function setup() {
   const timers=new Map(), discarded=[];
   const doc=new EventTarget(); Object.defineProperty(doc,'hidden',{get:()=>hidden});
   const tabs=[{id:1,windowId:1,url:'https://www.example.test/a'}, {id:2,windowId:1,url:'https://example.test/b'}, {id:3,windowId:2,url:'https://example.test/active',active:true}];
-  const api={runtime:{sendMessage:async message=>{assert.equal(message.type,'foxy:memory');reads++;return {firefox:3400000000,system:{total:36000000000,used:25560000000}};}},
+  const api={runtime:{sendMessage:async message=>{assert.equal(message.type,'foxy:memory');reads++;return {firefox:3650722202,system:{total:51539607552,used:36593121362}};}},
     windows:{getAll:async()=>[{id:1,type:'normal'},{id:2,type:'normal'}]},
     tabs:{query:async()=>tabs,get:async id=>tabs.find(t=>t.id===id),discard:async id=>{discarded.push(id);tabs.find(t=>t.id===id).discarded=true;}}};
   const controller=memory.createMemoryController(root,api,{document:doc,now:()=>time,schedule:(fn,ms)=>{timers.set(++timerId,{fn,ms});return timerId;},cancel:id=>timers.delete(id)});
@@ -36,7 +36,7 @@ test('memory header renders measured bytes, system use, neutral sparkline and si
   try {
     f.render();await f.settle();
     assert.equal(f.root.querySelector('.memory-total').textContent,'3.4 GB');
-    assert.equal(f.root.querySelector('.memory-system').textContent,'of 36 GB · system 71 % used');
+    assert.equal(f.root.querySelector('.memory-system').textContent,'of 48 GB · system 71 % used');
     assert.equal(f.root.querySelector('.memory-host').textContent,'example.test');
     assert.equal(f.root.querySelector('.memory-count').textContent,'3 tabs');
     assert.ok(f.root.querySelector('svg polyline').getAttribute('points'));
@@ -47,6 +47,18 @@ test('memory header renders measured bytes, system use, neutral sparkline and si
     withPseudoState([row],'hover',()=>assert.equal(getComputedStyle(unload).opacity,'1'));
     unload.click();await f.settle();assert.deepEqual(f.discarded,[1,2]);
     assert.equal(f.root.querySelector('.memory-count').textContent,'1 tab');
+  } finally {f.controller.stop();f.root.remove();}
+});
+
+test('memory formats sub-GB values and the GB boundary in binary units to one decimal', async () => {
+  const f=setup();
+  try {
+    f.api.runtime.sendMessage=async()=>({firefox:536870912,system:{total:38654705664,used:19327352832}});
+    f.render();await f.settle();
+    assert.equal(f.root.querySelector('.memory-total').textContent,'512.0 MB');
+    assert.equal(f.root.querySelector('.memory-system').textContent,'of 36 GB · system 50 % used');
+    f.api.runtime.sendMessage=async()=>({firefox:1073741824,system:{total:38654705664,used:19327352832}});
+    await f.tick();assert.equal(f.root.querySelector('.memory-total').textContent,'1.0 GB');
   } finally {f.controller.stop();f.root.remove();}
 });
 
@@ -65,7 +77,7 @@ test('memory polls every 5 s only while visible and shown; board rerenders retai
   } finally {f.controller.stop();f.root.remove();}
 });
 
-test('missing helper and errors show installation guidance; empty loaded sites explain the measurement limit', async () => {
+test('missing helper has install guidance but helper errors and message failures show unavailable', async () => {
   const f=setup();
   try {
     f.api.runtime.sendMessage=async()=>({unavailable:true});f.tabs.length=0;
@@ -73,9 +85,9 @@ test('missing helper and errors show installation guidance; empty loaded sites e
     assert.ok(f.root.textContent.includes('Firefox cannot report per-site memory'));
     assert.equal(f.root.querySelector('.memory-total').textContent,'');
     f.api.runtime.sendMessage=async()=>({error:'denied'});await f.tick();
-    assert.ok(f.root.textContent.includes('Install the Foxy helper to see memory'));
+    assert.equal(f.root.querySelector('.memory-unavailable').textContent,'Memory unavailable');
     f.api.runtime.sendMessage=async()=>{throw Error('pipe closed');};await f.tick();
-    assert.ok(f.root.textContent.includes('Install the Foxy helper to see memory'));
+    assert.equal(f.root.querySelector('.memory-unavailable').textContent,'Memory unavailable');
   } finally {f.controller.stop();f.root.remove();}
 });
 
@@ -95,7 +107,7 @@ test('a reply arriving while hidden adds no sample or timer and visibility resum
     f.render();await Promise.resolve();f.hide(true);
     resolve({firefox:3400000000,system:{total:36000000000,used:1}});await f.settle();
     assert.equal(f.timers.size,0);assert.equal(f.root.querySelector('polyline').getAttribute('points'),'');
-    f.api.runtime.sendMessage=async()=>({firefox:1000000000,system:{total:36000000000,used:1}});
+    f.api.runtime.sendMessage=async()=>({firefox:1073741824,system:{total:36000000000,used:1}});
     f.hide(false);await f.settle();assert.equal(f.root.querySelector('.memory-total').textContent,'1.0 GB');
     assert.equal(f.timers.size,1);
   } finally {f.controller.stop();f.root.remove();}
@@ -115,7 +127,7 @@ test('site-list edge fades reflect new sample content without a board rerender',
 test('live board toggles memory through storage and restores its saved placement without repeated writes', async () => {
   await styles();let requests=0;
   const ff=createBoardFirefox({selfTabId:99,tabs:[{id:99,windowId:1,url:'about:blank'}]},message=>{
-    if(message.type==='foxy:memory'){requests++;return {firefox:1000000000,system:{total:36000000000,used:1}};}
+    if(message.type==='foxy:memory'){requests++;return {firefox:1073741824,system:{total:36000000000,used:1}};}
     if(message.type==='foxy:saved')return {saved:[],missing:[],folders:{}};
     if(message.type==='foxy:reconcile')return {ok:true};
   });
@@ -148,4 +160,135 @@ test('memory toggle in Tiles changes the synced setting', async () => {
     assert.equal(toggle.getAttribute('aria-checked'),'true');toggle.click();await Promise.resolve();
     assert.deepEqual(changes,[['synced','showMemory',false]]);
   } finally {pane.remove();}
+});
+
+async function liveMemoryFixture() {
+  const ff=createBoardFirefox({selfTabId:99,tabs:[
+    {id:99,windowId:1,url:'about:blank',active:true},
+    {id:5,windowId:1,url:'https://alpha.test/a',lastAccessed:20},
+    {id:6,windowId:1,url:'https://beta.test/b',lastAccessed:10},
+  ]}, message=>{
+    if(message.type==='foxy:memory')return {firefox:1073741824,system:{total:51539607552,used:1}};
+    if(message.type==='foxy:saved')return {saved:[],missing:[],folders:{}};
+    if(message.type==='foxy:reconcile')return {ok:true};
+  });
+  await ff.browser.storage.sync.set({settings:{showMemory:true,showClock:false,showPinned:false}});await ff.settle();
+  const host=document.createElement('div');host.className='page';host.style.width='1600px';
+  const root=document.createElement('div');root.className='board';host.append(root);fixture().append(host);
+  const flush=async()=>{for(let i=0;i<8;i++){await ff.settle();await nextFrame();}};
+  const control=createController(root,ff.browser);await control.refresh();await flush();
+  return {ff,host,root,control,flush};
+}
+
+test('keyboard UNLOAD focus survives tab-event board replacement', async () => {
+  const f=await liveMemoryFixture();
+  try {
+    const button=f.root.querySelector('.memory-unload');button.focus();
+    const oldTile=f.root.querySelector('[data-kind="memory"]');
+    await f.ff.browser.tabs.create({windowId:1,url:'about:blank',active:false});await f.flush();
+    assert.ok(f.root.querySelector('[data-kind="memory"]')!==oldTile,'board replaced the tile');
+    assert.equal(document.activeElement?.closest('.memory-row')?.dataset.host,'alpha.test');
+    assert.ok(document.activeElement.classList.contains('memory-unload'));
+  } finally {f.host.remove();}
+});
+
+test('keyboard UNLOAD keeps focus on the next site then the list when emptied', async () => {
+  const f=await liveMemoryFixture();
+  try {
+    f.root.querySelector('.memory-unload').focus();document.activeElement.click();await f.flush();
+    assert.equal((await f.ff.browser.tabs.get(5)).discarded,true);
+    assert.equal(document.activeElement?.closest('.memory-row')?.dataset.host,'beta.test');
+    document.activeElement.click();await f.flush();
+    assert.equal((await f.ff.browser.tabs.get(6)).discarded,true);
+    assert.equal(document.activeElement,f.root.querySelector('.memory-sites'));
+  } finally {f.host.remove();}
+});
+
+test('UNLOAD handles an initial tab lookup failure without an unhandled rejection and can retry', async () => {
+  const f=setup();
+  try {
+    f.render();await f.settle();
+    const query=f.api.tabs.query;
+    f.api.tabs.query=async()=>{throw Error('lookup failed');};
+    const action=f.root.querySelector('.memory-unload');action.click();await f.settle();
+    assert.equal(action.hasAttribute('aria-disabled'),false);
+    f.api.tabs.query=query;action.click();await f.settle();
+    assert.deepEqual(f.discarded,[1,2]);
+  } finally {f.controller.stop();f.root.remove();}
+});
+
+function textLeft(node) {
+  const range=document.createRange();range.selectNodeContents(node);
+  return range.getBoundingClientRect().left;
+}
+
+test('memory title, numeric header and sparkline share an 18 px inset in both schemes', async () => {
+  await styles();const f=setup();
+  try {
+    f.render();await f.settle();
+    const tile=f.root.querySelector('[data-kind="memory"]');
+    for(const scheme of ['dark','light']) {
+      tile.style.colorScheme=scheme;
+      for(const selector of ['.column-title','.memory-total','.memory-system'])
+        assert.equal(textLeft(tile.querySelector(selector))-tile.getBoundingClientRect().left,18,selector);
+      assert.equal(tile.querySelector('.memory-sparkline').getBoundingClientRect().left-tile.getBoundingClientRect().left,18);
+    }
+  } finally {f.controller.stop();f.root.remove();}
+});
+
+test('memory site icons and empty/install text align at the title inset', async () => {
+  await styles();const f=setup();
+  try {
+    f.render();await f.settle();
+    const tile=f.root.querySelector('[data-kind="memory"]'), left=tile.getBoundingClientRect().left;
+    assert.equal(tile.querySelector('.memory-row .icon').getBoundingClientRect().left-left,18);
+    f.tabs.length=0;f.api.runtime.sendMessage=async()=>({unavailable:true});await f.tick();
+    assert.equal(textLeft(tile.querySelector('.memory-empty'))-left,18);
+    assert.equal(textLeft(tile.querySelector('.memory-unavailable'))-left,18);
+    assert.equal(getComputedStyle(tile.querySelector('.memory-system')).display,'none','empty system line reserves no margin');
+    assert.equal(getComputedStyle(tile.querySelector('.memory-total')).display,'none');
+  } finally {f.controller.stop();f.root.remove();}
+});
+
+test('minimum memory tile at S exposes three site rows and hides sparkline before system line', async () => {
+  await styles();const f=setup();
+  try {
+    for(let id=10;id<20;id++)f.tabs.push({id,windowId:1,url:`https://host${id}.test/`});
+    f.render();await f.settle();
+    assert.ok(getComputedStyle(f.root.querySelector('.memory-sparkline')).display!=='none','roomy sparkline');
+    f.view.tiles[0]={id:'memory',kind:'memory',x:0,y:0,w:4,h:5};f.render();await f.settle();
+    assert.equal(getComputedStyle(f.root.querySelector('.memory-sparkline')).display,'none','hide sparkline first');
+    assert.ok(getComputedStyle(f.root.querySelector('.memory-system')).display!=='none','system fits at S minimum');
+    const list=f.root.querySelector('.memory-sites'), rows=[...list.querySelectorAll('.memory-row')];
+    assert.ok(rows.length>=3);
+    assert.ok(rows[2].getBoundingClientRect().bottom<=list.getBoundingClientRect().bottom,'three full rows fit at S');
+    f.view.cell=f.view.targetCell=40;f.render();await f.settle();
+    assert.equal(getComputedStyle(f.root.querySelector('.memory-system')).display,'none','hide system next on shorter cells');
+    const shortList=f.root.querySelector('.memory-sites');
+    assert.ok(shortList.querySelectorAll('.memory-row')[2].getBoundingClientRect().bottom<=shortList.getBoundingClientRect().bottom);
+  } finally {f.controller.stop();f.root.remove();}
+});
+
+test('one helper error or timeout keeps the last values and reports unavailable, then recovers', async () => {
+  const f=setup();
+  try {
+    f.render();await f.settle();const original=f.api.runtime.sendMessage;
+    for(const error of ['denied','Memory request timed out']) {
+      f.api.runtime.sendMessage=async()=>({error});await f.tick();
+      assert.equal(f.root.querySelector('.memory-total').textContent,'3.4 GB');
+      assert.equal(f.root.querySelector('.memory-system').textContent,'of 48 GB · system 71 % used');
+      assert.equal(f.root.querySelector('.memory-unavailable').hidden,false);
+      assert.equal(f.root.querySelector('.memory-unavailable').textContent,'Memory unavailable');
+    }
+    f.render();await f.settle();assert.equal(f.root.querySelector('.memory-total').textContent,'3.4 GB');
+    f.api.runtime.sendMessage=original;await f.tick();assert.equal(f.root.querySelector('.memory-unavailable').hidden,true);
+  } finally {f.controller.stop();f.root.remove();}
+});
+
+test('Windows explains that memory needs the macOS or Linux helper, not a Windows install', async () => {
+  const f=setup();
+  try {
+    f.api.runtime.sendMessage=async()=>({unavailable:true,platform:'win'});f.render();await f.settle();
+    assert.equal(f.root.querySelector('.memory-unavailable').textContent,'Memory needs the Foxy helper on macOS or Linux');
+  } finally {f.controller.stop();f.root.remove();}
 });

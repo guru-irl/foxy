@@ -41,7 +41,7 @@ test('missing host and Windows answer unavailable without waiting', async () => 
   for (const os of ['mac', 'win']) {
     const f = fixture(os); f.options.portFactory = () => { throw Error('not installed'); };
     await connectAgent(f.options);
-    assert.deepEqual(await f.request({type: 'foxy:memory'}), {unavailable: true});
+    assert.deepEqual(await f.request({type: 'foxy:memory'}), os === 'win' ? {unavailable:true,platform:'win'} : {unavailable:true});
   }
 });
 
@@ -51,20 +51,20 @@ test('a silent host times out after 3 s; late replies do not leak to the CLI', a
   assert.equal(typeof pending?.then, 'function');
   const [id, timer] = [...f.timers][0]; assert.equal(timer.ms, 3000);
   timer.fn(); f.timers.delete(id);
-  assert.deepEqual(await pending, {unavailable: true});
+  assert.deepEqual(await pending, {error:'Memory request timed out'});
   await f.receive({type: 'memory', rid: f.sent[0].rid, firefox: 42});
   assert.deepEqual(f.handled, []);
 });
 
-test('disconnect releases pending memory immediately; a closed pipe also answers unavailable', async () => {
+test('disconnect and closed pipes report errors; subsequent no-port requests answer unavailable', async () => {
   const f = fixture(); await connectAgent(f.options);
   const pending = f.request({type: 'foxy:memory'});
   assert.equal(typeof pending?.then, 'function');
-  f.disconnect(); assert.deepEqual(await pending, {unavailable: true});
+  f.disconnect(); assert.deepEqual(await pending, {error:'Memory helper disconnected'});
   assert.deepEqual(await f.request({type: 'foxy:memory'}), {unavailable: true});
   assert.equal([...f.timers.values()].filter(t => t.ms === 3000).length, 0);
   const other = fixture(); other.options.portFactory = () => ({onMessage:{addListener(){}},onDisconnect:{addListener(){}},postMessage(){throw Error('closed');}});
   await connectAgent(other.options);
-  assert.deepEqual(await other.request({type:'foxy:memory'}), {unavailable:true});
+  assert.deepEqual(await other.request({type:'foxy:memory'}), {error:'Memory helper disconnected'});
   assert.equal(other.timers.size,0);
 });

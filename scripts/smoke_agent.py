@@ -86,7 +86,7 @@ def run(*, root=ROOT, firefox=FIREFOX):
                         memory.get('system', {}).get('total', 0) > 0, json.dumps(memory))
                     total = poll('memory tile renders a number', lambda: client.script(
                         "return document.querySelector('[data-kind=memory] .memory-total')?.textContent;"),
-                        lambda text: bool(text) and text.endswith(' GB') and float(text[:-3]) > 0)
+                        lambda text: bool(text) and text.endswith((' MB', ' GB')) and float(text[:-3]) > 0)
                     results.record('memory tile renders a number', True, total)
                     before = client.script("return {active: (await browser.tabs.query({active:true})).map(t=>t.id), win: (await browser.windows.getLastFocused()).id};")
                     add = json.loads(cli(root, env, 'add', ' agent SMOKE ', 'https://example.com/agent-b', 'https://example.com/agent-a#duplicate', '--json').stdout)

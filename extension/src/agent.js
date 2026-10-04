@@ -124,7 +124,7 @@ export function createAgentHandler({ api, saved, mark = markOwn }) {
 
 /** The factory and scheduler let tests exercise the real request dispatch. */
 export async function connectAgent({ api, handle, portFactory = name => api.runtime.connectNative(name), schedule = setTimeout, cancel = clearTimeout, now = Date.now }) {
-  let nativePort, sequence = 0;
+  let nativePort, platform, sequence = 0;
   const memoryPending = new Map();
   function finish(rid, reply) {
     const item = memoryPending.get(rid);
@@ -136,17 +136,18 @@ export async function connectAgent({ api, handle, portFactory = name => api.runt
   // Register before the platform await so MV3 can wake on page requests.
   api.runtime.onMessage.addListener(message => {
     if (message?.type !== 'foxy:memory') return undefined;
-    if (!nativePort) return Promise.resolve({ unavailable: true });
+    if (!nativePort) return Promise.resolve(platform === 'win' ? { unavailable: true, platform } : { unavailable: true });
     return new Promise(resolve => {
       const rid = `memory:${++sequence}`;
-      const timer = schedule(() => finish(rid, { unavailable: true }), 3000);
+      const timer = schedule(() => finish(rid, { error: 'Memory request timed out' }), 3000);
       timer?.unref?.();
       memoryPending.set(rid, { resolve, timer });
       try { nativePort.postMessage({ type: 'memory', rid }); }
-      catch { finish(rid, { unavailable: true }); }
+      catch { finish(rid, { error: 'Memory helper disconnected' }); }
     });
   });
-  if ((await api.runtime.getPlatformInfo()).os === 'win') return;
+  platform = (await api.runtime.getPlatformInfo()).os;
+  if (platform === 'win') return;
   // Firefox timers are numbers; Node timers must not retain a test process.
   const retry = delay => schedule(() => connect(false), delay)?.unref?.();
   function connect(first = true) {
@@ -180,7 +181,7 @@ export async function connectAgent({ api, handle, portFactory = name => api.runt
       if (!connected) return;
       connected = false;
       if (nativePort === port) nativePort = undefined;
-      for (const rid of memoryPending.keys()) finish(rid, { unavailable: true });
+      for (const rid of memoryPending.keys()) finish(rid, { error: 'Memory helper disconnected' });
       // A host that ran for a while (or answered) was working: come back quickly.
       retry(first || now() - started >= 5000 ? 5000 : 60000);
     });

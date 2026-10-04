@@ -1,5 +1,8 @@
 import ctypes
 import io
+import json
+import socket
+import threading
 from pathlib import Path
 import tempfile
 import unittest
@@ -54,6 +57,15 @@ class MemoryTests(unittest.TestCase):
             self.assertFalse(call.kwargs.get('shell', False))
             self.assertLessEqual(call.kwargs['timeout'], 1)
 
+    def test_mac_system_used_matches_app_wired_and_compressed_memory(self):
+        for anonymous, purgeable, expected in [(200, 10, 3932160), (5, 10, 819200)]:
+            with self.subTest(anonymous=anonymous):
+                text = ('Mach Virtual Memory Statistics: (page size of 16384 bytes)\n'
+                        f'Anonymous pages: {anonymous}.\nPages purgeable: {purgeable}.\n'
+                        'Pages active: 100.\nPages wired down: 20.\nPages occupied by compressor: 30.\n')
+                with patch.object(self.host.subprocess, 'check_output', side_effect=['51539607552\n', text]):
+                    self.assertEqual(self.host.mac_system_memory(), {'total': 51539607552, 'used': expected})
+
     def test_linux_reads_pss_else_rss_and_ignores_exited_or_unreadable_processes(self):
         self.assertTrue(hasattr(self.host, 'measure_memory'), 'memory measurement exists')
         with tempfile.TemporaryDirectory(prefix='memory-', dir=SCRATCH) as directory:
@@ -62,6 +74,9 @@ class MemoryTests(unittest.TestCase):
                 entry = proc / str(pid); entry.mkdir()
                 (entry / 'status').write_text(f'Name:\tFirefox\nPPid:\t{parent}\nVmRSS:\t{rss} kB\n')
                 if pss is not None: (entry / 'smaps_rollup').write_text(f'Rss: {rss} kB\nPss: {pss} kB\n')
+            kernel = proc / '2'; kernel.mkdir()
+            (kernel / 'status').write_text('Name:\tkworker/0:1H\nPPid:\t0\nGroups:\t\n')
+            (proc / '10' / 'smaps_rollup').write_text('55d0-7ffd ---p 00000000 00:00 0 [rollup]\nRss: 100 kB\nPss: 70 kB\n')
             (proc / '99').mkdir()
             (proc / 'meminfo').write_text('MemTotal: 1000 kB\nMemAvailable: 350 kB\nMemFree: 10 kB\n')
             paths = []
@@ -75,11 +90,57 @@ class MemoryTests(unittest.TestCase):
             self.assertNotIn(proc / '20' / 'smaps_rollup', paths, 'helper PSS is never read')
         self.assertEqual(reply, {'firefox': 327680, 'processes': 3, 'system': {'total': 1024000, 'used': 665600}})
 
+    def test_proc_values_ignores_empty_text_and_rollup_header_fields(self):
+        with tempfile.TemporaryDirectory(prefix='memory-', dir=SCRATCH) as directory:
+            path = Path(directory) / 'status'
+            path.write_text('Name:\tkworker/0:1H\nGroups:\t\nPPid:\t0\n55d0-7ffd ---p 00000000 00:00 0 [rollup]\nPss: 70 kB\n')
+            self.assertEqual(self.host.proc_values(path), {'PPid': 0, 'Pss': 70})
+
     def test_missing_firefox_root_or_unsupported_platform_fails(self):
         self.assertTrue(hasattr(self.host, 'measure_memory'), 'memory measurement exists')
         with patch.object(self.host, 'mac_process_table', return_value={11: (10, 100)}):
             with self.assertRaises(ValueError): self.host.measure_memory(root_pid=10, host_pid=20, platform='darwin')
         with self.assertRaises(ValueError): self.host.measure_memory(platform='win32')
+
+    def test_linux_portal_parent_is_an_error_not_a_firefox_measurement(self):
+        with tempfile.TemporaryDirectory(prefix='memory-', dir=SCRATCH) as directory:
+            proc = Path(directory)
+            (proc / '10').mkdir()
+            (proc / '10' / 'status').write_text('Name: xdg-dbus-proxy\nPPid: 1\nVmRSS: 100 kB\n')
+            (proc / '20').mkdir()
+            (proc / '20' / 'status').write_text('Name: python3\nPPid: 10\nVmRSS: 100 kB\n')
+            (proc / 'meminfo').write_text('MemTotal: 1000 kB\nMemAvailable: 350 kB\n')
+            with self.assertRaisesRegex(ValueError, 'Firefox process tree not found'):
+                self.host.measure_memory(root_pid=10, host_pid=20, platform='linux', proc=proc)
+
+    def test_empty_firefox_tree_is_an_error_not_a_zero_measurement(self):
+        with patch.object(self.host, 'mac_process_table', return_value={10: (1, 100)}), \
+             patch.object(self.host, 'mac_system_memory', return_value={'total': 1000, 'used': 500}):
+            with self.assertRaisesRegex(ValueError, 'Firefox process tree not found'):
+                self.host.measure_memory(root_pid=10, host_pid=10, platform='darwin')
+
+    def test_socket_memory_request_is_refused_without_native_relay(self):
+        host = self.host
+        writer = io.BytesIO()
+        relay = host.Relay(io.BytesIO(), writer, 1)
+        client, server = socket.socketpair()
+        worker = threading.Thread(target=relay.client, args=(server,))
+        worker.start()
+        try:
+            with client:
+                client.settimeout(.2)
+                client.sendall(b'{"type":"memory","command":"groups"}\n')
+                try:
+                    reply = json.loads(client.recv(4096))
+                except socket.timeout:
+                    self.fail('Socket memory request waited for the native timeout instead of refusing')
+                self.assertFalse(reply['ok'])
+                self.assertIn('error', reply)
+                self.assertNotIn('unreachable', reply)
+                self.assertEqual(writer.getvalue(), b'', 'refusal never reaches the extension')
+        finally:
+            worker.join(2)
+        self.assertFalse(worker.is_alive())
 
     def test_native_memory_request_replies_without_cli_relay_or_pending_id(self):
         host = self.host

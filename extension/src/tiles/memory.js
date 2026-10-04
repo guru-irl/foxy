@@ -32,7 +32,7 @@ export async function unloadHost(api, host) {
     try {
       // Selection may have changed since the row was drawn or the query began.
       const tab = await api.tabs.get(id);
-      if (!tab.active && !tab.discarded && !tab.incognito && hostOf(tab) === host) await api.tabs.discard(id);
+      if (!tab.active && !tab.audible && !tab.discarded && !tab.incognito && hostOf(tab) === host) await api.tabs.discard(id);
     } catch { /* Closed, newly active, or not discardable. Other tabs still unload. */ }
   }
 }
@@ -43,11 +43,13 @@ export function addSample(samples, sample) {
 
 export function sparklinePoints(samples) {
   if (!samples.length) return '';
+  if (samples.length === 1) return '2.00,16.00 298.00,16.00';
   const low = Math.min(...samples.map(item => item.bytes)), high = Math.max(...samples.map(item => item.bytes));
+  const span = Math.max(high - low, 256 * 1024 ** 2), middle = (high + low) / 2;
   const end = samples.at(-1).time;
   return samples.map(item => {
     const x = 2 + 296 * (1 - Math.min(WINDOW, end - item.time) / WINDOW);
-    const y = high === low ? 16 : 30 - 28 * (item.bytes - low) / (high - low);
+    const y = 16 - 28 * (item.bytes - middle) / span;
     return `${x.toFixed(2)},${y.toFixed(2)}`;
   }).join(' ');
 }
@@ -85,17 +87,26 @@ function validMemory(reply) {
     Number.isFinite(reply?.system?.total) && reply.system.total > 0 && Number.isFinite(reply.system.used) && reply.system.used >= 0;
 }
 
-function paint(tile, reply, sites, samples, unload) {
+function paint(tile, reply, sites, samples, unload, lastGood) {
   const available = validMemory(reply);
-  tile.querySelector('.memory-total').textContent = available ? `${(reply.firefox / 1e9).toFixed(1)} GB` : '';
-  tile.querySelector('.memory-system').textContent = available
-    ? `of ${Number((reply.system.total / 1e9).toFixed(1))} GB · system ${Math.round(reply.system.used / reply.system.total * 100)} % used` : '';
-  tile.querySelector('.memory-unavailable').hidden = available;
+  const measured = available ? reply : reply?.unavailable ? undefined : lastGood;
+  tile.querySelector('.memory-total').textContent = measured
+    ? measured.firefox < 1024 ** 3 ? `${(measured.firefox / 1024 ** 2).toFixed(1)} MB` : `${(measured.firefox / 1024 ** 3).toFixed(1)} GB`
+    : '';
+  tile.querySelector('.memory-system').textContent = measured
+    ? `of ${Number((measured.system.total / 1024 ** 3).toFixed(1))} GB · system ${Math.round(measured.system.used / measured.system.total * 100)} % used` : '';
+  const status = tile.querySelector('.memory-unavailable');
+  status.hidden = available;
+  status.textContent = reply?.unavailable
+    ? reply.platform === 'win' ? 'Memory needs the Foxy helper on macOS or Linux' : 'Install the Foxy helper to see memory'
+    : 'Memory unavailable';
   const spark = tile.querySelector('.memory-sparkline');
   spark.toggleAttribute('hidden', !available);
   spark.querySelector('polyline').setAttribute('points', sparklinePoints(samples));
   const list = tile.querySelector('.memory-sites'), top = list.scrollTop;
-  const focused = document.activeElement?.closest('.memory-row')?.dataset.host;
+  const focusedRow = list.contains(document.activeElement) ? document.activeElement.closest('.memory-row') : null;
+  const focused = focusedRow?.dataset.host;
+  const focusedIndex = [...list.querySelectorAll('.memory-row')].indexOf(focusedRow);
   const rows = sites.map(site => {
     const row = el('div', 'memory-row');
     row.dataset.host = site.host;
@@ -107,10 +118,15 @@ function paint(tile, reply, sites, samples, unload) {
     }
     const action = el('button', 'memory-unload', 'UNLOAD'); action.type = 'button';
     action.setAttribute('aria-label', `Unload inactive tabs of ${site.host}`);
+    let unloading = false;
     action.onclick = async () => {
-      if (action.disabled) return;
-      action.disabled = true;
-      try { await unload(site.host); } finally { action.disabled = false; }
+      if (unloading) return;
+      unloading = true;
+      // Native disabled buttons lose focus before tab events replace the board.
+      action.setAttribute('aria-disabled', 'true');
+      try { await unload(site.host); }
+      catch { /* A failed lookup leaves the sites intact; the next click can retry. */ }
+      finally { unloading = false; action.removeAttribute('aria-disabled'); }
     };
     row.append(icon, el('span', 'memory-host', site.host), el('span', 'memory-count', `${site.count} ${site.count === 1 ? 'tab' : 'tabs'}`), action);
     return row;
@@ -118,15 +134,18 @@ function paint(tile, reply, sites, samples, unload) {
   if (!rows.length) rows.push(el('p', 'memory-empty', 'No loaded sites. Firefox cannot report per-site memory.'));
   list.replaceChildren(...rows);
   list.scrollTop = top;
-  if (focused) rows.find(row => row.dataset.host === focused)?.querySelector('button')?.focus({ preventScroll: true });
+  if (focused) {
+    const row = rows.find(row => row.dataset.host === focused) ?? rows[Math.min(focusedIndex, rows.length - 1)];
+    (row?.querySelector('button') ?? list).focus({ preventScroll: true });
+  }
 }
 
 /** One sampler per page, retained across board renders and stopped on pagehide. */
 export function createMemoryController(root, api, { document: doc = root.ownerDocument, schedule = setTimeout, cancel = clearTimeout, now = Date.now } = {}) {
-  let reply, sites = [], samples = [], timer, running = false, inFlight = false, disposed = false;
+  let reply, lastGood, sites = [], samples = [], timer, running = false, inFlight = false, disposed = false;
   const tile = () => root.querySelector('[data-kind="memory"]');
   const visible = () => !disposed && root.isConnected && !doc.hidden && !!tile() && !tile().hidden;
-  const draw = () => { if (tile()) paint(tile(), reply, sites, samples, unload); };
+  const draw = () => { if (tile()) paint(tile(), reply, sites, samples, unload, lastGood); };
   async function readSites() {
     const [tabs, windows] = await Promise.all([api.tabs.query({}), api.windows.getAll({ windowTypes: ['normal'] })]);
     return loadedSites(tabs, windows);
@@ -142,12 +161,15 @@ export function createMemoryController(root, api, { document: doc = root.ownerDo
     const started = now();
     try {
       const [next, loaded] = await Promise.all([
-        api.runtime.sendMessage({ type: 'foxy:memory' }).catch(() => ({ unavailable: true })),
+        api.runtime.sendMessage({ type: 'foxy:memory' }).catch(() => ({ error: 'Memory request failed' })),
         readSites().catch(() => []),
       ]);
       if (!visible()) return;
       reply = next; sites = loaded;
-      if (validMemory(reply)) samples = addSample(samples, { time: now(), bytes: reply.firefox });
+      if (validMemory(reply)) {
+        lastGood = reply;
+        samples = addSample(samples, { time: now(), bytes: reply.firefox });
+      }
       draw();
     } finally {
       inFlight = false;

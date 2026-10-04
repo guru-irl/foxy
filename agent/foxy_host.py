@@ -51,15 +51,21 @@ def mac_system_memory():
     total = int(subprocess.check_output(['/usr/sbin/sysctl', '-n', 'hw.memsize'], text=True, timeout=1))
     text = subprocess.check_output(['/usr/bin/vm_stat'], text=True, timeout=1)
     page_size = int(re.search(r'page size of (\d+) bytes', text).group(1))
-    pages = sum(int(re.search(r'^' + re.escape(key) + r':\s+(\d+)', text, re.M).group(1))
-                for key in ('Pages active', 'Pages wired down', 'Pages occupied by compressor'))
+    values = {key: int(value) for key, value in re.findall(r'^([^:\n]+):\s+(\d+)', text, re.M)}
+    app = max(0, values['Anonymous pages'] - values.get('Pages purgeable', 0)) \
+        if 'Anonymous pages' in values else values['Pages active']
+    pages = app + values['Pages wired down'] + values['Pages occupied by compressor']
     return {'total': total, 'used': min(total, pages * page_size)}
 
 
 def proc_values(path):
-    return {key: int(value.split()[0]) for key, value in
-            (line.split(':', 1) for line in path.read_text().splitlines() if ':' in line)
-            if value.strip().split()[0].isdigit()}
+    values = {}
+    for line in path.read_text().splitlines():
+        key, sep, value = line.partition(':')
+        parts = value.split()
+        if sep and re.fullmatch(r'[A-Za-z_][A-Za-z_()]*', key) and parts and parts[0].isdigit():
+            values[key] = int(parts[0])
+    return values
 
 
 def linux_process_table(proc):
@@ -90,7 +96,12 @@ def measure_memory(*, root_pid=None, host_pid=None, platform=None, proc=Path('/p
     else:
         raise ValueError('Memory measurement is unavailable on this platform')
     if root_pid not in table:
-        raise ValueError('Firefox process is unavailable')
+        raise ValueError('Firefox process tree not found')
+    if platform.startswith('linux'):
+        # Portals may launch the host outside Firefox's process tree.
+        status = (proc / str(root_pid) / 'status').read_text()
+        if not re.search(r'^Name:\s+firefox(?:-bin|-esr)?\s*$', status, re.M | re.I):
+            raise ValueError('Firefox process tree not found')
     children = {}
     for pid, (parent, _) in table.items():
         children.setdefault(parent, []).append(pid)
@@ -114,6 +125,8 @@ def measure_memory(*, root_pid=None, host_pid=None, platform=None, proc=Path('/p
             except (OSError, KeyError, ValueError):
                 pass  # Restricted smaps or an exiting process: fall back to RSS.
         total += amount
+    if not seen:
+        raise ValueError('Firefox process tree not found')
     return {'firefox': total, 'processes': len(seen), 'system': system}
 
 
@@ -211,6 +224,8 @@ class Relay:
     def request(self, request):
         if not isinstance(request, dict):
             return {'ok': False, 'error': 'Request must be a JSON object'}
+        if request.get('type') == 'memory':
+            return {'ok': False, 'error': 'Memory requests are only available to the extension'}
         request_id = uuid.uuid4().hex
         item = {'event': threading.Event()}
         with self.lock:

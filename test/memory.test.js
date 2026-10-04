@@ -53,9 +53,19 @@ test('five-minute sparkline retains only fresh samples and stays finite for equa
   assert.equal(points.split(' ').length, 60);
   assert.ok(!/NaN|Infinity/.test(points));
   assert.equal(memory.sparklinePoints([]), '');
-  const changed = memory.sparklinePoints([{time:0,bytes:100},{time:5000,bytes:200}]).split(' ').map(p=>p.split(',').map(Number));
+  const changed = memory.sparklinePoints([{time:0,bytes:734003200},{time:5000,bytes:796917760}]).split(' ').map(p=>p.split(',').map(Number));
   assert.ok(changed[1][0] > changed[0][0]);
   assert.ok(changed[1][1] < changed[0][1]);
+});
+
+test('sparkline draws a flat full-width line from the first sample', () => {
+  assert.equal(memory.sparklinePoints([{time:0,bytes:734003200}]), '2.00,16.00 298.00,16.00');
+});
+
+test('sparkline centres small drift within a minimum 256 MB vertical span', () => {
+  const points = memory.sparklinePoints([{time:0,bytes:734003200},{time:5000,bytes:796917760}])
+    .split(' ').map(p=>p.split(',').map(Number));
+  assert.deepEqual(points.map(p=>p[1]), [19.28,12.72]);
 });
 
 test('memory placements reload and a hidden tile retains its saved rectangle without new writes', async () => {
@@ -77,7 +87,7 @@ test('memory is visible by default with a 5 x 6 rectangle and its own minimum', 
   assert.equal(kindOf('memory'), 'memory');
   assert.deepEqual(defaultSize('memory', 48, 20), {w:5,h:6});
   assert.deepEqual(defaultSize('memory', 80, 20), {w:5,h:6});
-  assert.deepEqual(clampRect('memory', {x:0,y:0,w:1,h:1}, 20), {id:'memory',x:0,y:0,w:3,h:3});
+  assert.deepEqual(clampRect('memory', {x:0,y:0,w:1,h:1}, 20), {id:'memory',x:0,y:0,w:4,h:5});
   const options = {layouts:{},synced:{...DEFAULT_SETTINGS,showClock:false,showPinned:false},device:DEFAULT_DEVICE,contentWidth:1600};
   const board = {columns:[],saved:[],tabs:[],pinned:[]};
   assert.deepEqual(buildView(board,options).tiles.map(t=>t.kind), ['memory']);
@@ -85,4 +95,15 @@ test('memory is visible by default with a 5 x 6 rectangle and its own minimum', 
   assert.equal((await loadSettings(ff.browser)).synced.showMemory,false);
   assert.deepEqual(buildView(board,{...options,synced:{...options.synced,showMemory:false}}).tiles,[]);
   await assert.rejects(()=>saveSetting(ff.browser,'synced','showMemory','yes'), /Invalid/);
+});
+
+test('UNLOAD skips currently audible tabs even when they started playing after the query', async () => {
+  const discarded=[];
+  const live=[{id:1,windowId:1,url:'https://music.test/a'},
+    {id:2,windowId:1,url:'https://music.test/b',audible:true},
+    {id:3,windowId:1,url:'https://music.test/c'}];
+  const api={windows:{getAll:async()=>windows},tabs:{query:async()=>live,
+    get:async id=>({...live.find(t=>t.id===id),audible:id!==3}),discard:async id=>discarded.push(id)}};
+  await memory.unloadHost(api,'music.test');
+  assert.deepEqual(discarded,[3]);
 });

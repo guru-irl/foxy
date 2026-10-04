@@ -946,9 +946,10 @@ button.group-name:focus-visible {
 }
 
 /* --- Memory ------------------------------------------------------------ */
+.memory { container: memory / size; }
 .memory-summary {
   flex: none;
-  padding: 4px 12px 8px;
+  padding: 4px 10px 8px;
 }
 .memory-total {
   font-size: 32px;
@@ -969,8 +970,10 @@ button.group-name:focus-visible {
   font-size: 12px;
   line-height: 1.5;
 }
+.memory-total:empty,
+.memory-system:empty { display: none; }
 .memory-unavailable { padding: 4px 0; }
-.memory-empty { padding: 8px; }
+.memory-empty { padding: 8px 10px; }
 .memory-sparkline {
   display: block;
   width: 100%;
@@ -992,7 +995,7 @@ button.group-name:focus-visible {
   align-items: center;
   gap: 8px;
   min-height: var(--row);
-  padding: 0 8px;
+  padding: 0 10px;
   border-radius: 999px;
 }
 .memory-row:hover,
@@ -1025,3 +1028,9 @@ button.group-name:focus-visible {
 .memory-row:focus-within .memory-unload { opacity: 1; }
 .memory-unload:hover,
 .memory-unload:focus-visible { background: light-dark(#e5e5e5, #383838); }
+@container memory (height < 320px) {
+  .memory-sparkline { display: none; }
+}
+@container memory (height < 260px) {
+  .memory-system { display: none; }
+}
