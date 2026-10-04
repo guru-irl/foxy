@@ -14,11 +14,12 @@ Version 3.2.0. Distributed as an unlisted add-on. Design: `docs/superpowers/spec
 
 ## Board
 
-- **Tiles:** groups, PINNED, SAVED, a clock and MEMORY on a scrolling grid that fills the page edge to edge. Groups and SAVED have scrolling lists.
+- **Tiles:** groups, PINNED, SAVED, a clock, MEMORY and weather on a scrolling grid that fills the page edge to edge. Groups and SAVED have scrolling lists.
 - **PINNED:** one icon per cell, in tab order. Hover shows the name, other-window label and ×; the active pin has a neutral bottom dot. A muted top-left dot means the name needs site access; hover or focus the icon for ALLOW. Extra pins scroll with edge fades. Default 6 × 2 cells, minimum 1 × 1.
 - **Memory:** the helper measures Firefox's process total and system use, with a five-minute sparkline. Loaded sites are grouped by host; UNLOAD discards inactive tabs. Firefox cannot report per-site memory. Without the helper, the tile shows installation guidance.
+- **Weather:** your location (rounded to about 1 km) or a city you pick in Settings. The tile shows more as it grows: temperature, then condition, place and high / low, then the next 24 hours (scroll them with the wheel, the arrow keys or a swipe), then 7 days. It refreshes every 15 minutes while a Foxy page is visible; offline it shows the last reading and when it was updated.
 - **UNGROUPED TABS rail:** ungrouped tabs stay on the right, running to the board bottom with their own scroll. A round Settings gear sits inside the rail at its bottom right; the tab list ends above it.
-- **Move and resize:** drag a tile's header (empty space or the 4 px icon margins for PINNED, even at 1 × 1), or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
+- **Move and resize:** drag a tile's header (empty space or the 4 px icon margins for PINNED, even at 1 × 1; the weather tile by its body), or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
 - **Window widths:** each width keeps its own layout (up to 4). A width without one shows the closest: tiles narrow slightly, or columns of tiles pack together in order. Resizing saves nothing. Moving a tile updates the layout shown if the result still fits it; otherwise it saves a new layout for this width.
 - **Windows:** this window comes first; others are labelled. Tile places do not change tab order.
 - **Open a tab:** click it. A pin from another window moves here unless that setting is off.
@@ -39,10 +40,12 @@ After updating, boards saved with M, L or XL cells show smaller tiles; resize th
 |---|---|---|
 | Cell size | S 48 px (default); Custom 40 to 240 px (cells stretch a little to fill the width) | Per device |
 | Ungrouped tabs rail width | 2 cells to half the available width; default 5 | Synced |
-| Show clock, pinned, saved, memory | On or off for each | Synced |
+| Show clock, pinned, saved, memory, weather | On or off for each | Synced |
 | Reset layout | Click twice within 3 seconds; clears saved tile places for every width | Synced |
 | Time format | 24-hour or 12-hour | Synced |
 | Show date | On or off | Synced |
+| Temperature | °C (wind in km/h) or °F (wind in mph) | Synced |
+| Location | Current location, or a city found by search (Enter picks the first match); Use my location goes back | Per device |
 | Transparency | Low, medium, high | Synced |
 | Row density | Normal 32 px, compact 24 px | Per device |
 | Other windows | Show or hide their tabs and groups | Synced |
@@ -88,9 +91,11 @@ Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their pl
 | `storage` | Remember mappings and pending changes; tile layout and settings (synced), device settings (local) |
 | `scripting` | Keep a renamed pin's title |
 | `nativeMessaging` | Connect the local agent CLI to Foxy |
+| `geolocation` (optional) | Weather for where you are. Asked together with location data collection by "Allow weather" while Location is Current location; a searched city does not need it. Firefox may use your system's or a network location service to find you; coordinates are rounded to 2 decimals before any request |
+| Location data collection (optional) | Asked by "Allow weather"; until you allow it, weather sends nothing. Turn either off in about:addons: the tile asks again and the cached forecast and place name are deleted |
 | Site access (optional) | Requested per site when you rename a pin there |
 
-Foxy makes no network requests of its own.
+Foxy makes network requests only for weather, and only after you allow location data collection ("Allow weather"): Open-Meteo (forecast and city search) and BigDataCloud (place name). No API keys, no account, no cookies.
 
 ## Limits
 

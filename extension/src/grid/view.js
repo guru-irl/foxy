@@ -18,6 +18,7 @@ export function buildView(board, { layouts, synced, device, contentWidth, folder
   }
   if (synced.showSaved && board.saved?.length) entries.push({ id: "saved", kind: "saved" });
   if (synced.showMemory) entries.push({ id: "memory", kind: "memory" });
+  if (synced.showWeather) entries.push({ id: "weather", kind: "weather" });
   const ids = entries.map(entry => entry.id);
   const visibleTiles = tiles => tiles.filter(tile => ids.includes(tile.id));
   const k = sourceLayout(layouts, cols, k => keepsOrSqueezes(visibleTiles(layouts[k].tiles), k, cols));

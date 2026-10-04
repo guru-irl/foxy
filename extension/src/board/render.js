@@ -3,6 +3,7 @@ import { pinnedTile, restorePinnedHover } from "../tiles/pinned.js";
 import { colorKey, formatDate, formatTime } from "../model.js";
 import { attachDnd } from "./dnd.js";
 import { openNameEditor, openColorPicker } from "./edit.js";
+import { weatherTile, paintWeather } from "../tiles/weather.js";
 
 const editors = new WeakMap();
 const renameStarts = new WeakMap();
@@ -105,7 +106,8 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
     const node = tile.kind === "group" ? groupColumn(root, tile.group, handlers)
       : tile.kind === "pinned" ? pinned.tile
       : tile.kind === "saved" ? savedColumn(root, board.saved, ui, handlers)
-      : tile.kind === "memory" ? createMemoryTile() : clockTile();
+      : tile.kind === "memory" ? createMemoryTile()
+      : tile.kind === "weather" ? weatherTile() : clockTile();
     node.classList.add("tile");
     node.dataset.tileId = tile.id;
     node.dataset.kind = tile.kind;
@@ -133,6 +135,7 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   root.replaceChildren(grid, rail, ...(pinOverlays ? [pinOverlays] : []));
   if (pinOverlays) grid.addEventListener('scroll', scrollPins, { passive: true });
   updateClock(root, settings);
+  paintWeather(root, settings);
   const previousBanner = banners.get(root);
   const missingCount = board.missing?.length ?? 0;
   if (missingCount && previousBanner?.dataset.count === String(missingCount)) {

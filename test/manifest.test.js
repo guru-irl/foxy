@@ -20,8 +20,9 @@ test("manifest replaces the new tab page and the home page with newtab.html", ()
   assert.deepEqual(manifest.chrome_settings_overrides, { homepage: "newtab.html" });
 });
 
-test("manifest asks for tabs, tabGroups, bookmarks, storage, scripting and nativeMessaging and uses a module event page", () => {
+test("manifest asks for tabs, tabGroups, bookmarks, storage, scripting and nativeMessaging, geolocation only as optional, and uses a module event page", () => {
   assert.deepEqual(manifest.permissions, ["tabs", "tabGroups", "bookmarks", "storage", "scripting", "nativeMessaging"]);
+  assert.deepEqual(manifest.optional_permissions, ["geolocation"]);
   assert.equal(manifest.host_permissions, undefined);
   assert.deepEqual(manifest.optional_host_permissions, ["*://*/*"]);
   assert.deepEqual(manifest.background, { scripts: ["background.js"], type: "module" });
@@ -48,7 +49,7 @@ test("manifest has the gecko settings AMO needs", () => {
   const gecko = manifest.browser_specific_settings.gecko;
   assert.equal(gecko.id, "{4408f971-7930-41ea-9f93-b01231e40861}");
   assert.equal(gecko.strict_min_version, "140.0");
-  assert.deepEqual(gecko.data_collection_permissions, { required: ["none"] });
+  assert.deepEqual(gecko.data_collection_permissions, { required: ["none"], optional: ["locationInfo"] });
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
 });
 

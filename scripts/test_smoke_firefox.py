@@ -96,6 +96,8 @@ class ProfileTests(unittest.TestCase):
         self.assertIs(values["extensions.update.enabled"], False)
         self.assertEqual(values["network.proxy.ssl"], "127.0.0.1")
         self.assertIs(values["network.proxy.failover_direct"], False)
+        # No location lookups: the weather tile then makes no request at all.
+        self.assertIs(values["geo.enabled"], False)
 
     def test_invalid_port_does_not_create_profile(self):
         for port in (0, 65536, True, "2828"):

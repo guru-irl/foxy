@@ -164,7 +164,7 @@ export function attachGridDrag(root, { view, canCommit, onPreview, onCommit, onC
     const target = event.target;
     if (!(target instanceof Element)) return;
     const rail = target.closest(".rail-resize"), handle = target.closest(".tile-resize");
-    const header = target.closest(".column-header, .column-title, .tile-header");
+    const header = target.closest(".column-header, .column-title, .tile-header, .tile-grab");
     const node = target.closest(".tile");
     const emptyPin = node?.dataset.kind === "pinned" && !target.closest("button, input, textarea");
     if (!rail && (!node || (!handle && ((!header && !emptyPin) || target.closest("input, textarea, button:not(.group-name)"))))) return;

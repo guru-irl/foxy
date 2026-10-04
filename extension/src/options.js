@@ -5,7 +5,7 @@ import { watchStorage } from "./grid/store.js";
 
 export async function createOptions(container, api) {
   let version = 0;
-  const handlers = settingActions(api, () => resetLayout(api));
+  const handlers = settingActions(api, () => resetLayout(api), globalThis.fetch?.bind(globalThis));
   async function refresh() {
     const mine = ++version, settings = await loadSettings(api);
     if (mine !== version) return;

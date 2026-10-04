@@ -14,6 +14,7 @@ import { renderSettings, settingActions, resetLayout } from "./settings/pane.js"
 import { targetLayout, mergeTiles, withWrites } from "./grid/layouts.js";
 import { tileKey, parseTileKey, loadLayouts, saveTiles, removeGroupTiles, watchStorage, persistLayouts } from "./grid/store.js";
 import { loadSettings, saveSetting, cardAlpha } from "./settings/store.js";
+import { startWeather } from "./tiles/weather.js";
 export { renderTime, updateClock } from "./board/render.js";
 
 function validFoldersReply(reply) {
@@ -23,7 +24,10 @@ function validFoldersReply(reply) {
 }
 
 const root = document.getElementById("board");
-if (root) createController(root, globalThis.browser).refresh();
+// Only the real page gets network and location; tests inject their own or none.
+if (root) createController(root, globalThis.browser, undefined, {
+  weather: { fetch: globalThis.fetch.bind(globalThis), geolocation: navigator.geolocation },
+}).refresh();
 
 // Minute boundaries and visibility changes update the tile without a board read.
 function startClock(root, settings) {
@@ -43,7 +47,7 @@ function startClock(root, settings) {
 
 /** All board interactions share this state; DnD and editors set it via handlers. */
 export function createController(root, api, ui = { editGroupId: null, dragging: false, editing: false },
-  { maxWait = 30000, newGroupDelay = 1000 } = {}) {
+  { maxWait = 30000, newGroupDelay = 1000, weather = null } = {}) {
   const memory = createMemoryController(root, api);
   ui.confirmFolderId ??= null;
   ui.gridDragging ??= false;
@@ -76,7 +80,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     pendingTiles.clear();
     pendingWrites.clear();
     heldWrites.clear();
-  });
+  }, weather?.fetch);
   const page = root.parentElement?.matches(".page") ? root.parentElement : root;
   // Measure the available width, not the below-three-column overflow floor.
   const pageWidth = () => {
@@ -618,7 +622,9 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     },
   };
 
-  const buildGridView = (options, pending = pendingTiles) => buildPendingView(board, options, pending);
+  // Only a page given weather access (the real new tab page) shows the tile.
+  const buildGridView = (options, pending = pendingTiles) => buildPendingView(board,
+    weather ? options : { ...options, synced: { ...options.synced, showWeather: false } }, pending);
   const displayPending = (next, pending = pendingTiles) => showPending(board, savedReply.folders ?? {}, next, pending);
 
   function discardTarget(k) {
@@ -723,12 +729,15 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     enqueue();
   });
   startClock(root, () => gridState?.synced);
+  const weatherLoop = weather && startWeather(root, { api, ...weather,
+    settings: () => gridState && { synced: gridState.synced, device: gridState.device } });
 
   const onChange = () => schedule();
   window.addEventListener("pagehide", () => {
     unloaded = true;
     memory.stop();
     detachGridDrag();
+    weatherLoop?.stop();
     for (const id of deferredGroups.keys()) clearDeferredGroup(id);
   }, { once: true });
 
@@ -802,6 +811,7 @@ function captureView(root) {
     } else if (active.matches(".rows")) focus = { rowsKey: rowsKey(active) };
     else if (active.matches(".grid")) focus = { grid: true };
     else if (active.matches(".settings-gear")) focus = { gear: true };
+    else if (active.closest(".weather")) focus = { weather: active.className };
     else if (group) focus = { groupId: group.dataset.groupId, className: active.className,
       index: [...root.querySelectorAll(".column[data-group-id]")].indexOf(group) };
   }
@@ -820,6 +830,9 @@ function restoreView(root, { focus, top, tops }) {
       const row = rows.find(row => row.dataset.host === focus.memoryHost) ?? rows[Math.min(focus.index, rows.length - 1)];
       active = row?.querySelector('.memory-unload') ?? sites ?? root.querySelector('.grid');
     } else if (focus.gear) active = root.querySelector(".settings-gear");
+    else if (focus.weather !== undefined) {
+      active = [...root.querySelectorAll(".weather button, .weather [tabindex]")].find(node => node.className === focus.weather);
+    }
     else if (focus.grid) active = root.querySelector(".grid");
     else if (focus.tabId === undefined && focus.rowsKey !== undefined) active = list;
     else {

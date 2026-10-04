@@ -182,6 +182,38 @@ body {
   font: inherit;
 }
 .settings-number:focus-visible { background: var(--pressed); }
+.settings-text {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px 12px;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--text);
+  font: inherit;
+}
+.settings-text:focus-visible { background: var(--pressed); }
+.settings-text::placeholder { color: var(--text-muted); }
+.weather-current { display: block; margin-top: 2px; color: var(--text-muted); }
+.weather-results { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.weather-results:empty { display: none; }
+.weather-result {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  text-align: start;
+}
+.weather-result-name { flex: none; }
+.weather-result-detail { overflow: hidden; color: var(--text-muted); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+.weather-auto { margin-top: 8px; background: var(--hover); }
+.weather-search [hidden] { display: none; }
+.weather-search .weather-allow { display: block; margin-top: 6px; background: var(--hover); }
 .settings-reset { background: var(--hover); }
 .settings-pane button:focus-visible { background: var(--thumb); }
 .options-page .settings-pane {
@@ -247,10 +279,359 @@ body {
   .clock-date { display: none; }
 }
 
+/* --- Weather ----------------------------------------------------------- */
+
+/* Tiers follow the tile's own size: small (glyph and temperature), medium
+   (plus condition, place, high / low), tall (plus the hourly strip) and
+   taller (plus 7 days). Colour is limited to the sun core, rain and bolt. */
+.weather {
+  --weather-sun: light-dark(#d4951a, #f0c04f);
+  --weather-rain: light-dark(#3b78c4, #82b4ee);
+  --weather-bar: light-dark(rgba(0, 0, 0, 0.32), rgba(255, 255, 255, 0.36));
+  box-sizing: border-box;
+  container-type: size;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 12px;
+  background: var(--card);
+  overflow: hidden;
+  color: var(--text);
+}
+
+.weather-body {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  padding: 12px 14px;
+}
+
+.weather svg {
+  display: block;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  color: var(--label);
+}
+.weather svg * { vector-effect: non-scaling-stroke; }
+.weather svg mask * { vector-effect: none; }
+.weather svg .solid { fill: currentColor; stroke: none; }
+.weather svg .accent-sun { fill: var(--weather-sun); stroke: none; }
+.weather svg .accent-rain { stroke: var(--weather-rain); }
+.weather svg .accent-rain.solid { fill: var(--weather-rain); stroke: none; }
+.weather svg .accent-bolt { stroke: var(--weather-sun); }
+
+.weather-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.weather-place,
+.weather-updated {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: normal 600 10px / 14px "Foxy Sans", system-ui, sans-serif;
+  font-stretch: 90%;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.weather-place { color: var(--label); }
+.weather-updated { flex: none; color: var(--text-muted); letter-spacing: 0.04em; text-transform: none; }
+
+.weather-now {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+  min-width: 0;
+}
+.weather-glyph { width: 32px; height: 32px; }
+.weather-temp {
+  font: normal 300 40px / 1 "Foxy Sans", system-ui, sans-serif;
+  letter-spacing: -0.02em;
+  font-variant-numeric: lining-nums tabular-nums;
+  white-space: nowrap;
+}
+.weather-summary {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.weather-condition,
+.weather-range,
+.weather-feels {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.weather-condition { font-size: 13px; line-height: 16px; }
+.weather-range { font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.weather-lo, .weather-feels { color: var(--text-muted); }
+.weather-feels { display: none; font-size: 12px; line-height: 16px; }
+
+.weather-details,
+.weather-hours,
+.weather-days { display: none; }
+
+.weather-message {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+}
+.weather-retry,
+.weather-allow {
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--hover);
+  color: var(--text-muted);
+  font: normal 700 10px / 20px "Foxy Sans", system-ui, sans-serif;
+  font-stretch: 80%;
+  letter-spacing: 0.08em;
+}
+.weather-allow {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text);
+  font: normal 500 12px / 20px "Foxy Sans", system-ui, sans-serif;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.weather-allow:hover { background: var(--pressed); }
+.weather .weather-allow-glyph,
+.weather .weather-retry-glyph { display: none; }
+.weather .weather-retry-glyph { width: 16px; height: 16px; stroke-width: 1.75px; color: currentColor; }
+.weather[data-state="consent"] .weather-body { gap: 10px; }
+.weather[data-state="consent"] .weather-message { max-width: 22ch; }
+.weather:not([data-state="ok"]) .weather-body {
+  align-items: center;
+  justify-content: center;
+}
+
+/* Wide medium: the summary sits to the right of the temperature. */
+@container (width >= 260px) {
+  .weather-now { grid-template-columns: auto auto 1fr; }
+  .weather-summary { grid-column: auto; text-align: right; }
+}
+
+/* Tall: larger reading, details and the hourly strip at the bottom. */
+@container (height >= 260px) and (width >= 150px) {
+  .weather-body { gap: 10px; padding: 16px; }
+  .weather .weather-glyph { width: 48px; height: 48px; stroke-width: 1.75px; }
+  .weather-temp { font-size: 56px; }
+  .weather-feels { display: block; }
+  .weather-details {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 16px;
+  }
+  .weather-sep { margin-inline: 6px; opacity: 0.6; }
+  /* Without days, the reading sits centred between the place and the hours. */
+  .weather-now { margin-top: auto; }
+  .weather-details { margin-bottom: auto; }
+  .weather-hours {
+    --fade-start: 0px;
+    --fade-end: 0px;
+    display: flex;
+    flex: none;
+    gap: 2px;
+    margin-top: auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    outline: none;
+    /* Touch swipes pan the strip natively instead of moving the tile. */
+    touch-action: pan-x;
+    border-radius: 10px;
+  }
+  .weather-hours:focus-visible { background: var(--hover); }
+  .weather-hours[data-scroll-start] { --fade-start: 24px; }
+  .weather-hours[data-scroll-end] { --fade-end: 24px; }
+  .weather-hours[data-scroll-start],
+  .weather-hours[data-scroll-end] {
+    mask-image: linear-gradient(to right, transparent, black var(--fade-start), black calc(100% - var(--fade-end)), transparent);
+  }
+  .weather-hour {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    width: 40px;
+    padding: 6px 0 4px;
+    border-radius: 10px;
+  }
+  .weather-hour:first-child { background: var(--hover); }
+  .weather-hour-time {
+    color: var(--text-muted);
+    font: normal 600 10px / 12px "Foxy Sans", system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+  .weather-hour-glyph { width: 20px; height: 20px; }
+  .weather-hour-temp { font-size: 13px; line-height: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .weather-hour-pop { min-height: 12px; color: var(--weather-rain); font-size: 9px; line-height: 12px; }
+}
+
+/* Tall below 300 px wide: the summary stays under the reading, and the
+   reading follows the width, so 101° and -13° fit 3-column tiles. */
+@container (height >= 260px) and (150px <= width < 300px) {
+  .weather-details { display: none; }
+  .weather-now { grid-template-columns: auto 1fr; }
+  .weather-summary { grid-column: 1 / -1; text-align: left; }
+  .weather-temp { font-size: min(56px, 21cqw); }
+}
+
+/* Medium below 260 px wide: the reading follows the width too. */
+@container (100px <= height < 260px) and (150px <= width < 260px) {
+  .weather-temp { font-size: min(40px, 19cqw, calc(100cqh - 70px)); }
+}
+
+/* Taller: seven days with a shared min / max scale. */
+@container (height >= 460px) and (width >= 150px) {
+  .weather-now, .weather-details { margin-block: 0; }
+  .weather-hours { margin-top: 0; }
+  .weather-days {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    justify-content: space-evenly;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .weather-day {
+    display: grid;
+    grid-template-columns: minmax(36px, auto) 20px 32px 1fr 32px;
+    align-items: center;
+    gap: 8px;
+    min-height: 24px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .weather-day-name { font-weight: 600; }
+  .weather-day-glyph { width: 20px; height: 20px; }
+  .weather-day-min { color: var(--text-muted); text-align: right; }
+  .weather-bar {
+    position: relative;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--hover);
+  }
+  .weather-bar-fill {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: 999px;
+    background: var(--weather-bar);
+  }
+  .weather-bar-now {
+    position: absolute;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    margin: -4px 0 0 -4px;
+    border-radius: 50%;
+    background: var(--text);
+  }
+}
+
+/* Narrow taller tiles: no day glyph, tighter gaps, and the bar keeps room. */
+@container (height >= 460px) and (150px <= width < 220px) {
+  .weather-day {
+    grid-template-columns: auto auto minmax(20px, 1fr) auto;
+    gap: 6px;
+  }
+  .weather .weather-day-glyph { display: none; }
+}
+
+/* Small: glyph and temperature only, centred; side by side when wide. */
+@container (width < 150px) or (height < 100px) {
+  .weather-body {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    padding: 4px;
+  }
+  .weather-top, .weather-summary, .weather-details, .weather-hours, .weather-days { display: none; }
+  .weather-now { display: flex; flex-direction: column; align-items: center; gap: min(6px, 4cqh); }
+  .weather-glyph { width: min(44cqh, 52cqw); height: min(44cqh, 52cqw); }
+  .weather-temp { font-size: min(30cqh, 30cqw); font-weight: 400; }
+  .weather-message { font-size: min(12px, 18cqw); line-height: 1.2; }
+  .weather-retry { padding: 2px 8px; }
+  .weather-allow { padding: 2px 8px; font-size: min(11px, 16cqw); line-height: 18px; }
+  .weather[data-state="consent"] .weather-message,
+  .weather[data-state="no-place"] .weather-message,
+  .weather[data-state="error"] .weather-message { display: none; }
+  .weather[data-state="no-place"] .weather-body::after {
+    content: "Set place";
+    color: var(--text-muted);
+    font-size: min(11px, 20cqw, 24cqh);
+    text-align: center;
+  }
+}
+@container ((width < 150px) or (height < 100px)) and (aspect-ratio > 1.6) {
+  .weather-now { flex-direction: row; gap: min(10px, 4cqw); }
+  .weather-glyph { width: min(60cqh, 26cqw); height: min(60cqh, 26cqw); }
+  .weather-temp { font-size: min(52cqh, 22cqw); }
+}
+@container (width < 80px) or (height < 80px) {
+  .weather-temp { font-weight: 500; }
+}
+/* Narrow: Allow under a small cloud; the full words stay in the label. */
+@container (width < 100px) {
+  .weather .weather-allow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    min-height: 0;
+    padding: 4px 6px;
+    font-size: 11px;
+    font-stretch: 100%;
+    line-height: 13px;
+    letter-spacing: 0;
+  }
+  .weather .weather-allow-glyph { display: block; width: min(18px, 30cqh); height: min(18px, 30cqh); color: currentColor; }
+  .weather-allow-more { display: none; }
+}
+@container (width < 50px) {
+  .weather .weather-allow { padding-inline: 4px; font-size: 10px; }
+}
+/* Narrow: RETRY becomes a small round icon button. */
+@container (width < 80px) {
+  .weather .weather-retry {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    min-height: 0;
+    padding: 0;
+    border-radius: 50%;
+  }
+  .weather .weather-retry-glyph { display: block; }
+  .weather-retry-text { display: none; }
+}
+
 /* Resolve the alpha variables here, so live settings inherited from the board
    can change each card's fill in either colour scheme. */
 .column,
 .clock,
+.weather,
 .banner {
   --card: light-dark(rgba(246, 246, 247, var(--card-alpha-light)), rgba(22, 22, 24, var(--card-alpha-dark)));
 }
@@ -473,7 +854,8 @@ button.dot {
 
 .tile .column-header,
 .tile .column-title,
-.tile-header {
+.tile-header,
+.tile-grab {
   touch-action: none;
   cursor: grab;
 }

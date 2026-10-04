@@ -4,8 +4,9 @@ import { createFirefox } from "./fakes/firefox.js";
 import { DEFAULT_SETTINGS, DEFAULT_DEVICE, loadSettings, saveSetting, cellPx, cardAlpha } from "../extension/src/settings/store.js";
 
 const syncedDefaults = { railCells: 5, showClock: true, showPinned: true, showSaved: true, showMemory: true,
-  timeFormat: "24", showDate: true, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true };
-const deviceDefaults = { cellSize: "S", customCell: 80, density: "normal" };
+  timeFormat: "24", showDate: true, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true,
+  showWeather: true, tempUnit: "C" };
+const deviceDefaults = { cellSize: "S", customCell: 80, density: "normal", weatherPlace: "auto" };
 
 test("loadSettings returns detached defaults when storage is empty", async () => {
   const ff = createFirefox();
@@ -26,8 +27,9 @@ test("loadSettings falls back per key, keeps valid values and ignores unknown ke
     density: "compact", extra: true } });
   assert.deepEqual(await loadSettings(ff.browser), {
     synced: { railCells: 5, showClock: true, showPinned: false, showSaved: true, showMemory: true,
-      timeFormat: "12", showDate: false, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true },
-    device: { cellSize: "custom", customCell: 80, density: "compact" },
+      timeFormat: "12", showDate: false, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true,
+      showWeather: true, tempUnit: "C" },
+    device: { cellSize: "custom", customCell: 80, density: "compact", weatherPlace: "auto" },
   });
 });
 
@@ -49,6 +51,9 @@ const invalid = [
   ["synced", "transparency", "max"],
   ...["M", "L", "XL", "XXL"].map(value => ["device", "cellSize", value]), ["device", "customCell", 500], ["device", "customCell", 39],
   ["device", "customCell", 40.5], ["device", "customCell", "80"], ["device", "density", "dense"],
+  ["synced", "showWeather", 1], ["synced", "tempUnit", "K"], ["synced", "tempUnit", "c"],
+  ["device", "weatherPlace", "home"], ["device", "weatherPlace", { name: "X", lat: 95, lon: 0 }],
+  ["device", "weatherPlace", { lat: 1, lon: 1 }],
 ];
 for (const [scope, key, value] of invalid) {
   test(`invalid ${scope}.${key}=${JSON.stringify(value)} falls back on load and rejects on save without writing`, async () => {
@@ -81,6 +86,8 @@ const valid = [
   ...["S", "custom"].map(value => ["device", "cellSize", value]),
   ["device", "customCell", 40], ["device", "customCell", 240],
   ["device", "density", "normal"], ["device", "density", "compact"],
+  ["synced", "showWeather", false], ["synced", "tempUnit", "F"], ["synced", "tempUnit", "C"],
+  ["device", "weatherPlace", { name: "Dublin", lat: 53.33, lon: -6.25 }], ["device", "weatherPlace", "auto"],
 ];
 for (const [scope, key, value] of valid) {
   test(`saveSetting accepts ${scope}.${key}=${JSON.stringify(value)} in the correct area`, async () => {
@@ -105,8 +112,9 @@ test("saveSetting preserves other valid settings and writes only the selected sc
   const loaded = await saveSetting(ff.browser, "synced", "showPinned", false);
   assert.deepEqual(loaded, {
     synced: { railCells: 4, showClock: false, showPinned: false, showSaved: true, showMemory: true, timeFormat: "24",
-      showDate: true, transparency: "high", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true },
-    device: { cellSize: "S", customCell: 120, density: "compact" },
+      showDate: true, transparency: "high", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true,
+      showWeather: true, tempUnit: "C" },
+    device: { cellSize: "S", customCell: 120, density: "compact", weatherPlace: "auto" },
   });
   assert.deepEqual(ff.calls.filter(c => c.api.endsWith(".set")), [
     { api: "storage.sync.set", args: [{ settings: { showClock: false, railCells: 4, transparency: "high", extra: 1,

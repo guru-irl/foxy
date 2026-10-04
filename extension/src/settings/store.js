@@ -1,10 +1,12 @@
 import { CELL_PRESETS } from "../grid/layout.js";
+import { validPlace } from "../weather/location.js";
 
 export const DEFAULT_SETTINGS = Object.freeze({
   railCells: 5, showClock: true, showPinned: true, showSaved: true, showMemory: true, timeFormat: "24",
   showDate: true, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true,
+  showWeather: true, tempUnit: "C",
 });
-export const DEFAULT_DEVICE = Object.freeze({ cellSize: "S", customCell: 80, density: "normal" });
+export const DEFAULT_DEVICE = Object.freeze({ cellSize: "S", customCell: 80, density: "normal", weatherPlace: "auto" });
 
 const integer = (value, min, max) => Number.isInteger(value) && value >= min && value <= max;
 const boolean = value => typeof value === "boolean";
@@ -14,11 +16,13 @@ const syncedRules = {
   otherWindows: boolean, pinsMoveHere: boolean, switchToOpenTab: boolean,
   timeFormat: value => ["24", "12"].includes(value),
   transparency: value => ["low", "medium", "high"].includes(value),
+  showWeather: boolean, tempUnit: value => ["C", "F"].includes(value),
 };
 const deviceRules = {
   cellSize: value => ["S", "custom"].includes(value),
   customCell: value => integer(value, 40, 240),
   density: value => ["normal", "compact"].includes(value),
+  weatherPlace: validPlace,
 };
 
 async function loadScope(api, area, key, defaults, rules) {

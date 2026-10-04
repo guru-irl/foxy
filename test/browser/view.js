@@ -14,8 +14,10 @@ export function renderBoard(root, board, ui, handlers, options = {}) {
   const { total } = fitCell(root.getBoundingClientRect().width, cellPx(options.device ?? fixtureDevice));
   const rail = Math.max(2, Math.min(railLimits(total).max, (options.synced ?? fixtureSettings).railCells));
   const k = Math.max(1, total - rail, ...layout.map(t => t.x + t.w));
+  // Memory and weather are opt-in here, as on a board without the helper or weather access.
   const view = buildView(board, { layouts: layout.length ? { [k]: { lastWriteMs: 0, tiles: layout } } : {}, device: fixtureDevice,
-    contentWidth: root.getBoundingClientRect().width, folders: {}, ...rest, synced: { showMemory: false, ...(rest.synced ?? fixtureSettings) } });
+    contentWidth: root.getBoundingClientRect().width, folders: {}, ...rest,
+    synced: { showMemory: false, showWeather: false, ...(rest.synced ?? fixtureSettings) } });
   render(root, board, view, ui, handlers, options.synced ?? fixtureSettings);
   return view;
 }
