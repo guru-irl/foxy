@@ -99,7 +99,7 @@ for (const [scope, key, value] of valid) {
 test("saveSetting preserves other valid settings and writes only the selected scope", async () => {
   const ff = createFirefox();
   await ff.browser.storage.sync.set({ settings: { showClock: false, railCells: 4, transparency: "high", extra: 1 },
-    "tile:clock": { x: 0, y: 0, w: 5, h: 2 } });
+    "tile:17:clock": { x: 0, y: 0, w: 5, h: 2 } });
   await ff.browser.storage.local.set({ deviceSettings: { cellSize: "S", customCell: 120, density: "compact" }, unrelated: 1 });
   ff.calls.length = 0;
   const loaded = await saveSetting(ff.browser, "synced", "showPinned", false);
@@ -112,7 +112,7 @@ test("saveSetting preserves other valid settings and writes only the selected sc
     { api: "storage.sync.set", args: [{ settings: { showClock: false, railCells: 4, transparency: "high", extra: 1,
       showPinned: false } }] },
   ]);
-  assert.deepEqual(await ff.browser.storage.sync.get("tile:clock"), { "tile:clock": { x: 0, y: 0, w: 5, h: 2 } });
+  assert.deepEqual(await ff.browser.storage.sync.get("tile:17:clock"), { "tile:17:clock": { x: 0, y: 0, w: 5, h: 2 } });
   assert.deepEqual(await ff.browser.storage.local.get(), {
     deviceSettings: { cellSize: "S", customCell: 120, density: "compact" }, unrelated: 1,
   });

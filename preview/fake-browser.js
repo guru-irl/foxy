@@ -20,8 +20,10 @@ ff.browser.runtime.onMessage.addListener(message => {
   }
 });
 if (scenario.layout) {
-  await ff.browser.storage.sync.set(Object.fromEntries(
-    Object.entries(scenario.layout).map(([id, rect]) => [`tile:${id}`, rect])));
+  const k = scenario.layoutWidth ?? 9;
+  await ff.browser.storage.sync.set({ layouts: { [k]: 1 },
+    ...Object.fromEntries(Object.entries(scenario.layout).map(([id, rect]) => [`tile:${k}:${id}`, rect])),
+    ...(scenario.syncedSettings ? { settings: scenario.syncedSettings } : {}) });
   await ff.browser.storage.local.set({ deviceSettings: scenario.deviceSettings });
 }
 globalThis.browser = ff.browser;

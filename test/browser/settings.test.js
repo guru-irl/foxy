@@ -364,22 +364,22 @@ test("a failed reset logs and keeps tile keys, with the reset button usable agai
     assert.ok(warnings.some(args => String(args[0]).startsWith("Foxy:")));
   } finally { ff.browser.storage.sync.remove = remove; console.warn = warn; }
 });
-test("reset removes only tile keys once, and an open board places visible tiles in spec order", async () => {
+test("reset removes tile keys and layouts once, and an open board places visible tiles in spec order", async () => {
   const { ff, node, pane } = await setup();
-  await ff.browser.storage.sync.set({ "tile:hidden": { x: 0, y: 70, w: 3, h: 4 }, keep: 7,
-    settings: { showPinned: false }, "tile:clock": { x: 0, y: 70, w: 5, h: 2 } }); await flush(ff);
+  await ff.browser.storage.sync.set({ "tile:10:hidden": { x: 0, y: 70, w: 3, h: 4 }, keep: 7,
+    settings: { showPinned: false }, "tile:10:clock": { x: 0, y: 70, w: 5, h: 2 } }); await flush(ff);
   node.querySelector(".settings-cell").click(); const reset = pane.querySelector(".settings-reset");
   const before = ff.calls.length; reset.click(); assert.equal(reset.textContent, "Confirm reset");
   assert.equal(ff.calls.slice(before).filter(c => c.api === "storage.sync.remove").length, 0);
   await waitForConfirm(); reset.click(); await flush(ff);
   const removals = ff.calls.slice(before).filter(c => c.api === "storage.sync.remove"); assert.equal(removals.length, 1);
-  assert.ok(removals[0].args[0].includes("tile:hidden")); assert.ok(removals[0].args[0].every(key => key.startsWith("tile:")));
+  assert.ok(removals[0].args[0].includes("tile:10:hidden")); assert.ok(removals[0].args[0].every(key => key.startsWith("tile:") || key === "layouts"));
   const stored = await ff.browser.storage.sync.get(null);
-  assert.equal(stored.keep, 7); assert.equal(stored.settings.showPinned, false); assert.equal(stored["tile:hidden"], undefined);
-  assert.deepEqual(stored["tile:clock"], { x: 0, y: 0, w: 5, h: 2 });
-  assert.deepEqual(stored["tile:group:one"], { x: 5, y: 0, w: 3, h: 4 });
-  assert.deepEqual(stored["tile:group:two"], { x: 0, y: 2, w: 3, h: 4 });
-  assert.deepEqual(stored["tile:saved"], { x: 3, y: 4, w: 3, h: 4 });
+  assert.equal(stored.keep, 7); assert.equal(stored.settings.showPinned, false); assert.equal(stored["tile:10:hidden"], undefined);
+  assert.deepEqual(stored["tile:10:clock"], { x: 0, y: 0, w: 5, h: 2 });
+  assert.deepEqual(stored["tile:10:group:one"], { x: 5, y: 0, w: 3, h: 4 });
+  assert.deepEqual(stored["tile:10:group:two"], { x: 0, y: 2, w: 3, h: 4 });
+  assert.deepEqual(stored["tile:10:saved"], { x: 3, y: 4, w: 3, h: 4 });
   assert.equal(reset.textContent, "Reset layout");
 });
 test("reset clears this page's unmapped pending placements", async () => {
@@ -458,9 +458,9 @@ test("options content sets the document height in a 250 px frame without an inne
   assert.equal(doc.body.scrollHeight, contentHeight);
   assert.equal(scroll.clientHeight, contentHeight);
 });
-test("options.html renders the shared pane, saves and resets only tile keys", async () => {
+test("options.html renders the shared pane, saves and resets tile keys and layouts", async () => {
   const { ff, node } = await setup();
-  await ff.browser.storage.sync.set({ "tile:orphan": { x: 0, y: 20, w: 3, h: 4 }, keep: 7, settings: { transparency: "high" } }); await flush(ff);
+  await ff.browser.storage.sync.set({ "tile:10:orphan": { x: 0, y: 20, w: 3, h: 4 }, keep: 7, settings: { transparency: "high" } }); await flush(ff);
   const frame = await options(ff), doc = frame.contentDocument, pane = doc.querySelector(".settings-pane");
   assert.ok(pane); assert.equal(pane.hidden, false); assert.equal(doc.querySelector(".settings-cell"), null);
   assert.equal(pane.querySelector('[data-rail="value"]').textContent, "2");
@@ -472,10 +472,10 @@ test("options.html renders the shared pane, saves and resets only tile keys", as
   assert.equal(writes(ff).length - before, 1); assert.equal(node.style.getPropertyValue("--row"), "24px");
   const reset = pane.querySelector(".settings-reset"), start = ff.calls.length; reset.click(); await waitForConfirm(); reset.click(); await flush(ff);
   const removals = ff.calls.slice(start).filter(c => c.api === "storage.sync.remove"); assert.equal(removals.length, 1);
-  assert.ok(removals[0].args[0].every(key => key.startsWith("tile:")));
+  assert.ok(removals[0].args[0].every(key => key.startsWith("tile:") || key === "layouts"));
   const stored = await ff.browser.storage.sync.get(null); assert.equal(stored.keep, 7);
   assert.deepEqual(stored.settings, { transparency: "high" });
-  assert.equal(stored["tile:orphan"], undefined); assert.equal((await ff.browser.storage.local.get("deviceSettings")).deviceSettings.density, "compact");
+  assert.equal(stored["tile:10:orphan"], undefined); assert.equal((await ff.browser.storage.local.get("deviceSettings")).deviceSettings.density, "compact");
   for (const scheme of ["light", "dark"]) {
     doc.documentElement.style.colorScheme = scheme;
     const css = frame.contentWindow.getComputedStyle(pane);
@@ -574,8 +574,9 @@ test("new groups save the same XL default size at 1600 and 1000 px", async () =>
     await ff.browser.storage.local.set({ deviceSettings: { cellSize: "XL" } });
     const frame = await newtab(ff, width);
     try {
-      const stored = await ff.browser.storage.sync.get("tile:group:one");
-      const group = stored["tile:group:one"];
+      const k = Math.floor((width + 16) / 160) - 3;
+      const stored = await ff.browser.storage.sync.get(`tile:${k}:group:one`);
+      const group = stored[`tile:${k}:group:one`];
       assert.ok(group, "a mapped group has a saved placement");
       sizes.push([group.w, group.h]);
     } finally { frame.remove(); }

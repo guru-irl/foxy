@@ -6,8 +6,13 @@ import { DEFAULT_SETTINGS, DEFAULT_DEVICE } from "../extension/src/settings/stor
 
 const group = (id, current = true) => ({ id, current, windowId: current ? 1 : 2, rows: [] });
 const board = { columns: [group(1), group(2)], saved: [], pinned: [], tabs: [] };
-const options = (overrides = {}) => ({ layout: [], synced: { ...DEFAULT_SETTINGS, showClock: false, showPinned: false },
-  device: DEFAULT_DEVICE, contentWidth: 944, folders: { 1: "a", 2: "b" }, ...overrides });
+const options = (overrides = {}) => {
+  const { layout = [], ...rest } = overrides;
+  const k = Math.max(7, ...layout.map(t => t.x + t.w));
+  return { layouts: layout.length ? { [k]: { lastWriteMs: 0, tiles: layout } } : {},
+    synced: { ...DEFAULT_SETTINGS, showClock: false, showPinned: false },
+    device: DEFAULT_DEVICE, contentWidth: 944, folders: { 1: "a", 2: "b" }, ...rest };
+};
 
 test("new tiles use clock, pinned, current tab-strip groups, remote groups, saved order", () => {
   const ordered = buildBoard({ windows: [{ id: 2, type: "normal" }, { id: 1, type: "normal" }],
@@ -152,4 +157,15 @@ test("board otherWindows false filters pins, groups and loose tabs to this windo
   assert.deepEqual(view.columns.map(g => g.id), [1]);
   assert.deepEqual(view.pinned.flatMap(s => s.rows).map(t => t.id), [10]);
   assert.deepEqual(view.tabs.flatMap(s => s.rows).map(t => t.id), [12]);
+});
+
+
+test("source layout geometry places new groups at the source width before deriving", () => {
+  const layout = [{ id: "group:a", x: 0, y: 0, w: 7, h: 9 }];
+  const view = buildView(board, options({ layouts: { 34: { lastWriteMs: 1, tiles: layout } },
+    contentWidth: 1392, device: { ...DEFAULT_DEVICE, cellSize: "S" },
+    synced: { ...DEFAULT_SETTINGS, showClock: false, showPinned: false, railCells: 5 } }));
+  assert.equal(view.cols, 17); assert.equal(view.k, 34);
+  assert.deepEqual(view.newTiles, [{ id: "group:b", x: 7, y: 0, w: 5, h: 6 }]);
+  assert.deepEqual(view.saved, layout);
 });

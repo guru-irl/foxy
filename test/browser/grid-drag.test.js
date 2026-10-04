@@ -10,10 +10,10 @@ async function flush(ff) {
   for (let i = 0; i < 5; i++) { await ff.settle(); await nextFrame(); }
 }
 const initial = {
-  "tile:group:a": { x: 0, y: 0, w: 3, h: 4 },
-  "tile:group:b": { x: 0, y: 4, w: 3, h: 4 },
-  "tile:pinned": { x: 5, y: 0, w: 3, h: 4 },
-  "tile:clock": { x: 5, y: 4, w: 5, h: 2 },
+  "tile:10:group:a": { x: 0, y: 0, w: 3, h: 4 },
+  "tile:10:group:b": { x: 0, y: 4, w: 3, h: 4 },
+  "tile:10:pinned": { x: 5, y: 0, w: 3, h: 4 },
+  "tile:10:clock": { x: 5, y: 4, w: 5, h: 2 },
 };
 async function setup({ layout = initial, width = 1232, settings = {}, folders = { 1: "a", 2: "b" }, extraGroups = [], listener, withPane = false } = {}) {
   css ??= new Promise(resolve => {
@@ -45,7 +45,7 @@ const tile = (root, id = "group:a") => [...root.querySelectorAll(".tile")].find(
 const header = root => tile(root).querySelector(".column-header");
 const rect = node => ({ x: Number(node.style.getPropertyValue("--x")), y: Number(node.style.getPropertyValue("--y")),
   w: Number(node.style.getPropertyValue("--w")), h: Number(node.style.getPropertyValue("--h")) });
-const writes = ff => ff.calls.filter(call => call.api === "storage.sync.set").map(call => call.args[0]);
+const writes = ff => ff.calls.filter(call => call.api === "storage.sync.set").map(call => Object.fromEntries(Object.entries(call.args[0]).filter(([key]) => key !== "layouts")));
 function point(node, x = 0.5, y = 0.5) {
   const bounds = node.getBoundingClientRect();
   return { clientX: bounds.left + bounds.width * x, clientY: bounds.top + bounds.height * y };
@@ -77,7 +77,7 @@ test("tile header move snaps with its pointer offset, pushes live and writes onl
   assert.deepEqual(writes(ff), [], "preview must not write");
   pointer("pointerup", document, shifted(start, 20, 192)); source.click(); await flush(ff);
   assert.equal(root.querySelector(".name-editor"), null, "a post-drag click cannot rename");
-  assert.deepEqual(writes(ff), [{ "tile:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:group:b": { x: 0, y: 6, w: 3, h: 4 } }]);
+  assert.deepEqual(writes(ff), [{ "tile:10:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:10:group:b": { x: 0, y: 6, w: 3, h: 4 } }]);
   assert.equal(getComputedStyle(tile(root)).opacity, "1");
 });
 
@@ -90,7 +90,7 @@ test("header clicks through 4px still rename and the dot still recolours without
   source = header(root).querySelector(".dot"); start = down(source);
   pointer("pointermove", document, shifted(start, 100, 192)); pointer("pointerup", document, shifted(start, 100, 192)); source.click();
   assert.ok(root.querySelector(".color-picker")); escape(); await flush(ff);
-  assert.deepEqual(rect(tile(root)), initial["tile:group:a"]); assert.deepEqual(writes(ff), []);
+  assert.deepEqual(rect(tile(root)), initial["tile:10:group:a"]); assert.deepEqual(writes(ff), []);
 });
 
 for (const kind of ["move", "resize", "rail"]) {
@@ -103,8 +103,8 @@ for (const kind of ["move", "resize", "rail"]) {
       assert.ok(kind === "rail" ? root.querySelector(".rail").getBoundingClientRect().width > 272 : rect(tile(root)).y > 0 || rect(tile(root)).w > 3);
       if (cancel === "Escape") escape(); else pointer(cancel, source, start);
       await flush(ff);
-      assert.deepEqual(rect(tile(root)), initial["tile:group:a"]);
-      assert.deepEqual(rect(tile(root, "group:b")), initial["tile:group:b"]);
+      assert.deepEqual(rect(tile(root)), initial["tile:10:group:a"]);
+      assert.deepEqual(rect(tile(root, "group:b")), initial["tile:10:group:b"]);
       assert.equal(root.querySelector(".rail").getBoundingClientRect().width, 272);
       assert.deepEqual(writes(ff), []);
       pointer("pointerup", document, shifted(start, 192, 192)); await flush(ff); assert.deepEqual(writes(ff), []);
@@ -123,7 +123,7 @@ for (const kind of ["move", "resize", "rail", "before threshold"]) {
       try {
         if (kind !== "before threshold") pointer("pointermove", document, target);
         const original = tile(root, "pinned");
-        await ff.browser.storage.sync.set({ "tile:pinned": { x: 0, y: 20, w: 3, h: 4 } });
+        await ff.browser.storage.sync.set({ "tile:10:pinned": { x: 0, y: 20, w: 3, h: 4 } });
         await flush(ff);
         assert.equal(tile(root, "pinned"), original, "remote render stays held until cancellation");
         assert.equal(rect(original).y, 0);
@@ -137,8 +137,8 @@ for (const kind of ["move", "resize", "rail", "before threshold"]) {
         }
         assert.equal(control.ui.gridDragging, kind !== "rail" && kind !== "before threshold", "tile cancellation holds updates through the return slide");
         assert.equal(root.hasAttribute("data-grid-dragging"), false);
-        assert.deepEqual(rect(tile(root)), initial["tile:group:a"], "cancel restores the tile preview");
-        assert.deepEqual(rect(tile(root, "group:b")), initial["tile:group:b"]);
+        assert.deepEqual(rect(tile(root)), initial["tile:10:group:a"], "cancel restores the tile preview");
+        assert.deepEqual(rect(tile(root, "group:b")), initial["tile:10:group:b"]);
         assert.equal(root.querySelector(".rail").getBoundingClientRect().width, 272);
         await flush(ff);
         assert.equal(rect(tile(root, "pinned")).y, 20, "held remote update applies after cancel");
@@ -170,11 +170,11 @@ test("a second press during the closed-group check cannot start a gesture; a fre
     assert.equal(root.hasAttribute("data-grid-dragging"), false, "a press during ending must not start another gesture");
     assert.deepEqual(rect(neighbour), before); assert.deepEqual(writes(ff), []);
     release(); await flush(ff); assert.equal(control.ui.gridDragging, false);
-    assert.deepEqual(writes(ff), [{ "tile:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:group:b": { x: 0, y: 6, w: 3, h: 4 } }]);
+    assert.deepEqual(writes(ff), [{ "tile:10:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:10:group:b": { x: 0, y: 6, w: 3, h: 4 } }]);
     const fresh = down(header(root)), freshTarget = shifted(fresh, 0, 192);
     pointer("pointermove", document, freshTarget); assert.equal(control.ui.gridDragging, true);
     const pinned = tile(root, "pinned");
-    await ff.browser.storage.sync.set({ "tile:pinned": { x: 0, y: 20, w: 3, h: 4 } }); await flush(ff);
+    await ff.browser.storage.sync.set({ "tile:10:pinned": { x: 0, y: 20, w: 3, h: 4 } }); await flush(ff);
     assert.equal(tile(root, "pinned"), pinned); assert.equal(rect(pinned).y, 0);
     pointer("pointerup", document, freshTarget); await flush(ff);
     assert.equal(control.ui.gridDragging, false); assert.equal(rect(tile(root)).y, 4);
@@ -188,7 +188,7 @@ test("visibilitychange while visible keeps the tile gesture and its held updates
   try {
     pointer("pointermove", document, target);
     const moved = rect(tile(root)), pinned = tile(root, "pinned");
-    await ff.browser.storage.sync.set({ "tile:pinned": { x: 0, y: 20, w: 3, h: 4 } }); await flush(ff);
+    await ff.browser.storage.sync.set({ "tile:10:pinned": { x: 0, y: 20, w: 3, h: 4 } }); await flush(ff);
     Object.defineProperty(document, "hidden", { configurable: true, value: false });
     document.dispatchEvent(new Event("visibilitychange"));
     assert.equal(control.ui.gridDragging, true); assert.equal(root.hasAttribute("data-grid-dragging"), true);
@@ -223,7 +223,7 @@ test("resize corner snaps its bottom right, pushes live and respects minima and 
   assert.deepEqual(rect(tile(root)), { x: 0, y: 0, w: 5, h: 6 });
   assert.deepEqual(rect(tile(root, "group:b")), { x: 0, y: 6, w: 3, h: 4 });
   pointer("pointerup", document, shifted(start, 192, 192)); await flush(ff);
-  assert.deepEqual(writes(ff), [{ "tile:group:a": { x: 0, y: 0, w: 5, h: 6 }, "tile:group:b": { x: 0, y: 6, w: 3, h: 4 } }]);
+  assert.deepEqual(writes(ff), [{ "tile:10:group:a": { x: 0, y: 0, w: 5, h: 6 }, "tile:10:group:b": { x: 0, y: 6, w: 3, h: 4 } }]);
   source = tile(root).querySelector(".tile-resize"); start = down(source);
   pointer("pointermove", document, shifted(start, -2000, -2000));
   assert.deepEqual(rect(tile(root)), { x: 0, y: 0, w: 2, h: 2 });
@@ -289,7 +289,7 @@ for (const kind of ["move", "resize", "rail"]) {
       const source = kind === "move" ? header(root) : kind === "resize" ? tile(root).querySelector(".tile-resize") : root.querySelector(".rail-resize");
       assert.ok(source); const start = down(source), original = tile(root, "pinned");
       pointer("pointermove", document, shifted(start, kind === "rail" ? -96 : 0, 96));
-      await ff.browser.storage.sync.set({ "tile:pinned": { x: 0, y: 20, w: 3, h: 4 }, settings: { transparency: "high" } });
+      await ff.browser.storage.sync.set({ "tile:10:pinned": { x: 0, y: 20, w: 3, h: 4 }, settings: { transparency: "high" } });
       await flush(ff);
       assert.equal(tile(root, "pinned"), original, "no DOM replacement while captured");
       assert.equal(rect(original).y, 0, "remote position is held during preview");
@@ -298,7 +298,7 @@ for (const kind of ["move", "resize", "rail"]) {
       assert.equal(rect(tile(root, "pinned")).y, 20);
       assert.equal(root.style.getPropertyValue("--card-alpha-dark"), "0.45");
       const localWrites = writes(ff).slice(1);
-      assert.ok(localWrites.every(entry => !("tile:pinned" in entry)), "an unrelated remote tile must not be written back");
+      assert.ok(localWrites.every(entry => !("tile:10:pinned" in entry)), "an unrelated remote tile must not be written back");
       if (kind === "rail" && end === "release") assert.deepEqual(localWrites, [{ settings: { transparency: "high", railCells: 4 } }]);
       if (end === "cancel") assert.deepEqual(localWrites, []);
     });
@@ -306,8 +306,8 @@ for (const kind of ["move", "resize", "rail"]) {
 }
 
 test("narrow fit writes nothing, a move saves shown rectangles including fitted neighbours", async () => {
-  const layout = { "tile:group:a": { x: 7, y: 0, w: 3, h: 4 }, "tile:group:b": { x: 0, y: 4, w: 5, h: 4 },
-    "tile:group:c": { x: 8, y: 10, w: 5, h: 4 } };
+  const layout = { "tile:13:group:a": { x: 7, y: 0, w: 3, h: 4 }, "tile:13:group:b": { x: 0, y: 4, w: 5, h: 4 },
+    "tile:13:group:c": { x: 8, y: 10, w: 5, h: 4 } };
   const { ff, root } = await setup({ layout, folders: { 1: "a", 2: "b", 3: "c" }, settings: { showClock: false, showPinned: false },
     extraGroups: [{ id: 3, windowId: 1, title: "C" }] });
   root.style.width = "560px"; window.dispatchEvent(new Event("resize")); await flush(ff);
@@ -315,11 +315,11 @@ test("narrow fit writes nothing, a move saves shown rectangles including fitted 
   assert.deepEqual(rect(tile(root, "group:c")), { x: 0, y: 10, w: 3, h: 4 }); assert.deepEqual(writes(ff), []);
   const source = header(root), start = down(source); pointer("pointermove", document, shifted(start, 0, 192));
   pointer("pointerup", document, shifted(start, 0, 192)); await flush(ff);
-  assert.deepEqual(writes(ff), [{ "tile:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:group:b": { x: 0, y: 6, w: 3, h: 4 },
-    "tile:group:c": { x: 0, y: 10, w: 3, h: 4 } }]);
-  assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:c"], { x: 0, y: 10, w: 3, h: 4 });
-  root.style.width = "1232px"; window.dispatchEvent(new Event("resize")); await flush(ff);
-  assert.deepEqual(rect(tile(root)), { x: 0, y: 2, w: 3, h: 4 });
+  assert.deepEqual(writes(ff), [{ "tile:3:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:3:group:b": { x: 0, y: 6, w: 3, h: 4 },
+    "tile:3:group:c": { x: 0, y: 10, w: 3, h: 4 } }]);
+  assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:3:group:c"], { x: 0, y: 10, w: 3, h: 4 });
+  root.style.width = "1520px"; window.dispatchEvent(new Event("resize")); await flush(ff);
+  assert.deepEqual(rect(tile(root)), layout["tile:13:group:a"], "widening returns to the unchanged source");
 });
 
 test("gap-closed narrow drag saves the shown arrangement and keeps preview equal to release", async () => {
@@ -337,23 +337,16 @@ test("gap-closed narrow drag saves the shown arrangement and keeps preview equal
     assert.deepEqual(preview["group:c"], { x: 9, y: 6, w: 5, h: 3 });
     assert.deepEqual(preview["group:e"], { x: 9, y: 9, w: 5, h: 3 });
     for (const id of ["b", "d", "f"]) {
-      const saved = narrowLayout[`tile:group:${id}`];
+      const saved = narrowLayout[`tile:20:group:${id}`];
       assert.deepEqual(preview[`group:${id}`], { ...saved, x: 14 });
     }
     assert.deepEqual(writes(ff), []);
     pointer("pointerup", document, target); await flush(ff);
     assert.deepEqual(shown(), preview);
-    assert.deepEqual(writes(ff), [{
-      "tile:group:a": { x: 9, y: 3, w: 5, h: 3 },
-      "tile:group:b": { x: 14, y: 0, w: 5, h: 3 },
-      "tile:group:c": { x: 9, y: 6, w: 5, h: 3 },
-      "tile:group:d": { x: 14, y: 3, w: 5, h: 3 },
-      "tile:group:e": { x: 9, y: 9, w: 5, h: 3 },
-      "tile:group:f": { x: 14, y: 6, w: 5, h: 3 },
-    }]);
+    assert.deepEqual(writes(ff), [Object.fromEntries(Object.entries(preview).map(([id, r]) => [`tile:19:${id}`, r]))]);
     const stored = await ff.browser.storage.sync.get(null);
     for (const id of ["clock", "pinned"]) {
-      assert.deepEqual(stored[`tile:${id}`], narrowLayout[`tile:${id}`]);
+      assert.deepEqual(stored[`tile:20:${id}`], narrowLayout[`tile:20:${id}`]);
     }
   } finally { escape(); await flush(ff); }
 });
@@ -378,11 +371,10 @@ test("four-column gesture saves fitted neighbours and keeps every previewed rect
     assert.deepEqual(writes(ff), []);
     pointer("pointerup", document, target); await flush(ff);
     assert.deepEqual(shown(), preview, "release must preserve every previewed rectangle");
-    assert.deepEqual(writes(ff), [{ "tile:group:a": { x: 0, y: 14, w: 3, h: 4 },
-      "tile:pinned": { x: 0, y: 8, w: 3, h: 4 }, "tile:clock": { x: 0, y: 12, w: 4, h: 2 } }]);
+    assert.deepEqual(writes(ff), [Object.fromEntries(Object.entries(preview).map(([id, r]) => [`tile:4:${id}`, r]))]);
     const stored = await ff.browser.storage.sync.get(null);
-    assert.deepEqual(stored["tile:group:b"], initial["tile:group:b"]);
-    for (const id of ["pinned", "clock"]) assert.deepEqual(stored[`tile:${id}`], preview[id]);
+    assert.deepEqual(stored["tile:10:group:b"], initial["tile:10:group:b"]);
+    for (const id of ["pinned", "clock"]) assert.deepEqual(stored[`tile:4:${id}`], preview[id]);
   } finally { escape(); await flush(ff); }
 });
 
@@ -402,7 +394,7 @@ test("an unmapped neighbour previews where it lands when a mapped tile moves to 
     assert.deepEqual(writes(ff), []);
     pointer("pointerup", document, target); await flush(ff);
     assert.deepEqual(shown(), preview);
-    assert.deepEqual(writes(ff), [{ "tile:group:a": { x: 0, y: 12, w: 3, h: 4 } }]);
+    assert.deepEqual(writes(ff), [{ "tile:10:group:a": { x: 0, y: 12, w: 3, h: 4 } }]);
   } finally { escape(); await flush(ff); }
 });
 
@@ -412,7 +404,7 @@ test("a mapped neighbour without a saved place previews its post-release first-f
   const groupId = await ff.browser.tabs.group({ tabIds: [tab.id] }); folders[groupId] = "c";
   await flush(ff);
   assert.deepEqual(rect(tile(root, "group:c")), { x: 3, y: 6, w: 3, h: 4 });
-  assert.equal((await ff.browser.storage.sync.get(null))["tile:group:c"], undefined);
+  assert.equal((await ff.browser.storage.sync.get(null))["tile:10:group:c"], undefined);
   ff.calls.length = 0;
   const ids = ["group:a", "group:b", "group:c", "pinned", "clock"];
   const shown = () => Object.fromEntries(ids.map(id => [id, rect(tile(root, id))]));
@@ -423,8 +415,8 @@ test("a mapped neighbour without a saved place previews its post-release first-f
     assert.deepEqual(writes(ff), []);
     pointer("pointerup", document, target); await flush(ff);
     assert.deepEqual(shown(), preview);
-    assert.deepEqual(writes(ff), [{ "tile:group:a": { x: 0, y: 12, w: 3, h: 4 } }]);
-    assert.equal((await ff.browser.storage.sync.get(null))["tile:group:c"], undefined);
+    assert.deepEqual(writes(ff), [{ "tile:10:group:a": { x: 0, y: 12, w: 3, h: 4 } }]);
+    assert.equal((await ff.browser.storage.sync.get(null))["tile:10:group:c"], undefined);
   } finally { escape(); await flush(ff); }
 });
 
@@ -438,8 +430,8 @@ test("four-column unmapped drag previews pending pushes where they land without 
     pointer("pointermove", document, target);
     const preview = shown();
     assert.deepEqual(preview, {
-      "local:1": { x: 0, y: 5, w: 3, h: 4 }, "group:b": { x: 0, y: 9, w: 3, h: 4 },
-      pinned: { x: 1, y: 0, w: 3, h: 4 }, clock: { x: 0, y: 13, w: 4, h: 2 },
+      "local:1": { x: 0, y: 5, w: 3, h: 4 }, "group:b": { x: 0, y: 0, w: 3, h: 4 },
+      pinned: { x: 0, y: 9, w: 3, h: 4 }, clock: { x: 0, y: 13, w: 4, h: 2 },
     });
     assert.deepEqual(writes(ff), []);
     pointer("pointerup", document, target); await flush(ff);
@@ -465,16 +457,16 @@ for (const mapped of [true, false]) {
       assert.equal(control.ui.gridDragging, false);
       assert.equal(root.hasAttribute("data-grid-dragging"), false);
       assert.equal(tile(root, id), undefined, "closed tile disappears after cancellation");
-      assert.deepEqual(rect(tile(root, "group:b")), initial["tile:group:b"]);
+      assert.deepEqual(rect(tile(root, "group:b")), initial["tile:10:group:b"]);
       assert.deepEqual(writes(ff), [], "neither the vanished tile nor its preview pushes may be written");
-      assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:group:b"], initial["tile:group:b"]);
+      assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:10:group:b"], initial["tile:10:group:b"]);
     });
   }
 }
 
 for (const kind of ["move", "resize"]) {
   test(`${kind} uses grid padding and scroll content coordinates`, async () => {
-    const { ff, root } = await setup({ layout: { ...initial, "tile:group:a": { x: 0, y: 8, w: 3, h: 4 } } });
+    const { ff, root } = await setup({ layout: { ...initial, "tile:10:group:a": { x: 0, y: 8, w: 3, h: 4 } } });
     const grid = root.querySelector(".grid"); grid.style.padding = "12px 0 0 20px"; grid.scrollTop = 576;
     const source = kind === "move" ? header(root) : tile(root).querySelector(".tile-resize"); assert.ok(source);
     const start = down(source); pointer("pointermove", document, shifted(start, 96, -96));
@@ -482,7 +474,7 @@ for (const kind of ["move", "resize"]) {
     escape(); await flush(ff); assert.deepEqual(writes(ff), []);
   });
   test(`${kind} auto-scrolls vertically and the snapped target follows the scroll`, async () => {
-    const { root } = await setup({ layout: { ...initial, "tile:clock": { x: 5, y: 20, w: 5, h: 2 } } });
+    const { root } = await setup({ layout: { ...initial, "tile:10:clock": { x: 5, y: 20, w: 5, h: 2 } } });
     const grid = root.querySelector(".grid"), source = kind === "move" ? header(root) : tile(root).querySelector(".tile-resize"); assert.ok(source);
     const start = down(source), target = { clientX: start.clientX, clientY: grid.getBoundingClientRect().bottom - 2 };
     pointer("pointermove", document, target); const first = rect(tile(root));
@@ -496,7 +488,7 @@ for (const kind of ["move", "resize"]) {
 for (const kind of ["move", "resize"]) {
   test(`unmapped group ${kind} stays pending, then mapping saves its rect and pushes once`, async () => {
     let folders = { 2: "b" };
-    const { ff, root, control } = await setup({ layout: { "tile:group:b": { x: 0, y: 4, w: 3, h: 4 } }, settings: { showClock: false, showPinned: false },
+    const { ff, root, control } = await setup({ layout: { "tile:10:group:b": { x: 0, y: 4, w: 3, h: 4 } }, settings: { showClock: false, showPinned: false },
       listener: message => message.type === "foxy:reconcile" ? { ok: true } : message.type === "foxy:saved" ? { saved: [], missing: [], folders } : undefined });
     const source = kind === "move" ? tile(root, "local:1").querySelector(".column-header") : tile(root, "local:1").querySelector(".tile-resize"); assert.ok(source);
     const start = down(source); pointer("pointermove", document, shifted(start, 0, 192));
@@ -505,7 +497,7 @@ for (const kind of ["move", "resize"]) {
     assert.deepEqual(rect(tile(root, "local:1")), wanted); assert.equal(rect(tile(root, "group:b")).y, 6);
     assert.deepEqual(writes(ff), [], "pending tiles and their pushes wait for the mapping");
     folders = { 1: "a", 2: "b" }; await control.refresh(); await flush(ff);
-    assert.deepEqual(writes(ff), [{ "tile:group:b": { x: 0, y: 6, w: 3, h: 4 }, "tile:group:a": wanted }]);
+    assert.deepEqual(writes(ff), [{ "tile:10:group:b": { x: 0, y: 6, w: 3, h: 4 }, "tile:10:group:a": wanted }]);
     await control.refresh(); await flush(ff); assert.equal(writes(ff).length, 1);
   });
 }
@@ -517,7 +509,7 @@ for (const kind of ["move", "resize", "rail"]) {
     const start = down(source); pointer("pointermove", document, shifted(start, kind === "rail" ? -192 : 192, 192));
     assert.ok(kind === "rail" ? root.querySelector(".rail").getBoundingClientRect().width > 272 : rect(tile(root)).y > 0 || rect(tile(root)).w > 3);
     pointer("pointermove", document, start); pointer("pointerup", document, start); await flush(ff);
-    assert.deepEqual(rect(tile(root)), initial["tile:group:a"]); assert.deepEqual(writes(ff), []);
+    assert.deepEqual(rect(tile(root)), initial["tile:10:group:a"]); assert.deepEqual(writes(ff), []);
   });
 }
 
@@ -566,7 +558,7 @@ test("tile write failure logs once and keeps the committed layout without a retr
     assert.deepEqual(rect(tile(root)), { x: 0, y: 2, w: 3, h: 4 });
     assert.equal(warnings.length, 1); assert.ok(warnings[0][0].startsWith("Foxy:"));
     await flush(ff); assert.equal(warnings.length, 1);
-    assert.deepEqual((await sync.get(null))["tile:group:a"], initial["tile:group:a"]);
+    assert.deepEqual((await sync.get(null))["tile:10:group:a"], initial["tile:10:group:a"]);
   } finally { sync.set = set; console.warn = warn; }
 });
 
@@ -603,7 +595,7 @@ for (const kind of ["move", "resize"]) {
   test(`${kind} snaps against fractional pitch and commits the shown rectangle only`, async () => {
     const { ff, root, control } = await setup({ width: 1237.5,
       settings: { showClock: false, showPinned: false }, layout: {
-        "tile:group:a": { x: 0, y: 0, w: 3, h: 4 }, "tile:group:b": { x: 0, y: 4, w: 3, h: 4 },
+        "tile:10:group:a": { x: 0, y: 0, w: 3, h: 4 }, "tile:10:group:b": { x: 0, y: 4, w: 3, h: 4 },
       } });
     assert.ok(Math.abs(control.view.cell - (1253.5 / 13 - 16)) < 0.00001, "controller keeps the fractional page width");
     const source = kind === "move" ? header(root) : tile(root).querySelector(".tile-resize"), start = down(source);
@@ -619,7 +611,7 @@ for (const kind of ["move", "resize"]) {
       assert.deepEqual(writes(ff), []);
       pointer("pointerup", document, shifted(start, 48.3, 0)); await flush(ff);
       assert.deepEqual(rect(tile(root)), expected);
-      assert.deepEqual(writes(ff), [{ "tile:group:a": expected }]);
+      assert.deepEqual(writes(ff), [{ "tile:10:group:a": expected }]);
     } finally { escape(); await flush(ff); }
   });
 }
@@ -660,7 +652,7 @@ test("Q2 same target does not rebuild preview", async () => {
 
 // Removing positionTiles' --rows leaves a zero-height dots layer.
 test("Q3 dots layer covers the viewport and occupied rows during a gesture", async () => {
-  const { ff, root } = await setup({ layout: { ...initial, "tile:clock": { x: 5, y: 20, w: 5, h: 2 } } });
+  const { ff, root } = await setup({ layout: { ...initial, "tile:10:clock": { x: 5, y: 20, w: 5, h: 2 } } });
   const grid = root.querySelector(".grid"), dots = grid.querySelector(".grid-corners");
   const start = down(header(root));
   try {
@@ -675,7 +667,7 @@ test("Q3 dots layer covers the viewport and occupied rows during a gesture", asy
 // Missing a gesture scroll listener leaves both free geometry and target stale.
 for (const kind of ["move", "resize"]) {
   test(`scroll during ${kind} keeps the free edge under the pointer and updates the outline`, async () => {
-    const { ff, root } = await setup({ layout: { ...initial, "tile:clock": { x: 5, y: 20, w: 5, h: 2 } } });
+    const { ff, root } = await setup({ layout: { ...initial, "tile:10:clock": { x: 5, y: 20, w: 5, h: 2 } } });
     const grid = root.querySelector(".grid"), node = tile(root);
     const start = down(kind === "move" ? header(root) : node.querySelector(".tile-resize"));
     try {
@@ -770,11 +762,11 @@ test("neighbours slide only on target changes and rapid reversals keep the last 
 // so elementFromPoint checks their paint order, not just pointer-events:none.
 test("corner dots stay behind clock, pinned, saved and group tiles during a gesture", async () => {
   const layout = {
-    "tile:clock": { x: 0, y: 0, w: 3, h: 2 },
-    "tile:pinned": { x: 3, y: 0, w: 2, h: 2 },
-    "tile:saved": { x: 5, y: 0, w: 2, h: 2 },
-    "tile:group:a": { x: 0, y: 2, w: 3, h: 4 },
-    "tile:group:b": { x: 3, y: 2, w: 3, h: 4 },
+    "tile:10:clock": { x: 0, y: 0, w: 3, h: 2 },
+    "tile:10:pinned": { x: 3, y: 0, w: 2, h: 2 },
+    "tile:10:saved": { x: 5, y: 0, w: 2, h: 2 },
+    "tile:10:group:a": { x: 0, y: 2, w: 3, h: 4 },
+    "tile:10:group:b": { x: 3, y: 2, w: 3, h: 4 },
   };
   const { ff, root } = await setup({ layout, listener: message => message.type === "foxy:reconcile"
     ? { ok: true } : message.type === "foxy:saved"
@@ -788,7 +780,7 @@ test("corner dots stay behind clock, pinned, saved and group tiles during a gest
     dots.style.pointerEvents = "auto";
     const origin = grid.getBoundingClientRect();
     for (const id of ["clock", "pinned", "saved", "group:b"]) {
-      const node = tile(root, id), saved = layout[`tile:${id}`];
+      const node = tile(root, id), saved = layout[`tile:10:${id}`];
       // 88px is the first 96px-pitch gap intersection within these multi-cell cards.
       const hit = document.elementFromPoint(origin.left + saved.x * 96 + 88,
         origin.top + saved.y * 96 + 88);
@@ -886,7 +878,7 @@ for (const kind of ["move", "resize"]) {
       const source = kind === "move" ? header(root) : node.querySelector(".tile-resize"), start = down(source);
       pointer("pointermove", document, shifted(start, 37, 173));
       const target = box(root.querySelector(".drop-outline"));
-      await ff.browser.storage.sync.set({ "tile:pinned": { x: 5, y: 20, w: 3, h: 4 } });
+      await ff.browser.storage.sync.set({ "tile:10:pinned": { x: 5, y: 20, w: 3, h: 4 } });
       await flush(ff); ff.calls.length = 0;
       const pinned = tile(root, "pinned");
       if (end === "release") pointer("pointerup", document, shifted(start, 37, 173)); else escape();
@@ -894,9 +886,9 @@ for (const kind of ["move", "resize"]) {
       assert.equal(control.ui.gridDragging, true, "hold extends through settlement");
       assert.equal(tile(root), node, "captured node is retained while sliding");
       assert.equal(tile(root, "pinned"), pinned); assert.equal(rect(pinned).y, 0);
-      assert.deepEqual(writes(ff), end === "cancel" ? [] : [{ "tile:group:a": kind === "move"
+      assert.deepEqual(writes(ff), end === "cancel" ? [] : [{ "tile:10:group:a": kind === "move"
         ? { x: 0, y: 2, w: 3, h: 4 } : { x: 0, y: 0, w: 3, h: 6 },
-        "tile:group:b": { x: 0, y: 6, w: 3, h: 4 } }], "release saves before the visual slide ends");
+        "tile:10:group:b": { x: 0, y: 6, w: 3, h: 4 } }], "release saves before the visual slide ends");
       const beforeSlide = box(node);
       assert.equal(getComputedStyle(node).zIndex, "3", "settling tile stays above the outline and neighbours");
       await new Promise(resolve => setTimeout(resolve, 80));
@@ -909,9 +901,9 @@ for (const kind of ["move", "resize"]) {
       close(landed.left, expected.left, "landed x"); close(landed.top, expected.top, "landed y");
       close(landed.width, expected.width, "landed width"); close(landed.height, expected.height, "landed height");
       if (end === "cancel") { assert.deepEqual(writes(ff), []); assert.equal(rect(neighbour).y, 4); }
-      else assert.deepEqual(writes(ff), [{ "tile:group:a": kind === "move"
+      else assert.deepEqual(writes(ff), [{ "tile:10:group:a": kind === "move"
         ? { x: 0, y: 2, w: 3, h: 4 } : { x: 0, y: 0, w: 3, h: 6 },
-        "tile:group:b": { x: 0, y: 6, w: 3, h: 4 } }]);
+        "tile:10:group:b": { x: 0, y: 6, w: 3, h: 4 } }]);
     });
   }
 }
@@ -925,9 +917,9 @@ test("a board update arriving during the release slide stays held until landing"
   pointer("pointermove", document, target);
   const landing = box(root.querySelector(".drop-outline"));
   pointer("pointerup", document, target); await nextFrame();
-  const dropWrites = [{ "tile:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:group:b": { x: 0, y: 6, w: 3, h: 4 } }];
+  const dropWrites = [{ "tile:10:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:10:group:b": { x: 0, y: 6, w: 3, h: 4 } }];
   assert.deepEqual(writes(ff), dropWrites, "release saved before the incoming update");
-  const remote = { "tile:pinned": { x: 5, y: 20, w: 3, h: 4 } };
+  const remote = { "tile:10:pinned": { x: 5, y: 20, w: 3, h: 4 } };
   await ff.browser.storage.sync.set(remote); await ff.settle();
   assert.equal(control.ui.gridDragging, true);
   assert.equal(tile(root), node, "the sliding node must not be replaced");
@@ -963,7 +955,7 @@ for (const kind of ["move", "resize"]) {
     assert.equal(control.ui.gridDragging, false); assert.equal(root.hasAttribute("data-grid-dragging"), false);
     assert.equal(root.querySelector(".drop-outline"), null); assert.equal(root.querySelector(".tile.dragging"), null);
     assert.deepEqual(writes(ff), []);
-    assert.deepEqual(rect(tile(root)), initial["tile:group:a"]);
+    assert.deepEqual(rect(tile(root)), initial["tile:10:group:a"]);
     pointer("pointerup", document, shifted(start, 37, 173)); await flush(ff); assert.deepEqual(writes(ff), []);
   });
 }
@@ -1031,7 +1023,7 @@ test("a group closed during its release slide keeps the accepted drop and pushes
   await new Promise(resolve => setTimeout(resolve, 650)); await flush(ff);
   assert.equal(control.ui.gridDragging, false); assert.equal(tile(root), undefined);
   assert.deepEqual(rect(tile(root, "group:b")), { x: 0, y: 6, w: 3, h: 4 });
-  assert.deepEqual(writes(ff), [{ "tile:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:group:b": { x: 0, y: 6, w: 3, h: 4 } }]);
+  assert.deepEqual(writes(ff), [{ "tile:10:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:10:group:b": { x: 0, y: 6, w: 3, h: 4 } }]);
   assert.equal(ff.calls.filter(call => call.api === "tabGroups.get").length, 1, "the group gate runs only at release");
 });
 
@@ -1049,10 +1041,10 @@ for (const id of ["group:a", "clock"]) {
       assert.equal(control.ui.gridDragging, true, "pagehide precedes the end of the visual slide");
       window.dispatchEvent(new Event("pagehide"));
       await flush(ff);
-      const wanted = id === "clock" ? { "tile:clock": kind === "move"
+      const wanted = id === "clock" ? { "tile:10:clock": kind === "move"
         ? { x: 5, y: 6, w: 5, h: 2 } : { x: 5, y: 4, w: 5, h: 4 } }
-        : { "tile:group:a": kind === "move" ? { x: 0, y: 2, w: 3, h: 4 } : { x: 0, y: 0, w: 3, h: 6 },
-          "tile:group:b": { x: 0, y: 6, w: 3, h: 4 } };
+        : { "tile:10:group:a": kind === "move" ? { x: 0, y: 2, w: 3, h: 4 } : { x: 0, y: 0, w: 3, h: 6 },
+          "tile:10:group:b": { x: 0, y: 6, w: 3, h: 4 } };
       assert.deepEqual(writes(ff), [wanted], "accepted drop saves exactly once, with 3.0.0 tile rectangles");
       const stored = await ff.browser.storage.sync.get(Object.keys(wanted));
       assert.deepEqual(stored, wanted);

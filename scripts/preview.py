@@ -26,6 +26,9 @@ INJECT = (
 
 # name: (query string, window width, window height)
 SCENARIOS = {
+    "real-34": ("scenario=real-34", 2480, 1200),
+    "real-33": ("scenario=real-33", 2416, 1800),
+    "real-17": ("scenario=real-17", 1392, 2320),
     "empty": ("scenario=empty", 1600, 1000),
     "one-window": ("scenario=one-window", 1600, 1000),
     "saved": ("scenario=saved", 1600, 1000),

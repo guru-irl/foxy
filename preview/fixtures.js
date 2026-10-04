@@ -1,3 +1,4 @@
+import { realLayout, realGroups } from "../test/browser/fixtures/real-layout.js";
 // Preview fixtures use only inline, neutral icons. No network requests.
 const TITLES = ["YouTube", "Inbox (3)", "Pull request #1234: Fix the flaky sidebar test in the vertical tab strip",
   "Docs", "Calendar", "Figma", "Hacker News", "Weather", "Maps", "Music", "Notes", "Photos"];
@@ -58,7 +59,13 @@ function grid(cellSize = "M") {
     },
   };
 }
+function realGrid() {
+  const data = scenario(realGroups.map(g => ({ title: g.title, color: g.color, count: 12 })), { pinned: 5 });
+  return { ...data, folders: Object.fromEntries(data.groups.map(g => [g.id, g.title.toLowerCase()])),
+    layout: realLayout, layoutWidth: 34, syncedSettings: { railCells: 5 }, deviceSettings: { cellSize: "S" } };
+}
 export const SCENARIOS = {
+  "real-34": realGrid(), "real-33": realGrid(), "real-17": realGrid(),
   "grid-m": grid(),
   "grid-xl": grid("XL"),
   "grid-narrow": grid(),
