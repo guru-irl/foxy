@@ -10,7 +10,7 @@ A private Firefox add-on and browser theme.
 
 **Platforms:** desktop Firefox 140+ on macOS, Windows and Linux, not Android. The theme supports glass blur on macOS only.
 
-Version 3.2.0. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-10-03-foxy-grid-design.md` and `2026-10-04-foxy-3.2-design.md`.
+Version 3.3.0. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-10-03-foxy-grid-design.md`, `2026-10-04-foxy-3.2-design.md` and `2026-10-04-foxy-3.3-design.md`.
 
 ## Board
 
