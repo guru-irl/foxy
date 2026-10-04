@@ -16,9 +16,11 @@ export function createTabSwitch(api, { now = Date.now, settings = DEFAULT_SETTIN
     ? value.switchToOpenTab : DEFAULT_SETTINGS.switchToOpenTab;
   const expired = candidate => now() >= candidate.created + MAX_MS
     || (candidate.settleAt !== null && now() >= candidate.settleAt);
+  // Best effort: a failed write only loses the watch across idle, never a switch.
   async function persist(extra = {}) {
     for (const [id, candidate] of candidates) if (expired(candidate)) candidates.delete(id);
-    await api.storage.session.set({ foxySwitchCandidates: Object.fromEntries(candidates), ...extra });
+    try { await api.storage.session.set({ foxySwitchCandidates: Object.fromEntries(candidates), ...extra }); }
+    catch (error) { console.warn("Foxy: could not save tab switch watches", error); }
   }
   const settingReady = api.storage.sync.get("settings").then(stored => {
     if (!settingsVersion) enabled = stored.settings === undefined ? enabled : readEnabled(stored.settings);
@@ -117,12 +119,16 @@ export function createTabSwitch(api, { now = Date.now, settings = DEFAULT_SETTIN
       // settlement or the cap must not revive a watch, even after idle.
       if (expired(candidate)) { candidates.delete(id); await persist(); return; }
       let changed = false, check = false;
+      // pushState, replaceState and hash changes arrive as one complete update
+      // with a URL: they keep a running settle deadline.
+      const sameDocument = changes.status === "complete";
       if (Object.hasOwn(changes, "url") && candidate.url !== changes.url) {
-        candidate.url = changes.url; candidate.settleAt = null; changed = true;
+        candidate.url = changes.url; changed = true;
+        if (!sameDocument) candidate.settleAt = null;
         check = webURL(candidate.url) && !isHop(candidate.url);
       }
       const url = changes.url ?? tab?.url ?? candidate.url;
-      if (changes.status === "complete" && url && url !== "about:blank" && !isHop(url)) {
+      if (changes.status === "complete" && candidate.settleAt === null && url && url !== "about:blank" && !isHop(url)) {
         candidate.settleAt = now() + SETTLE_MS; changed = true;
       }
       if (changed) await persist();

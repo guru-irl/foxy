@@ -430,6 +430,34 @@ test("a URL change cancels settling until the next non-hop page completes", asyn
   await f.advance(4000); await f.navigate(tab, URL_A); await f.switched(tab);
 });
 
+test("same-document URL changes keep the settle deadline", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://different.example.com/" });
+  await f.complete(tab); await f.advance(2000);
+  // pushState, replaceState and hash changes arrive as one complete update with a URL.
+  const live = await f.ff.browser.tabs.get(tab.id);
+  f.ff.fire("tabs.onUpdated", tab.id, { status: "complete", url: "https://different.example.com/route" },
+    { ...live, url: "https://different.example.com/route", status: "complete" });
+  await f.flush(); await f.advance(1000);
+  await f.navigate(tab, URL_A); await f.retained(tab);
+});
+
+test("a same-document change still starts settling when none is running", async t => {
+  const f = await fixture(t); const tab = await f.create({ url: "https://different.example.com/" });
+  const live = await f.ff.browser.tabs.get(tab.id);
+  f.ff.fire("tabs.onUpdated", tab.id, { status: "complete", url: "https://different.example.com/route" },
+    { ...live, url: "https://different.example.com/route", status: "complete" });
+  await f.flush(); await f.advance(3000);
+  await f.navigate(tab, URL_A); await f.retained(tab);
+});
+
+test("a failing session write does not stop switching", async t => {
+  const f = await fixture(t);
+  t.mock.method(f.ff.browser.storage.session, "set", async () => { throw new Error("quota"); });
+  t.mock.method(console, "warn", () => {});
+  const tab = await f.create({ url: URL_A }); await f.switched(tab);
+  const next = await f.create({ url: "https://different.example.com/" }); await f.navigate(next, URL_A); await f.switched(next);
+});
+
 test("a new completed page gets its own three second settle window", async t => {
   const f = await fixture(t); const tab = await f.create({ url: "https://different.example.com/" });
   await f.complete(tab); await f.advance(2000); await f.navigate(tab, "https://different.example.com/next");
