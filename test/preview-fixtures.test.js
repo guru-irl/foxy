@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildView } from "../extension/src/grid/view.js";
 import { loadSettings } from "../extension/src/settings/store.js";
-import { loadLayout } from "../extension/src/grid/store.js";
+import { loadLayouts } from "../extension/src/grid/store.js";
 import { buildBoard } from "../extension/src/board/model.js";
 
 // fake-browser.js only needs the page URL and the scheme target at import time.
@@ -68,9 +68,9 @@ for (const [name, cell, width] of [["grid-m", 1616 / 16 - 16, 1600], ["grid-xl",
     const { api, board, reply } = await preview(t, name);
     assert.deepEqual(reply.folders, { 101: "preview-101", 102: "preview-102", 103: "preview-103" });
     assert.equal(board.saved.length, 3);
-    const layout = await loadLayout(api);
+    const stored = await loadLayouts(api), layout = stored.layouts[9].tiles;
     const settings = await loadSettings(api);
-    const view = buildView(board, { layout, ...settings, contentWidth: width,
+    const view = buildView(board, { layouts: stored.layouts, ...settings, contentWidth: width,
       folders: reply.folders });
     assert.equal(view.cell, cell);
     assert.equal(view.tiles.length, 6);
@@ -79,7 +79,7 @@ for (const [name, cell, width] of [["grid-m", 1616 / 16 - 16, 1600], ["grid-xl",
     if (name === "grid-narrow") {
       assert.ok(view.tiles.some(tile => tile.y !== layout.find(saved => saved.id === tile.id).y),
         "narrow fixture must exercise display fit");
-      assert.deepEqual(await loadLayout(api), layout, "display fit must not save positions");
+      assert.deepEqual(await loadLayouts(api), stored, "display fit must not save positions");
     }
   });
 }

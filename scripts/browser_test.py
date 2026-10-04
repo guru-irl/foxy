@@ -11,6 +11,8 @@ import signal
 import shutil
 import subprocess
 import sys
+
+from firefox_env import firefox_environment
 import tempfile
 import threading
 import time
@@ -148,7 +150,7 @@ def terminate_firefox(process):
         process.wait()
 
 
-def run(root, files, *, firefox=FIREFOX, timeout=120):
+def run(root, files, *, firefox=FIREFOX, timeout=300):
     root = Path(root).resolve()
     scratch = root / ".spider" / "scratch"
     scratch.mkdir(parents=True, exist_ok=True)
@@ -172,11 +174,11 @@ def run(root, files, *, firefox=FIREFOX, timeout=120):
             log_path = directory / "firefox.log"
             retain_log = False
             try:
-                with log_path.open("wb") as log:
+                with firefox_environment(directory) as env, log_path.open("wb") as log:
                     try:
                         process = subprocess.Popen(
                             [str(firefox), "--headless", "--no-remote", "-profile", str(profile), url],
-                            env={**os.environ, "TMPDIR": str(temp)},
+                            env=env,
                             start_new_session=True, stdout=log, stderr=log,
                         )
                     except OSError as error:

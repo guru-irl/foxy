@@ -79,7 +79,7 @@ test("tab snapshots have complete defaults, setup activation and increasing acce
   const tab = await ff.browser.tabs.get(1);
   assert.deepEqual(tab, { id: 1, windowId: 1, index: 0, pinned: false, groupId: -1,
     url: "about:blank", title: "about:blank", favIconUrl: undefined, active: false,
-    discarded: false, hidden: false, status: "complete", lastAccessed: 1, incognito: false });
+    discarded: false, hidden: false, status: "complete", lastAccessed: 1, incognito: false, cookieStoreId: "firefox-default" });
   assert.equal((await ff.browser.tabs.get(2)).lastAccessed, 2);
   assert.equal((await ff.browser.tabs.get(2)).active, true);
   tab.title = "changed";
@@ -1179,11 +1179,11 @@ test("sync storage writes, removal and clear emit sync changes without touching 
 test("sync storage survives restarts with and without session restore", async () => {
   for (const restore of [true, false]) {
     const ff = createFirefox();
-    await ff.browser.storage.sync.set({ "tile:clock": { x: 0, y: 0, w: 5, h: 2 } });
+    await ff.browser.storage.sync.set({ "tile:17:clock": { x: 0, y: 0, w: 5, h: 2 } });
     await ff.settle();
     ff.restart({ restore });
     await ff.settle();
-    assert.deepEqual(await ff.browser.storage.sync.get(), { "tile:clock": { x: 0, y: 0, w: 5, h: 2 } });
+    assert.deepEqual(await ff.browser.storage.sync.get(), { "tile:17:clock": { x: 0, y: 0, w: 5, h: 2 } });
   }
 });
 

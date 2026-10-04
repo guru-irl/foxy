@@ -13,6 +13,8 @@ import signal
 import socket
 import subprocess
 import sys
+
+from firefox_env import firefox_environment
 import time
 import threading
 
@@ -685,13 +687,13 @@ def run(*, firefox=FIREFOX, keep_going=False, root=ROOT):
         write_profile(profile, port)
         temp = scratch / "tmp"
         temp.mkdir()
-        with (scratch / "firefox.log").open("wb") as log:
+        with firefox_environment(scratch) as env, (scratch / "firefox.log").open("wb") as log:
             try:
                 process = subprocess.Popen([
                     str(firefox), "--headless", "--no-remote", "--marionette",
                     # Firefox 138+ requires explicit opt-in to chrome context.
                     "--remote-allow-system-access", "-profile", str(profile), "about:blank",
-                ], env={**os.environ, "TMPDIR": str(temp), "TMP": str(temp), "TEMP": str(temp)},
+                ], env=env,
                     start_new_session=True, stdout=log, stderr=log)
                 client = connect_firefox(process, port)
                 session = client.command("WebDriver:NewSession", {"capabilities": {"alwaysMatch": {

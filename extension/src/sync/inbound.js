@@ -1,6 +1,7 @@
 import { decodeFolderTitle, decodePinTitle, encodeFolderTitle, isOpenableUrl } from "./codec.js";
 import { emptyState, groupOfFolder, tabsInFolder, probeMissingBookmark, wasRemoved } from "./state.js";
 import { matchTabs } from "./match.js";
+import { markOwn } from "../tabs/own.js";
 
 /** All methods run inside the controller's queue. Inner work never re-enqueues. */
 export function createInbound({ api, getState, save, now = Date.now, quietMs = 10000, orderReleased = () => {}, lostIdentity = () => {} }) {
@@ -170,6 +171,7 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
         // a lazy tab afterwards preserves its unloaded title and document.
         const appendIndex = (await api.tabs.query({ windowId: win.id })).length;
         tab = await api.tabs.create({ windowId: win.id, index: appendIndex, url: node.url, title: name, discarded: true, active: false });
+        markOwn(tab.id);
         try {
           tab = await api.tabs.update(tab.id, { pinned: true });
           await api.tabs.move(tab.id, { index });
@@ -179,10 +181,12 @@ export function createInbound({ api, getState, save, now = Date.now, quietMs = 1
         }
       } else {
         tab = await api.tabs.create({ windowId: win.id, index, url: node.url, pinned: true, active: false });
+        markOwn(tab.id);
       }
     } else {
       tab = await api.tabs.create({ windowId: group.windowId, url: node.url,
         title: node.title, discarded: true, active: false });
+      markOwn(tab.id);
     }
     if (!tab.pinned) {
       try { await api.tabs.group({ groupId: group.id, tabIds: [tab.id] }); }

@@ -8,12 +8,12 @@ export const narrowGroups = [
 ];
 export const narrowFolders = { 1: "a", 2: "b", 3: "c", 4: "d", 5: "e", 6: "f" };
 export const narrowLayout = {
-  "tile:clock": { x: 0, y: 0, w: 4, h: 2 },
-  "tile:pinned": { x: 0, y: 2, w: 4, h: 6 },
-  "tile:group:a": { x: 10, y: 0, w: 5, h: 3 },
-  "tile:group:b": { x: 15, y: 0, w: 5, h: 3 },
-  "tile:group:c": { x: 10, y: 3, w: 5, h: 3 },
-  "tile:group:d": { x: 15, y: 3, w: 5, h: 3 },
-  "tile:group:e": { x: 10, y: 6, w: 5, h: 3 },
-  "tile:group:f": { x: 15, y: 6, w: 5, h: 3 },
+  "tile:20:clock": { x: 0, y: 0, w: 4, h: 2 },
+  "tile:20:pinned": { x: 0, y: 2, w: 4, h: 6 },
+  "tile:20:group:a": { x: 10, y: 0, w: 5, h: 3 },
+  "tile:20:group:b": { x: 15, y: 0, w: 5, h: 3 },
+  "tile:20:group:c": { x: 10, y: 3, w: 5, h: 3 },
+  "tile:20:group:d": { x: 15, y: 3, w: 5, h: 3 },
+  "tile:20:group:e": { x: 10, y: 6, w: 5, h: 3 },
+  "tile:20:group:f": { x: 15, y: 6, w: 5, h: 3 },
 };

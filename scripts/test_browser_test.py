@@ -109,6 +109,8 @@ with urllib.request.urlopen(base + "/test/browser/smoke.test.js") as response:
     mime = response.headers.get_content_type()
 (root / "launch.json").write_text(json.dumps({{
     "args": sys.argv[1:], "tmpdir": os.environ["TMPDIR"],
+    "agent_sock": os.environ.get("FOXY_AGENT_SOCK"),
+    "agent_resolved": str(pathlib.Path(os.environ.get("FOXY_AGENT_SOCK", "missing")).resolve()),
     "pid": os.getpid(), "child": child.pid, "mime": mime,
 }}))
 print("stand-in Firefox diagnostic", flush=True)
@@ -158,6 +160,9 @@ signal.pause()
         scratch = self.root / ".spider" / "scratch"
         self.assertTrue(profile.is_relative_to(scratch))
         self.assertTrue(pathlib.Path(launch["tmpdir"]).is_relative_to(scratch))
+        self.assertIsNotNone(launch['agent_sock'])
+        self.assertTrue(pathlib.Path(launch['agent_resolved']).is_relative_to(profile.parent))
+        self.assertLess(len(launch['agent_sock'].encode()), 104)
         self.assertIn("/test/browser/run.html?files=", launch["args"][-1])
         self.assert_processes_stopped(launch)
 

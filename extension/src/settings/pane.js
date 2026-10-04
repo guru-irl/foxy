@@ -24,7 +24,7 @@ export function settingActions(api, onReset) {
 
 export async function resetLayout(api) {
   const stored = await api.storage.sync.get(null);
-  await api.storage.sync.remove(Object.keys(stored).filter(key => key.startsWith("tile:")));
+  await api.storage.sync.remove(Object.keys(stored).filter(key => key.startsWith("tile:") || key.startsWith("layout:") || key === "layouts"));
 }
 
 /** Shared pane. Repeated calls update values without replacing focused nodes. */
@@ -153,7 +153,9 @@ export function renderSettings(container, state, handlers) {
     const cards = section("Cards");
     segmented(cards, "Transparency", "synced", "transparency", [["low", "Low"], ["medium", "Medium"], ["high", "High"]]);
     segmented(cards, "Row density", "device", "density", [["normal", "Normal"], ["compact", "Compact"]], true);
-    toggle(section("Windows"), "Show tabs and groups from other windows", "otherWindows");
+    const windows = section("Windows");
+    toggle(windows, "Show tabs and groups from other windows", "otherWindows");
+    toggle(windows, "Switch to an open tab instead of opening a duplicate", "switchToOpenTab");
     toggle(section("Pins"), "Clicking a pin from another window moves it here", "pinsMoveHere");
     function edges() {
       container.classList.toggle("scroll-start", scroll.scrollTop > 0);
