@@ -240,9 +240,9 @@ export function renderSettings(container, state, handlers) {
         if (places?.length && input.value.trim() === query) pick(places[0]);
       });
       auto.addEventListener("click", () => {
-        // Ask in this click (it must run before any await); a decline leaves the tile's Allow pill.
-        pane.handlers.allowMyLocation?.().catch(() => false);
-        change("device", "weatherPlace", "auto");
+        // Ask in this click (it must run before any await); switch only on a grant so a decline keeps the city.
+        const asked = pane.handlers.allowMyLocation?.() ?? Promise.resolve(true);
+        asked.then(granted => { if (granted) change("device", "weatherPlace", "auto"); }, () => {});
       });
       pane.controls.push(() => {
         const place = pane.state.device.weatherPlace;

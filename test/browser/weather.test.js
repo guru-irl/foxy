@@ -233,6 +233,23 @@ test("controller: a searched city asks only for locationInfo; my location withou
   } finally { control.stop(); }
 });
 
+test("controller: revoking geolocation while a city is set keeps the forecast, the cache and the fetch count", async () => {
+  const deps = weatherDeps(), node = await withTile(deps);
+  deps.current.device.weatherPlace = { name: "Berlin", lat: 52.52, lon: 13.41 };
+  const control = startWeather(node, deps);
+  try {
+    control.wake(); await settle();
+    assert.equal(node.querySelector(".weather").dataset.state, "ok");
+    const fetched = deps.fetch.calls.length, cached = (await deps.api.storage.local.get("weather")).weather;
+    assert.ok(cached, "cached");
+    await deps.api.permissions.remove({ permissions: ["geolocation"] });
+    await deps.ff.settle(); await settle();
+    assert.equal(node.querySelector(".weather").dataset.state, "ok");
+    assert.deepEqual((await deps.api.storage.local.get("weather")).weather, cached);
+    assert.equal(deps.fetch.calls.length, fetched);
+  } finally { control.stop(); }
+});
+
 test("controller: revoking clears the cached place and forecast; revoking geolocation matters only for my location", async () => {
   const deps = weatherDeps(), node = await withTile(deps);
   await deps.api.storage.local.set({ deviceSettings: { weatherPlace: { name: "Berlin", lat: 52.52, lon: 13.41 } } });
@@ -528,16 +545,21 @@ test("pane: Enter picks the first result; Use my location resets to auto", async
   input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
   await settle();
   assert.deepEqual(changes, [["device", "weatherPlace", { name: "Berlin", lat: 52.52, lon: 13.41 }]]);
+  const asked = [];
+  let answer = true;
   renderSettings(container, { synced: { ...DEFAULT_SETTINGS }, device: { ...DEFAULT_DEVICE, weatherPlace: { name: "Berlin", lat: 52.52, lon: 13.41 } }, railMax: 4 },
     { onChange: async (...args) => { changes.push(args); }, onReset() {}, searchPlaces: async () => [],
-      allowMyLocation: () => { asked.push(changes.length); return Promise.resolve(true); } });
-  const asked = [];
+      allowMyLocation: () => { asked.push(changes.length); return Promise.resolve(answer); } });
   assert.equal(container.querySelector(".weather-current").textContent, "Berlin");
   const auto = container.querySelector(".weather-auto");
   assert.equal(auto.disabled, false);
+  answer = false;
   auto.click();
-  assert.deepEqual(asked, [1], "the permission prompt is requested synchronously in the click, before the change");
+  assert.deepEqual(asked, [1], "the permission prompt is requested synchronously in the click");
   await settle();
+  assert.equal(changes.length, 1, "a decline keeps the searched city");
+  answer = true;
+  auto.click(); await settle();
   assert.deepEqual(changes.at(-1), ["device", "weatherPlace", "auto"]);
 });
 
