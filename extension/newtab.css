@@ -483,32 +483,18 @@ button.dot {
 
 .tile-resize {
   position: absolute;
-  right: 0;
-  bottom: 0;
   z-index: 1;
   width: 16px;
   height: 16px;
-  border-radius: 999px;
   opacity: 0;
   cursor: nwse-resize;
   touch-action: none;
 }
 
-.tile-resize::before {
-  content: "";
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--text-muted);
-}
-
-.tile:hover .tile-resize,
-.tile:focus-within .tile-resize {
-  opacity: 1;
-}
+.tile-resize[data-corner="nw"] { top: 0; left: 0; }
+.tile-resize[data-corner="ne"] { top: 0; right: 0; cursor: nesw-resize; }
+.tile-resize[data-corner="sw"] { bottom: 0; left: 0; cursor: nesw-resize; }
+.tile-resize[data-corner="se"] { bottom: 0; right: 0; }
 
 .rail-resize {
   position: absolute;

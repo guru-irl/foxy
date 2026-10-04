@@ -105,10 +105,13 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
     node.classList.add("tile");
     node.dataset.tileId = tile.id;
     node.dataset.kind = tile.kind;
-    const handle = button("tile-resize", `Resize ${tile.kind === "group" ? tile.group.title.trim() || "Unnamed" : tile.kind}`);
-    handle.tabIndex = -1;
-    handle.setAttribute("aria-hidden", "true");
-    node.append(handle);
+    for (const corner of ["se", "nw", "ne", "sw"]) {
+      const handle = button("tile-resize", `Resize ${tile.kind === "group" ? tile.group.title.trim() || "Unnamed" : tile.kind}`);
+      handle.dataset.corner = corner;
+      handle.tabIndex = -1;
+      handle.setAttribute("aria-hidden", "true");
+      node.append(handle);
+    }
     grid.append(node);
   }
   positionTiles(grid, view.tiles);

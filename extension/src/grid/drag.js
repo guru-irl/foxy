@@ -44,20 +44,32 @@ export function attachGridDrag(root, { view, canCommit, onPreview, onCommit, onC
       return;
     }
     const step = before.cell + GAP, point = contentPoint(drag.grid, pointer), tile = drag.tile;
-    const left = point.x - drag.offset.x, top = point.y - drag.offset.y;
-    const width = point.x + drag.offset.x - tile.x * step;
-    const height = point.y + drag.offset.y - tile.y * step;
+    let target;
     if (kind === "move") {
+      const left = point.x - drag.offset.x, top = point.y - drag.offset.y;
       drag.node.style.transform = `translate(${left - tile.x * step}px, ${top - tile.y * step}px)`;
+      target = clampRect(tile.id, { ...tile, x: Math.round(left / step), y: Math.round(top / step) }, before.cols);
     } else {
-      const min = minSize(tile.kind);
-      drag.node.style.width = `${Math.min((before.cols - tile.x) * step - GAP,
-        Math.max(Math.min(min.w, before.cols) * step - GAP, width))}px`;
-      drag.node.style.height = `${Math.max(min.h * step - GAP, height)}px`;
+      const west = drag.corner.endsWith("w"), north = drag.corner.startsWith("n");
+      const min = minSize(tile.kind), minW = Math.min(min.w, before.cols);
+      const movingX = point.x + drag.offset.x, movingY = point.y + drag.offset.y;
+      // Pixel edges keep the opposite corner fixed, including the 16px gap.
+      const left = west ? Math.max(0, Math.min(movingX, (tile.x + tile.w - minW) * step)) : tile.x * step;
+      const top = north ? Math.max(0, Math.min(movingY, (tile.y + tile.h - min.h) * step)) : tile.y * step;
+      const right = west ? (tile.x + tile.w) * step - GAP
+        : Math.min(before.cols * step - GAP, Math.max(left + minW * step - GAP, movingX));
+      const bottom = north ? (tile.y + tile.h) * step - GAP : Math.max(top + min.h * step - GAP, movingY);
+      for (const [key, value] of Object.entries({ left, top, width: right - left, height: bottom - top })) {
+        drag.node.style[key] = `${value}px`;
+      }
+      // Snap the moving edge, apply the minimum from the fixed edge, then
+      // clamp only the moving side. Generic clampRect would shift the anchor.
+      const x = west ? Math.max(0, Math.min(Math.round(movingX / step), tile.x + tile.w - minW)) : tile.x;
+      const y = north ? Math.max(0, Math.min(Math.round(movingY / step), tile.y + tile.h - min.h)) : tile.y;
+      const endX = west ? tile.x + tile.w : Math.min(before.cols, Math.max(tile.x + minW, Math.round((movingX + GAP) / step)));
+      const endY = north ? tile.y + tile.h : Math.max(tile.y + min.h, Math.round((movingY + GAP) / step));
+      target = { id: tile.id, x, y, w: endX - x, h: endY - y };
     }
-    const target = clampRect(tile.id, kind === "move" ? { ...tile,
-      x: Math.round(left / step), y: Math.round(top / step) }
-      : { ...tile, w: Math.round((width + GAP) / step), h: Math.round((height + GAP) / step) }, before.cols);
     if (drag.target && ["x", "y", "w", "h"].every(key => target[key] === drag.target[key])) return;
     drag.target = target;
     for (const key of ["x", "y", "w", "h"]) drag.outline.style.setProperty(`--${key}`, target[key]);
@@ -160,12 +172,13 @@ export function attachGridDrag(root, { view, canCommit, onPreview, onCommit, onC
     const tile = current.tiles.find(tile => tile.id === node?.dataset.tileId);
     if (!rail && !tile) return;
     const grid = root.querySelector(".grid"), step = current.cell + GAP, point = contentPoint(grid, event);
-    const kind = rail ? "rail" : handle ? "resize" : "move";
-    drag = { kind, node, source: target, grid, tile, pointerId: event.pointerId,
+    const kind = rail ? "rail" : handle ? "resize" : "move", corner = handle?.dataset.corner ?? "se";
+    drag = { kind, corner, node, source: target, grid, tile, pointerId: event.pointerId,
       before: { ...current, tiles: current.tiles.map(tile => ({ ...tile })) }, changed: [],
       pointer: { clientX: event.clientX, clientY: event.clientY }, start: { x: event.clientX, y: event.clientY },
       offset: tile && (kind === "move" ? { x: point.x - tile.x * step, y: point.y - tile.y * step }
-        : { x: (tile.x + tile.w) * step - GAP - point.x, y: (tile.y + tile.h) * step - GAP - point.y }),
+        : { x: (corner.endsWith("w") ? tile.x * step : (tile.x + tile.w) * step - GAP) - point.x,
+          y: (corner.startsWith("n") ? tile.y * step : (tile.y + tile.h) * step - GAP) - point.y }),
       right: root.querySelector(".rail").getBoundingClientRect().right, cells: current.railCells, active: kind !== "move" };
     onState?.(true, tile?.id);
     // Synthetic PointerEvents have no active native pointer. The real gesture
