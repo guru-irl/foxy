@@ -64,8 +64,9 @@ for (const selector of ['.rows[data-zone="pinned"]', '.rows[data-zone="tabs"]', 
 }
 
 test("even one pixel of hidden row content gets an edge hint", async () => {
-  const { root } = await draw({ height: 1000 });
-  const rows = root.querySelector('.rows[data-zone="tabs"]');
+  // 1232px gives exact 80px cells, so the hidden extent is an integer pixel.
+  const { root } = await draw({ width: 1232, height: 1000 });
+  const rows = root.querySelector('.rows[data-zone="pinned"]');
   rows.style.flex = "none";
   rows.style.height = `${rows.scrollHeight - 1}px`;
   await nextFrame(); await nextFrame();
