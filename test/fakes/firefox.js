@@ -191,7 +191,7 @@ export function createFirefox(setup = {}) {
   api("tabs", "query", (q = {}) => wins.flatMap(w => w.tabs).filter(t =>
     (q.windowId == null || t.windowId === q.windowId) && (!q.currentWindow || t.windowId === currentWindowId) &&
     (q.pinned == null || t.pinned === q.pinned) && (q.groupId == null || t.groupId === q.groupId) &&
-    (q.active == null || t.active === q.active) && (q.windowType == null || q.windowType === "normal")
+    (q.active == null || t.active === q.active) && (q.windowType == null || q.windowType === windowById(t.windowId).type)
   ).map(tabObject));
   api("tabs", "get", id => tabObject(tabById(id)));
   api("tabs", "getCurrent", () => setup.selfTabId == null ? undefined : tabObject(tabById(setup.selfTabId)));
@@ -242,6 +242,10 @@ export function createFirefox(setup = {}) {
     if (props.url != null) { t.url = props.url; t.title = props.url; t.discarded = false; }
     if (props.muted != null) t.muted = props.muted;
     updated(t, before);
+    if (props.loadReplace && props.url === "about:blank") {
+      t.status = "complete";
+      queue("tabs.onUpdated", id, { status: "complete" }, tabObject(t));
+    }
     removeEmptyGroups();
     return tabObject(t);
   });
@@ -754,10 +758,14 @@ export function createFirefox(setup = {}) {
     return response;
   });
 
+  function suspendBackground() {
+    if (settling || messages.size || pending.length) throw new Error("Settle Firefox before suspending");
+    for (const listeners of events.values()) listeners.clear();
+  }
   function restart({ restore = false } = {}) {
     if (settling || messages.size) throw new Error("Settle Firefox before restarting");
     pending.length = 0;
-    for (const listeners of events.values()) listeners.clear();
+    suspendBackground();
     for (const key of Object.keys(session)) delete session[key];
     if (restore) {
       const ids = new Map();
@@ -793,5 +801,21 @@ export function createFirefox(setup = {}) {
     }
     return `${pinned ? `${pinned} ` : ""}| ${items.join(" ")}`;
   }
-  return { browser, withUserInput, settle, layout, closeWindow, restart, bookmarkChanges, markUploaded, applyRemoteBookmarks, fire: queue, errors, calls };
+  // Firefox 157 external hand-offs create an active blank tab, complete that
+  // initial document, then report loading before the web URL commits.
+  async function createExternal(props = {}) {
+    const tab = await browser.tabs.create({ ...props, url: "about:blank" });
+    queue("tabs.onUpdated", tab.id, { status: "complete", url: "about:blank" }, tab);
+    const live = tabById(tab.id);
+    live.status = "loading";
+    queue("tabs.onUpdated", tab.id, { status: "loading" }, tabObject(live));
+    return tabObject(live);
+  }
+  function commitExternal(id, url) {
+    checkURL(url);
+    const tab = tabById(id);
+    tab.url = url; tab.title = url; tab.status = "loading";
+    queue("tabs.onUpdated", id, { status: "loading", url }, tabObject(tab));
+  }
+  return { browser, createExternal, commitExternal, suspendBackground, withUserInput, settle, layout, closeWindow, restart, bookmarkChanges, markUploaded, applyRemoteBookmarks, fire: queue, errors, calls };
 }
