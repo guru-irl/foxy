@@ -725,3 +725,30 @@ for (const width of [175, 240]) {
     assert.deepEqual(await ff.browser.storage.sync.get(null), before);
   });
 }
+
+// Catches a missing shared control, wrong scope, or stale values after Sync.
+for (const page of ["board", "options"]) {
+  test(`${page} WINDOWS pane syncs the duplicate-switch toggle and follows remote changes`, async () => {
+    const f = await setup();
+    let pane = f.pane;
+    if (page === "board") f.node.querySelector(".settings-cell").click();
+    else pane = (await options(f.ff)).contentDocument.querySelector(".settings-pane");
+    const control = toggle(pane, "switchToOpenTab");
+    assert.ok(control, "duplicate-switch setting is present");
+    assert.equal(control.closest("section").querySelector("h2").textContent, "Windows");
+    assert.equal(control.ownerDocument.getElementById(control.getAttribute("aria-labelledby")).textContent,
+      "Switch to an open tab instead of opening a duplicate");
+    assert.equal(control.getAttribute("aria-checked"), "true");
+    const before = writes(f.ff).length;
+    control.click(); await flush(f.ff);
+    assert.equal(writes(f.ff).length - before, 1);
+    assert.equal(writes(f.ff).at(-1).api, "storage.sync.set");
+    assert.equal((await f.ff.browser.storage.sync.get("settings")).settings.switchToOpenTab, false);
+    assert.equal(control.getAttribute("aria-checked"), "false");
+    await f.ff.browser.storage.sync.set({ settings: { switchToOpenTab: true } }); await flush(f.ff);
+    assert.equal(control.getAttribute("aria-checked"), "true");
+    control.click(); control.click(); await flush(f.ff);
+    assert.equal((await f.ff.browser.storage.sync.get("settings")).settings.switchToOpenTab, true);
+    assert.equal(control.getAttribute("aria-checked"), "true");
+  });
+}

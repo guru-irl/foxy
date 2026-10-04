@@ -1,8 +1,10 @@
 import { handleMessage } from "./src/close.js";
 import { createSync } from "./src/sync/sync.js";
+import { createTabSwitch } from "./src/tabs/switch.js";
 
 const api = globalThis.browser;
 const sync = createSync({ api });
+createTabSwitch(api);
 
 // Register synchronously: Firefox uses these listeners to wake this event page.
 // Each controller handler starts the session and runs through its serial queue.

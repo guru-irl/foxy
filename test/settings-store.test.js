@@ -4,7 +4,7 @@ import { createFirefox } from "./fakes/firefox.js";
 import { DEFAULT_SETTINGS, DEFAULT_DEVICE, loadSettings, saveSetting, cellPx, cardAlpha } from "../extension/src/settings/store.js";
 
 const syncedDefaults = { railCells: 3, showClock: true, showPinned: true, showSaved: true,
-  timeFormat: "24", showDate: true, transparency: "medium", otherWindows: true, pinsMoveHere: true };
+  timeFormat: "24", showDate: true, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true };
 const deviceDefaults = { cellSize: "M", customCell: 80, density: "normal" };
 
 test("loadSettings returns detached defaults when storage is empty", async () => {
@@ -26,7 +26,7 @@ test("loadSettings falls back per key, keeps valid values and ignores unknown ke
     density: "compact", extra: true } });
   assert.deepEqual(await loadSettings(ff.browser), {
     synced: { railCells: 3, showClock: true, showPinned: false, showSaved: true,
-      timeFormat: "12", showDate: false, transparency: "medium", otherWindows: true, pinsMoveHere: true },
+      timeFormat: "12", showDate: false, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true },
     device: { cellSize: "custom", customCell: 80, density: "compact" },
   });
 });
@@ -43,7 +43,7 @@ for (const value of [null, "bad", 42, [], [false]]) {
 const invalid = [
   ["synced", "railCells", 1], ["synced", "railCells", -1], ["synced", "railCells", 2.5],
   ["synced", "railCells", 1e9], ["synced", "railCells", "3"],
-  ...["showClock", "showPinned", "showSaved", "showDate", "otherWindows", "pinsMoveHere"]
+  ...["showClock", "showPinned", "showSaved", "showDate", "otherWindows", "pinsMoveHere", "switchToOpenTab"]
     .map(key => ["synced", key, 1]),
   ["synced", "timeFormat", "24-hour"], ["synced", "timeFormat", 12],
   ["synced", "transparency", "max"],
@@ -74,7 +74,7 @@ for (const [scope, key] of [["synced", "unknown"], ["device", "showClock"], ["sy
 
 const valid = [
   ["synced", "railCells", 2], ["synced", "railCells", 10000],
-  ...["showClock", "showPinned", "showSaved", "showDate", "otherWindows", "pinsMoveHere"]
+  ...["showClock", "showPinned", "showSaved", "showDate", "otherWindows", "pinsMoveHere", "switchToOpenTab"]
     .map(key => ["synced", key, false]),
   ["synced", "timeFormat", "12"], ["synced", "timeFormat", "24"],
   ...["low", "medium", "high"].map(value => ["synced", "transparency", value]),
@@ -105,7 +105,7 @@ test("saveSetting preserves other valid settings and writes only the selected sc
   const loaded = await saveSetting(ff.browser, "synced", "showPinned", false);
   assert.deepEqual(loaded, {
     synced: { railCells: 4, showClock: false, showPinned: false, showSaved: true, timeFormat: "24",
-      showDate: true, transparency: "high", otherWindows: true, pinsMoveHere: true },
+      showDate: true, transparency: "high", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true },
     device: { cellSize: "S", customCell: 120, density: "compact" },
   });
   assert.deepEqual(ff.calls.filter(c => c.api.endsWith(".set")), [

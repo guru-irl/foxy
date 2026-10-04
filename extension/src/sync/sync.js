@@ -8,6 +8,7 @@ import { createInbound } from "./inbound.js";
 import { matchGroups, matchTabs } from "./match.js";
 import { createNames } from "./names.js";
 import { settle, rebuild } from "./startup.js";
+import { markOwn } from "../tabs/own.js";
 
 /** One controller per event-page lifetime; storage.session survives idle wakes. */
 export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
@@ -610,6 +611,7 @@ export function createSync({ api, now = Date.now, removeDelayMs, quietMs,
       for (const bookmark of bookmarks) {
         const tab = await api.tabs.create({ windowId, url: bookmark.url, title: bookmark.title,
           discarded: true, active: false });
+        markOwn(tab.id);
         created.push({ tab, bookmark });
       }
       groupId = await api.tabs.group({ tabIds: created.map(({ tab }) => tab.id), createProperties: { windowId } });

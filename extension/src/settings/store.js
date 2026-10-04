@@ -2,7 +2,7 @@ import { CELL_PRESETS } from "../grid/layout.js";
 
 export const DEFAULT_SETTINGS = Object.freeze({
   railCells: 3, showClock: true, showPinned: true, showSaved: true, timeFormat: "24",
-  showDate: true, transparency: "medium", otherWindows: true, pinsMoveHere: true,
+  showDate: true, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true,
 });
 export const DEFAULT_DEVICE = Object.freeze({ cellSize: "M", customCell: 80, density: "normal" });
 
@@ -11,7 +11,7 @@ const boolean = value => typeof value === "boolean";
 const syncedRules = {
   railCells: value => integer(value, 2, 10000),
   showClock: boolean, showPinned: boolean, showSaved: boolean, showDate: boolean,
-  otherWindows: boolean, pinsMoveHere: boolean,
+  otherWindows: boolean, pinsMoveHere: boolean, switchToOpenTab: boolean,
   timeFormat: value => ["24", "12"].includes(value),
   transparency: value => ["low", "medium", "high"].includes(value),
 };
