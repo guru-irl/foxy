@@ -1,52 +1,54 @@
 import { blankAndClose } from "../close.js";
 import { DEFAULT_SETTINGS } from "../settings/store.js";
 import { isOwn } from "./own.js";
+import { isHop as defaultIsHop } from "./hops.js";
 
-const BURST_MS = 1000, CANDIDATE_MS = 10000, STARTUP_MS = 15000;
+const BURST_MS = 1000, SETTLE_MS = 3000, MAX_MS = 120000, STARTUP_MS = 15000;
 const withoutFragment = url => typeof url === "string" ? url.split("#", 1)[0] : "";
 const webURL = url => typeof url === "string" && /^https?:/.test(url);
 
 /** One controller per background lifetime. Listeners register before storage loads. */
-export function createTabSwitch(api, { now = Date.now, settings = DEFAULT_SETTINGS, isFoxyTab = isOwn } = {}) {
+export function createTabSwitch(api, { now = Date.now, settings = DEFAULT_SETTINGS, isFoxyTab = isOwn, isHop = defaultIsHop } = {}) {
   let started = now(), startupVersion = 0, recent = [], enabled = settings.switchToOpenTab !== false, settingsVersion = 0;
-  const candidates = new Map();
-  let switching = Promise.resolve();
+  const candidates = new Map(), burstIds = new Set();
+  let events = Promise.resolve();
   const readEnabled = value => typeof value?.switchToOpenTab === "boolean"
     ? value.switchToOpenTab : DEFAULT_SETTINGS.switchToOpenTab;
+  const expired = candidate => now() >= candidate.created + MAX_MS
+    || (candidate.settleAt !== null && now() >= candidate.settleAt);
+  // Best effort: a failed write only loses the watch across idle, never a switch.
+  async function persist(extra = {}) {
+    for (const [id, candidate] of candidates) if (expired(candidate)) candidates.delete(id);
+    try { await api.storage.session.set({ foxySwitchCandidates: Object.fromEntries(candidates), ...extra }); }
+    catch (error) { console.warn("Foxy: could not save tab switch watches", error); }
+  }
   const settingReady = api.storage.sync.get("settings").then(stored => {
     if (!settingsVersion) enabled = stored.settings === undefined ? enabled : readEnabled(stored.settings);
   }).catch(error => console.warn("Foxy: could not load tab switch setting", error));
-  const startReady = api.storage.session.get("foxySwitchStartedAt").then(async stored => {
+  const sessionReady = api.storage.session.get(["foxySwitchStartedAt", "foxySwitchCandidates"]).then(async stored => {
     if (startupVersion) return;
+    for (const [id, candidate] of Object.entries(stored.foxySwitchCandidates ?? {})) candidates.set(Number(id), candidate);
     if (Number.isFinite(stored.foxySwitchStartedAt)) started = stored.foxySwitchStartedAt;
     else await api.storage.session.set({ foxySwitchStartedAt: started });
-  }).catch(error => console.warn("Foxy: could not load tab switch start time", error));
-  const ready = Promise.all([settingReady, startReady]);
-
-  function forget(id) {
-    const candidate = candidates.get(id);
-    if (candidate) { clearTimeout(candidate.expiry); candidates.delete(id); }
+  }).catch(error => console.warn("Foxy: could not load tab switch session", error));
+  const ready = Promise.all([settingReady, sessionReady]).then(async () => {
+    if (!enabled && candidates.size) { candidates.clear(); await persist(); }
+  });
+  function enqueue(action) {
+    // Do not return this promise from listeners: watches survive idle in session
+    // storage rather than holding the background alive with a pending listener.
+    events = events.then(() => ready).then(action)
+      .catch(error => console.warn("Foxy: could not handle tab switch event", error));
   }
   // The browser can close either tab between API calls. Never remove the new
   // tab unless expansion, activation and focus all succeeded.
-  function check(id) {
-    const candidate = candidates.get(id);
-    if (!candidate) return;
-    candidate.pending++;
-    const run = switching.then(() => switchCandidate(id)).finally(() => {
-      candidate.pending--;
-      if (candidate.complete && !candidate.pending && candidates.get(id) === candidate) forget(id);
-    });
-    switching = run.catch(() => {});
-    return run;
-  }
   async function switchCandidate(id) {
-    await ready;
     const candidate = candidates.get(id);
-    if (!candidate || candidate.busy || !candidate.url || candidate.created - started < STARTUP_MS || !enabled || isFoxyTab(id)) return;
-    candidate.busy = true;
+    if (!candidate || burstIds.has(id) || expired(candidate) || !webURL(candidate.url) || isHop(candidate.url)
+      || candidate.created - started < STARTUP_MS || !enabled || isFoxyTab(id)) return;
     const url = candidate.url;
-    const current = () => candidates.get(id) === candidate && candidate.url === url && enabled && !isFoxyTab(id);
+    const current = () => candidates.get(id) === candidate && candidate.url === url && enabled
+      && !burstIds.has(id) && !isFoxyTab(id) && !expired(candidate);
     try {
       const source = await api.tabs.get(id);
       if (withoutFragment(source.url) !== withoutFragment(url) || (await api.windows.get(source.windowId)).type !== "normal") return;
@@ -67,48 +69,71 @@ export function createTabSwitch(api, { now = Date.now, settings = DEFAULT_SETTIN
       const live = await api.tabs.get(id);
       if (!current() || withoutFragment(live.url) !== withoutFragment(url)) return;
       await blankAndClose(api, id);
-      forget(id);
+      candidates.delete(id);
+      await persist();
     } catch { /* A tab or its window can disappear while switching. */ }
-    finally { candidate.busy = false; }
-  }
-  function urlChanged(id, url) {
-    const candidate = candidates.get(id);
-    if (!candidate || candidate.complete || now() - candidate.created >= CANDIDATE_MS || !webURL(url) || candidate.url === url) return;
-    candidate.url = url;
-    void check(id);
   }
   api.runtime.onStartup.addListener(() => {
-    startupVersion++; started = now(); recent = [];
-    void api.storage.session.set({ foxySwitchStartedAt: started })
-      .catch(error => console.warn("Foxy: could not save tab switch start time", error));
-    for (const id of candidates.keys()) forget(id);
+    startupVersion++;
+    const time = now();
+    enqueue(async () => {
+      started = time; recent = []; burstIds.clear(); candidates.clear();
+      await persist({ foxySwitchStartedAt: started });
+    });
   });
   api.storage.onChanged.addListener((changes, area) => {
     if (area === "sync" && Object.hasOwn(changes, "settings")) {
-      settingsVersion++; enabled = readEnabled(changes.settings.newValue);
+      settingsVersion++;
+      enqueue(async () => {
+        enabled = readEnabled(changes.settings.newValue);
+        if (!enabled) { candidates.clear(); await persist(); }
+      });
     }
   });
   api.tabs.onCreated.addListener(tab => {
     const created = now();
+    // Record arrivals synchronously so a burst can cancel a check already
+    // awaiting an API. Candidate mutations and session writes stay serialized.
     recent = recent.filter(entry => created - entry.created <= BURST_MS);
     recent.push({ id: tab.id, created });
-    if (recent.length >= 3) {
-      for (const entry of recent) forget(entry.id);
-      return;
-    }
-    if (!tab.active || isFoxyTab(tab.id)) return;
-    const candidate = { created, complete: false, busy: false, pending: 0 };
-    candidates.set(tab.id, candidate);
-    candidate.expiry = setTimeout(() => forget(tab.id), CANDIDATE_MS);
-    urlChanged(tab.id, tab.url);
+    const burst = recent.length >= 3 ? recent.map(entry => entry.id) : [];
+    for (const id of burst) burstIds.add(id);
+    enqueue(async () => {
+      if (burst.length) {
+        for (const id of burst) candidates.delete(id);
+        await persist();
+        for (const id of burst) burstIds.delete(id);
+        return;
+      }
+      if (!enabled || !tab.active || burstIds.has(tab.id) || isFoxyTab(tab.id) || created - started < STARTUP_MS) return;
+      candidates.set(tab.id, { created, url: tab.url ?? "", settleAt: null });
+      await persist();
+      await switchCandidate(tab.id);
+    });
   });
   const onUpdated = (id, changes, tab) => {
-    if (Object.hasOwn(changes, "url")) urlChanged(id, changes.url);
-    const candidate = candidates.get(id);
-    if (candidate && changes.status === "complete" && (changes.url ?? tab?.url) !== "about:blank") {
-      candidate.complete = true;
-      if (!candidate.pending) forget(id);
-    }
+    enqueue(async () => {
+      const candidate = candidates.get(id);
+      if (!candidate) return;
+      // Check stored deadlines before applying a new URL. A navigation after
+      // settlement or the cap must not revive a watch, even after idle.
+      if (expired(candidate)) { candidates.delete(id); await persist(); return; }
+      let changed = false, check = false;
+      // pushState, replaceState and hash changes arrive as one complete update
+      // with a URL: they keep a running settle deadline.
+      const sameDocument = changes.status === "complete";
+      if (Object.hasOwn(changes, "url") && candidate.url !== changes.url) {
+        candidate.url = changes.url; changed = true;
+        if (!sameDocument) candidate.settleAt = null;
+        check = webURL(candidate.url) && !isHop(candidate.url);
+      }
+      const url = changes.url ?? tab?.url ?? candidate.url;
+      if (changes.status === "complete" && candidate.settleAt === null && url && url !== "about:blank" && !isHop(url)) {
+        candidate.settleAt = now() + SETTLE_MS; changed = true;
+      }
+      if (changed) await persist();
+      if (check) await switchCandidate(id);
+    });
   };
   try { api.tabs.onUpdated.addListener(onUpdated, { properties: ["url", "status"] }); }
   catch (error) {
@@ -116,6 +141,8 @@ export function createTabSwitch(api, { now = Date.now, settings = DEFAULT_SETTIN
     try { api.tabs.onUpdated.addListener(onUpdated); }
     catch (fallbackError) { console.warn("Foxy: could not listen to switch updates", fallbackError); }
   }
-  api.tabs.onRemoved.addListener(forget);
+  api.tabs.onRemoved.addListener(id => {
+    enqueue(async () => { if (candidates.delete(id)) await persist(); });
+  });
   return { ready };
 }

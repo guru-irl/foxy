@@ -4,7 +4,7 @@ A private Firefox add-on and browser theme.
 
 - Replaces the new tab and home pages with a grid of your tabs and tab groups from every window.
 - Saves groups and pinned tabs as bookmarks, so they survive a failed session restore and sync to your other devices through Firefox Sync.
-- Switches to an open tab instead of opening a duplicate.
+- Switches to an open tab instead of opening a duplicate, including through Safe Links and sign-in pages.
 - Lets local agents add tabs to your groups.
 - Ships a glass, neutral, borderless Firefox theme with bundled fonts.
 
