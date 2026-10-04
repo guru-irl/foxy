@@ -12,10 +12,10 @@ class ScenarioTests(unittest.TestCase):
     def test_selects_grid_sizes_narrow_fit_and_both_settings_schemes(self):
         with patch.object(preview, "build_page"), patch.object(preview, "ensure_profile"), \
                 patch.object(preview, "shoot") as shoot:
-            preview.main(["grid-m", "grid-xl", "grid-narrow", "settings-open", "settings-open-light"])
+            preview.main(["grid-custom-80", "grid-custom-144", "grid-narrow", "settings-open", "settings-open-light"])
         self.assertEqual(shoot.call_args_list, [
-            unittest.mock.call("grid-m", "scenario=grid-m", 1600, 1000),
-            unittest.mock.call("grid-xl", "scenario=grid-xl", 1600, 1000),
+            unittest.mock.call("grid-custom-80", "scenario=grid-custom-80", 1600, 1000),
+            unittest.mock.call("grid-custom-144", "scenario=grid-custom-144", 1600, 1000),
             unittest.mock.call("grid-narrow", "scenario=grid-narrow", 700, 1000),
             unittest.mock.call("settings-open", "scenario=settings-open&settings=open", 1600, 1000),
             unittest.mock.call("settings-open-light", "scenario=settings-open&settings=open&scheme=light", 1600, 1000),

@@ -370,7 +370,7 @@ test("a failed reset logs and keeps tile keys, with the reset button usable agai
 test("reset removes tile keys and layouts once, and an open board places visible tiles in spec order", async () => {
   const { ff, node, pane } = await setup();
   await ff.browser.storage.sync.set({ "tile:10:hidden": { x: 0, y: 70, w: 3, h: 4 }, keep: 7,
-    settings: { showPinned: false }, "tile:10:clock": { x: 0, y: 70, w: 5, h: 2 } }); await flush(ff);
+    settings: { railCells: 3, showPinned: false }, "tile:10:clock": { x: 0, y: 70, w: 5, h: 2 } }); await flush(ff);
   node.querySelector(".settings-cell").click(); const reset = pane.querySelector(".settings-reset");
   const before = ff.calls.length; reset.click(); assert.equal(reset.textContent, "Confirm reset");
   assert.equal(ff.calls.slice(before).filter(c => c.api === "storage.sync.remove").length, 0);
@@ -575,6 +575,7 @@ test("new groups save the same Custom 144 default size at 1600 and 1000 px", asy
       message => message.type === "foxy:reconcile" ? { ok: true } : message.type === "foxy:saved"
         ? { folders: { 1: "one" }, saved: [], missing: [] } : undefined);
     await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 144 } });
+    await ff.browser.storage.sync.set({ settings: { railCells: 3 } });
     const frame = await newtab(ff, width);
     try {
       const k = Math.floor((width + 16) / 160) - 3;

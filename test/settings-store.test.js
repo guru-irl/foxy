@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createFirefox } from "./fakes/firefox.js";
 import { DEFAULT_SETTINGS, DEFAULT_DEVICE, loadSettings, saveSetting, cellPx, cardAlpha } from "../extension/src/settings/store.js";
 
-const syncedDefaults = { railCells: 3, showClock: true, showPinned: true, showSaved: true,
+const syncedDefaults = { railCells: 5, showClock: true, showPinned: true, showSaved: true,
   timeFormat: "24", showDate: true, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true };
 const deviceDefaults = { cellSize: "S", customCell: 80, density: "normal" };
 
@@ -25,7 +25,7 @@ test("loadSettings falls back per key, keeps valid values and ignores unknown ke
   await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 500,
     density: "compact", extra: true } });
   assert.deepEqual(await loadSettings(ff.browser), {
-    synced: { railCells: 3, showClock: true, showPinned: false, showSaved: true,
+    synced: { railCells: 5, showClock: true, showPinned: false, showSaved: true,
       timeFormat: "12", showDate: false, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true },
     device: { cellSize: "custom", customCell: 80, density: "compact" },
   });
@@ -179,12 +179,12 @@ for (const area of ["sync", "local"]) {
   test(`failed ${area} settings read logs once and defaults only that scope`, async t => {
     const ff = createFirefox();
     await ff.browser.storage.sync.set({ settings: { showClock: false } });
-    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "S" } });
+    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 120 } });
     const get = t.mock.method(ff.browser.storage[area], "get", async () => { throw new Error("unavailable"); });
     const warn = t.mock.method(console, "warn", () => {});
     assert.deepEqual(await loadSettings(ff.browser), {
       synced: { ...syncedDefaults, showClock: area === "sync" },
-      device: { ...deviceDefaults, cellSize: "S" },
+      device: area === "local" ? deviceDefaults : { ...deviceDefaults, cellSize: "custom", customCell: 120 },
     });
     assert.equal(get.mock.calls.length, 1);
     assert.equal(warn.mock.calls.length, 1);

@@ -66,8 +66,8 @@ function realGrid() {
 }
 export const SCENARIOS = {
   "real-34": realGrid(), "real-33": realGrid(), "real-17": realGrid(),
-  "grid-m": grid(),
-  "grid-xl": grid(144),
+  "grid-custom-80": grid(),
+  "grid-custom-144": grid(144),
   "grid-narrow": grid(),
   "settings-open": grid(),
   empty: scenario([], { pinned: 0 }),

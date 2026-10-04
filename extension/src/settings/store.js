@@ -1,7 +1,7 @@
 import { CELL_PRESETS } from "../grid/layout.js";
 
 export const DEFAULT_SETTINGS = Object.freeze({
-  railCells: 3, showClock: true, showPinned: true, showSaved: true, timeFormat: "24",
+  railCells: 5, showClock: true, showPinned: true, showSaved: true, timeFormat: "24",
   showDate: true, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true,
 });
 export const DEFAULT_DEVICE = Object.freeze({ cellSize: "S", customCell: 80, density: "normal" });

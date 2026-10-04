@@ -84,7 +84,7 @@ async function controller(set = setup(), listener, layout = {}, options = {}) {
   const ff = createFirefox(set, listener), root = await makeRoot();
   // These geometry fixtures use Custom 80, independent of the S default.
   await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
-  await ff.browser.storage.sync.set(layout); await ff.settle();
+  await ff.browser.storage.sync.set({ ...layout, settings: { railCells: 3, ...layout.settings } }); await ff.settle();
   const { createController } = await import("../../extension/src/main.js");
   const control = createController(root, ff.browser, undefined, options);
   await control.refresh();
@@ -472,7 +472,7 @@ test("empty-cell drop shows the unmapped tile at its rect, opens its editor and 
     assert.deepEqual(rectOf(tile), { x: 4, y: 2, w: 3, h: 4 });
     assert.ok(tile.querySelector(".name-editor"), "new group opens its name editor");
     assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set"), [], "unmapped placement is display-only");
-    assert.deepEqual(tileEntries(await ff.browser.storage.sync.get(null)), dropLayout);
+    assert.deepEqual(tileEntries(await ff.browser.storage.sync.get(null)), { ...dropLayout, settings: { railCells: 3 } });
     setReply({ saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote", [groupId]: "new" } });
     ff.fire("bookmarks.onCreated", "new", { id: "new", type: "folder" }); await flush(ff);
     assert.ok(root.querySelector(`[data-tile-id="local:${groupId}"]`), "mapping update is held by the editor");
@@ -485,7 +485,7 @@ test("empty-cell drop shows the unmapped tile at its rect, opens its editor and 
       "tile:13:pinned": { x: 5, y: 6, w: 3, h: 4 },
       "tile:13:group:remote": { x: 3, y: 10, w: 3, h: 4 },
     });
-    assert.deepEqual(await ff.browser.storage.sync.get(null), { ...dropLayout, ...writes[0].args[0] });
+    assert.deepEqual(await ff.browser.storage.sync.get(null), { ...dropLayout, settings: { railCells: 3 }, ...writes[0].args[0] });
     await control.refresh(); await flush(ff); await flush(ff);
     assert.equal(ff.calls.filter(c => c.api === "storage.sync.set").length, 1, "mapped pending entry is consumed once");
     assert.deepEqual(ff.errors, []);
@@ -526,7 +526,7 @@ for (const order of ["dropper-first", "dropper-second"]) {
     const pages = [];
     try {
       await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
-      await ff.browser.storage.sync.set(dropLayout); await ff.settle();
+      await ff.browser.storage.sync.set({ ...dropLayout, settings: { railCells: 3 } }); await ff.settle();
       for (let i = 0; i < 2; i++) {
         const root = await makeRoot();
         const control = createController(root, ff.browser, undefined, timer.options);

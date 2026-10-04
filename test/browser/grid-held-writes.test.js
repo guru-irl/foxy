@@ -38,7 +38,7 @@ async function setup() {
       : message.type === "foxy:saved" ? gate.then(() => ({ saved: [], missing: [], folders: { 1: "a" } })) : undefined);
   // These geometry fixtures use Custom 80, independent of the S default.
   await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
-  await ff.browser.storage.sync.set({ "tile:10:clock": { x: 0, y: 0, w: 5, h: 2 } });
+  await ff.browser.storage.sync.set({ settings: { railCells: 3 }, "tile:10:clock": { x: 0, y: 0, w: 5, h: 2 } });
   const host = document.createElement("div"), node = document.createElement("div"), pane = document.createElement("aside");
   host.className = "page"; host.style.cssText = "width:1232px;height:600px";
   node.className = "board";
@@ -63,7 +63,7 @@ test("a clock move before the first valid saved reply is shown and persisted wit
     assert.deepEqual((await ff.browser.storage.sync.get("tile:10:clock"))["tile:10:clock"], { x: 0, y: 3, w: 5, h: 2 });
     assert.equal(writes(ff).length, 1, "held and new tiles share one save");
     assert.ok(writes(ff)[0]["tile:10:pinned"]); assert.ok(writes(ff)[0]["tile:10:group:a"]);
-    await ff.browser.storage.sync.set({ settings: { showDate: false } }); await flush(ff);
+    await ff.browser.storage.sync.set({ settings: { railCells: 3, showDate: false } }); await flush(ff);
     assert.deepEqual(rect(tile(node)), { x: 0, y: 3, w: 5, h: 2 });
   } finally { release(); }
 });
@@ -93,7 +93,7 @@ test("the last held move wins and remains shown over a remote change before the 
     release(); await flush(ff);
     assert.deepEqual((await ff.browser.storage.sync.get("tile:10:clock"))["tile:10:clock"], { x: 0, y: 4, w: 5, h: 2 });
     assert.equal(writes(ff).length, 1);
-    await ff.browser.storage.sync.set({ settings: { showDate: false } }); await flush(ff);
+    await ff.browser.storage.sync.set({ settings: { railCells: 3, showDate: false } }); await flush(ff);
     assert.deepEqual(rect(tile(node)), { x: 0, y: 4, w: 5, h: 2 });
   } finally { release(); }
 });
