@@ -25,6 +25,7 @@ export function settingActions(api, onReset, fetch) {
     searchPlaces: async query => (await hasConsent(api) ? searchPlaces(query, fetch) : []),
     weatherAllowed: () => hasConsent(api),
     allowWeather: () => requestConsent(api),
+    allowMyLocation: () => requestConsent(api, "auto"),
     watchWeather: listener => watchConsent(api, listener),
   };
 }
@@ -238,7 +239,11 @@ export function renderSettings(container, state, handlers) {
         const places = found.query === query ? found.places : await run(query);
         if (places?.length && input.value.trim() === query) pick(places[0]);
       });
-      auto.addEventListener("click", () => change("device", "weatherPlace", "auto"));
+      auto.addEventListener("click", () => {
+        // Ask in this click (it must run before any await); a decline leaves the tile's Allow pill.
+        pane.handlers.allowMyLocation?.().catch(() => false);
+        change("device", "weatherPlace", "auto");
+      });
       pane.controls.push(() => {
         const place = pane.state.device.weatherPlace;
         current.textContent = place && place !== "auto" ? place.name : "Current location";

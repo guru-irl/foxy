@@ -2,7 +2,7 @@ import { test, assert, fixture, nextFrame } from "./harness.js";
 import { renderBoard } from "./view.js";
 import { createBoardFirefox } from "./controller.js";
 import { DEFAULT_SETTINGS, DEFAULT_DEVICE } from "../../extension/src/settings/store.js";
-import { renderSettings } from "../../extension/src/settings/pane.js";
+import { renderSettings, settingActions } from "../../extension/src/settings/pane.js";
 import { createController } from "../../extension/src/main.js";
 import { forecastJson, fakeFetch, fakeGeolocation, GEOCODING } from "../fakes/weather.js";
 import { parseForecast, REFRESH_MS } from "../../extension/src/weather/data.js";
@@ -529,12 +529,23 @@ test("pane: Enter picks the first result; Use my location resets to auto", async
   await settle();
   assert.deepEqual(changes, [["device", "weatherPlace", { name: "Berlin", lat: 52.52, lon: 13.41 }]]);
   renderSettings(container, { synced: { ...DEFAULT_SETTINGS }, device: { ...DEFAULT_DEVICE, weatherPlace: { name: "Berlin", lat: 52.52, lon: 13.41 } }, railMax: 4 },
-    { onChange: async (...args) => { changes.push(args); }, onReset() {}, searchPlaces: async () => [] });
+    { onChange: async (...args) => { changes.push(args); }, onReset() {}, searchPlaces: async () => [],
+      allowMyLocation: () => { asked.push(changes.length); return Promise.resolve(true); } });
+  const asked = [];
   assert.equal(container.querySelector(".weather-current").textContent, "Berlin");
   const auto = container.querySelector(".weather-auto");
   assert.equal(auto.disabled, false);
-  auto.click(); await settle();
+  auto.click();
+  assert.deepEqual(asked, [1], "the permission prompt is requested synchronously in the click, before the change");
+  await settle();
   assert.deepEqual(changes.at(-1), ["device", "weatherPlace", "auto"]);
+});
+
+test("settingActions: my location asks for geolocation and locationInfo in one request", async () => {
+  const requests = [];
+  const api = { permissions: { request: perms => { requests.push(perms); return Promise.resolve(true); } } };
+  assert.equal(await settingActions(api, () => {}).allowMyLocation(), true);
+  assert.deepEqual(requests, [{ permissions: ["geolocation"], data_collection: ["locationInfo"] }]);
 });
 
 test("board with weather access but no location shows set-a-location and makes no request", async () => {
