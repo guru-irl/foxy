@@ -327,6 +327,7 @@ test("background registers every wake listener at module evaluation and routes s
     "tabs.onCreated", "tabs.onUpdated", "tabs.onRemoved", "tabs.onMoved", "tabs.onAttached", "tabs.onDetached", "tabs.onActivated",
     "tabGroups.onCreated", "tabGroups.onUpdated", "tabGroups.onRemoved", "tabGroups.onMoved",
     "bookmarks.onCreated", "bookmarks.onChanged", "bookmarks.onMoved", "bookmarks.onRemoved", "windows.onFocusChanged",
+    "windows.onFocusChanged", // Agent remembers the last focused normal window too.
   ].sort());
   assert.deepEqual(filters.filter(Boolean), [{ properties: ["url", "status"] }, { properties: ["url", "title", "pinned", "groupId", "status"] }]);
   const saved = await ff.browser.runtime.sendMessage({ type: "foxy:saved" });
