@@ -151,9 +151,9 @@ test("default S cells set geometry and full pixel-target tile sizes", () => {
   assert.deepEqual([view.cell, view.total, view.cols, view.railCells], [48, 15, 10, 5]);
   assert.deepEqual(view.newTiles, [
     { id: "clock", x: 0, y: 0, w: 8, h: 4 },
-    { id: "pinned", x: 0, y: 4, w: 5, h: 6 },
-    { id: "group:a", x: 5, y: 4, w: 5, h: 6 },
-    { id: "group:b", x: 0, y: 10, w: 5, h: 6 },
+    { id: "pinned", x: 0, y: 4, w: 6, h: 2 },
+    { id: "group:a", x: 0, y: 6, w: 5, h: 6 },
+    { id: "group:b", x: 5, y: 6, w: 5, h: 6 },
   ]);
 });
 
