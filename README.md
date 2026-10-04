@@ -10,7 +10,7 @@ A private Firefox add-on and browser theme.
 
 **Platforms:** desktop Firefox 140+ on macOS, Windows and Linux, not Android. The theme supports glass blur on macOS only.
 
-Version 3.3.0. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-10-03-foxy-grid-design.md`, `2026-10-04-foxy-3.2-design.md` and `2026-10-04-foxy-3.3-design.md`.
+Version 3.3.1. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-10-03-foxy-grid-design.md`, `2026-10-04-foxy-3.2-design.md` and `2026-10-04-foxy-3.3-design.md`.
 
 ## Board
 
@@ -65,6 +65,7 @@ Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their pl
 
 - **What:** a link that opens in the foreground (from mail, Teams or any app) for a page already open switches to that tab and closes the new one.
 - **Matches:** same address ignoring `#…`, same container and private state; tabs in any window, pinned tabs and tabs in collapsed groups (the group expands).
+- **Redirects:** the new tab is followed through Safe Links and sign-in pages for up to 2 minutes, until a page has loaded and stayed for 3 seconds; later clicks in that tab are never switched.
 - **Left alone:** background tabs, bursts such as session restore or open all in tabs, the first 15 seconds after start, popups, and tabs Foxy opens.
 - **Closed duplicates** skip Recently Closed, so Ctrl+Shift+T still reaches your own closed tabs.
 - **Trade-off:** a tab you reopen with Ctrl+Shift+T while its page is open elsewhere is switched too, and its back and forward history is lost.
