@@ -36,7 +36,8 @@ for (const legacy of ["M", "L", "XL"]) {
         { id: 20, windowId: 1, groupId: 2 }, { id: 99, windowId: 1 }] },
     message => message.type === "foxy:reconcile" ? { ok: true } : message.type === "foxy:saved"
       ? { folders: { 1: "one", 2: "two" }, saved: [{ folderId: "closed", title: "Closed" }], missing: [] } : undefined);
-    const synced = { "layout:13": { t: 1 },
+    // Weather is a new 3.3 tile kind and would be placed (and saved) on any existing board; this test is about cells.
+    const synced = { "layout:13": { t: 1 }, settings: { showWeather: false },
       ...Object.fromEntries(Object.entries(legacyLayout).map(([id, rect]) => [`tile:13:${id}`, rect])) };
     const deviceSettings = { cellSize: legacy, density: "normal" };
     await ff.browser.storage.sync.set(synced);

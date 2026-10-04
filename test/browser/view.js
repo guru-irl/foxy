@@ -4,9 +4,9 @@ import { cellPx } from "../../extension/src/settings/store.js";
 import { DEFAULT_SETTINGS as ALL_SETTINGS, DEFAULT_DEVICE } from "../../extension/src/settings/store.js";
 import { renderBoard as render } from "../../extension/src/board/render.js";
 
-// Fixed-pixel DOM fixtures use Custom 80, a three-cell rail and no memory tile.
+// Fixed-pixel DOM fixtures use Custom 80, a three-cell rail and no memory or weather tile.
 // Tests of product defaults pass device and synced settings explicitly.
-const fixtureSettings = { ...ALL_SETTINGS, railCells: 3, showMemory: false };
+const fixtureSettings = { ...ALL_SETTINGS, railCells: 3, showMemory: false, showWeather: false };
 const fixtureDevice = { ...DEFAULT_DEVICE, cellSize: "custom", customCell: 80 };
 
 export function renderBoard(root, board, ui, handlers, options = {}) {

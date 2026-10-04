@@ -205,7 +205,8 @@ test("showWeather adds a weather tile after the others; off reserves no space", 
     options({ synced: { ...DEFAULTS, showWeather: true }, device: { ...DEFAULT_DEVICE, cellSize: "S" }, contentWidth: 1232 }));
   assert.deepEqual(on.tiles.map(t => t.id), ["clock", "pinned", "saved", "weather"]);
   assert.equal(on.tiles.at(-1).kind, "weather");
-  assert.deepEqual(on.newTiles.at(-1), { id: "weather", x: 5, y: 6, w: 5, h: 5 });
+  // With the 6 x 2 pinned tile at S, the first 5 x 5 gap is below the clock.
+  assert.deepEqual(on.newTiles.at(-1), { id: "weather", x: 0, y: 4, w: 5, h: 5 });
   const off = buildView({ ...board, columns: [] }, options({ synced: { ...DEFAULTS, showWeather: false } }));
   assert.equal(off.tiles.some(t => t.id === "weather"), false);
 });

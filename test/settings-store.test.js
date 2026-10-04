@@ -133,14 +133,14 @@ for (const legacy of ["M", "L", "XL"]) {
     await ff.browser.storage.local.set({ deviceSettings: stored, unrelated: 1 });
     ff.calls.length = 0;
     const loaded = await loadSettings(ff.browser);
-    assert.deepEqual(loaded.device, { cellSize: "S", customCell: 144, density: "normal" });
+    assert.deepEqual(loaded.device, { cellSize: "S", customCell: 144, density: "normal", weatherPlace: "auto" });
     assert.equal(cellPx(loaded.device), 48);
     assert.deepEqual(ff.calls.filter(c => c.api.endsWith(".set")), []);
     await saveSetting(ff.browser, "synced", "showDate", false);
     assert.deepEqual(await ff.browser.storage.local.get(null), { deviceSettings: stored, unrelated: 1 });
     ff.calls.length = 0;
     const changed = await saveSetting(ff.browser, "device", "density", "compact");
-    assert.deepEqual(changed.device, { cellSize: "S", customCell: 144, density: "compact" });
+    assert.deepEqual(changed.device, { cellSize: "S", customCell: 144, density: "compact", weatherPlace: "auto" });
     assert.deepEqual(ff.calls.filter(c => c.api.endsWith(".set")), [
       { api: "storage.local.set", args: [{ deviceSettings: { ...stored, cellSize: "S", density: "compact" } }] },
     ]);
