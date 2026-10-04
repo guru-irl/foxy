@@ -38,7 +38,7 @@ test("SAVED is absent with empty lists and a grid tile with entries", async () =
   assert.deepEqual([...root.querySelectorAll(".tile")].map(el => el.dataset.kind), ["clock", "pinned", "group", "saved"]);
   assert.equal(root.querySelector('.tile[data-kind="saved"] h2').textContent, "SAVED");
   assert.equal(root.querySelector(".rail").dataset.zone, "tabs");
-  assert.ok(root.lastElementChild.classList.contains("settings-cell"));
+  assert.ok(root.querySelector(".rail > .settings-gear"));
 });
 
 // Normalizing titles/API colour in the model, parsing labels or dropping metadata fails here.

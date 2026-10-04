@@ -22,7 +22,7 @@ function rectStyle(node) {
 }
 function near(actual, expected, label) { assert.ok(Math.abs(actual - expected) <= 0.5, `${label}: ${actual} vs ${expected}`); }
 
-test("grid renders groups and widgets at absolute cells, gear is a separate card", async () => {
+test("grid renders groups and widgets at absolute cells, gear sits inside the full-height rail", async () => {
   const node = await root();
   const layout = [{ id: "clock", x: 0, y: 0, w: 5, h: 2 }, { id: "pinned", x: 5, y: 0, w: 3, h: 4 },
     { id: "group:open", x: 0, y: 2, w: 3, h: 4 }, { id: "saved", x: 3, y: 4, w: 3, h: 4 }];
@@ -34,15 +34,17 @@ test("grid renders groups and widgets at absolute cells, gear is a separate card
   assert.equal(grid.style.getPropertyValue("--gap"), "16px");
   assert.equal(grid.style.getPropertyValue("--pitch"), "96px");
   assert.equal(rail.style.getPropertyValue("--rail-cells"), "3");
-  assert.equal(rail.querySelector("h2").textContent, "TABS");
-  const gear = node.querySelector(".settings-cell"), heading = rail.querySelector("h2");
+  assert.equal(rail.querySelector("h2").textContent, "UNGROUPED TABS");
+  const gear = node.querySelector(".settings-gear"), heading = rail.querySelector("h2");
   assert.equal(gear.getAttribute("aria-label"), "Settings");
-  assert.equal(heading.contains(gear), false, "the heading's accessible name must be exactly TABS");
-  assert.equal(gear.parentElement, node, "gear is outside the rail");
+  assert.equal(heading.contains(gear), false, "the heading's accessible name must be exactly UNGROUPED TABS");
+  assert.equal(gear.parentElement, rail, "gear is inside the rail");
   const gearBox = gear.getBoundingClientRect(), railBox = rail.getBoundingClientRect(), boardBox = node.getBoundingClientRect();
-  near(gearBox.width, 80, "gear width"); near(gearBox.height, 80, "gear height");
-  near(gearBox.right, boardBox.right, "gear right"); near(gearBox.bottom, boardBox.bottom, "gear bottom");
-  near(railBox.top, boardBox.top, "rail top"); near(railBox.bottom + 16, gearBox.top, "rail/gear gap");
+  near(gearBox.width, 32, "gear width"); near(gearBox.height, 32, "gear height");
+  near(gearBox.right + 8, boardBox.right, "gear right inset"); near(gearBox.bottom + 8, boardBox.bottom, "gear bottom inset");
+  near(railBox.top, boardBox.top, "rail top"); near(railBox.bottom, boardBox.bottom, "rail bottom");
+  near(rail.querySelector(".rows").getBoundingClientRect().bottom + 16, gearBox.top, "list/gear gap");
+  assert.equal(getComputedStyle(gear).borderRadius, "50%");
   assert.equal(rail.getBoundingClientRect().width, 272);
   for (const tile of layout) {
     const el = [...grid.querySelectorAll(".tile")].find(el => el.dataset.tileId === tile.id);

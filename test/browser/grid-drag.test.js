@@ -694,7 +694,7 @@ for (const kind of ["move", "resize"]) {
 // Without grid isolation, the dragged tile's z-index escapes above the pane.
 test("a dragged tile stays below the open settings pane where they overlap", async () => {
   const { ff, root, pane } = await setup({ withPane: true });
-  root.querySelector(".settings-cell").click();
+  root.querySelector(".settings-gear").click();
   assert.equal(pane.hidden, false);
   await new Promise(resolve => setTimeout(resolve, 220));
   const grid = root.querySelector(".grid"), start = down(header(root));

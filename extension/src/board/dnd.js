@@ -25,8 +25,8 @@ export function attachDnd(root, handlers, board) {
   function scrollStep() {
     frame = 0;
     if (!pointer || !root.isConnected) { stopScroll(); return; }
-    const { element, x, y } = pointer, old = element.scrollTop;
-    if (!element.isConnected || !scrollAtEdge(element, y)) { stopScroll(); return; }
+    const { element, x, y, scrollY } = pointer, old = element.scrollTop;
+    if (!element.isConnected || !scrollAtEdge(element, scrollY)) { stopScroll(); return; }
     if (element.scrollTop !== old) feedback(targetAt(document.elementFromPoint(x, y), x, y), x, y);
     frame = requestAnimationFrame(scrollStep);
   }
@@ -35,11 +35,13 @@ export function attachDnd(root, handlers, board) {
     const element = target instanceof Element && root.contains(target)
       ? target.closest(".rail")?.querySelector(".rows") ?? target.closest(".grid") : null;
     const bounds = element?.getBoundingClientRect();
+    const rail = element?.closest(".rail"), area = rail?.getBoundingClientRect() ?? bounds;
     const { clientX: x, clientY: y } = event;
-    if (!accepts(event.dataTransfer) || !bounds || x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom) {
+    if (!accepts(event.dataTransfer) || !bounds || x < area.left || x > area.right || y < bounds.top || y > area.bottom) {
       stopScroll(); return;
     }
-    pointer = { element, x, y };
+    // Keep the actual pointer for hit testing, but scroll the footer like the list's bottom edge.
+    pointer = { element, x, y, scrollY: rail ? Math.min(y, bounds.bottom - 1) : y };
     if (!frame) frame = requestAnimationFrame(scrollStep);
   }
   function accepts(transfer) {
@@ -81,8 +83,13 @@ export function attachDnd(root, handlers, board) {
   }
   function placement(target, y) {
     const zone = dropZone(target);
-    // Headings and card padding mean the start, even when the list is scrolled.
-    if (zone !== target) return { slot: 0, offset: zone.scrollTop };
+    if (zone !== target) {
+      // The rail footer beside the gear means the visible end of the list.
+      const bottom = zone.getBoundingClientRect().bottom;
+      if (target.closest(".rail") && y >= bottom) return placement(zone, bottom - 1);
+      // Headings and card padding mean the start, even when the list is scrolled.
+      return { slot: 0, offset: zone.scrollTop };
+    }
     const items = [...target.querySelectorAll(":scope > .row")];
     const rects = items.map(item => item.getBoundingClientRect());
     const slot = slotFromPointer(rects.map(r => (r.top + r.bottom) / 2), y);
@@ -165,7 +172,7 @@ export function attachDnd(root, handlers, board) {
     state.handlers.onTabDrop?.(id, drop);
   });
   root.addEventListener("dragleave", event => {
-    if (pointer && !pointer.element.contains(event.relatedTarget)) stopScroll();
+    if (pointer && !(pointer.element.closest(".rail") ?? pointer.element).contains(event.relatedTarget)) stopScroll();
     const target = accepts(event.dataTransfer) ? targetAt(event.target, event.clientX, event.clientY) : null;
     if (!target?.contains(event.relatedTarget)) clearFeedback();
   });

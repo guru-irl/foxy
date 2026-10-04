@@ -119,13 +119,14 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   corners.setAttribute("class", "grid-corners");
   corners.setAttribute("aria-hidden", "true");
   grid.append(corners);
-  const rail = fixedColumn(root, "tabs", "TABS", board.tabs, handlers);
+  const rail = fixedColumn(root, "tabs", "UNGROUPED TABS", board.tabs, handlers);
   rail.classList.add("rail");
   rail.style.setProperty("--rail-cells", view.railCells);
   rail.append(el("div", "rail-resize"));
-  const gear = button("settings-cell", "Settings");
+  const gear = button("settings-gear", "Settings");
   gear.setAttribute("aria-expanded", "false");
-  root.replaceChildren(grid, rail, gear);
+  rail.append(gear);
+  root.replaceChildren(grid, rail);
   updateClock(root, settings);
   const previousBanner = banners.get(root);
   const missingCount = board.missing?.length ?? 0;
