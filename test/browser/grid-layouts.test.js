@@ -52,13 +52,14 @@ async function move(root, ff, id, dx, dy) {
 async function resize(root, ff, c) {
   root.style.width = `${(c + 5) * 64 - 16}px`; window.dispatchEvent(new Event("resize")); await flush(ff);
 }
-for (const [c, xy] of [[34, [[0,0],[0,4],[6,0],[13,0],[20,0],[27,0],[20,9],[27,9]]],
-  [33, [[0,0],[0,4],[6,0],[13,0],[20,0],[0,9],[20,9],[0,18]]],
-  [17, [[0,0],[0,4],[6,0],[0,9],[7,9],[0,18],[7,18],[0,27]]]]) {
+for (const [c, rectangles] of [[34, [[0,0,6,4],[0,4,6,3],[6,0,7,9],[13,0,7,9],[20,0,7,9],[27,0,7,9],[20,9,7,8],[27,9,7,8]]],
+  [33, [[0,0,6,4],[0,4,6,3],[6,0,7,9],[13,0,6,9],[19,0,7,9],[26,0,7,9],[19,9,7,8],[26,9,7,8]]],
+  [28, [[0,0,5,4],[0,4,5,3],[5,0,6,9],[11,0,5,9],[16,0,6,9],[22,0,6,9],[16,9,6,8],[22,9,6,8]]],
+  [17, [[0,0,6,4],[0,4,6,3],[6,0,7,9],[0,9,7,9],[7,9,7,9],[0,18,7,9],[7,18,7,8],[0,27,7,8]]]]) {
   test(`real saved 34-column layout renders at ${c} without writes`, async () => {
     const { root, ff, control } = await setup(c);
     assert.equal(control.view.cols, c); assert.equal(control.view.k, 34);
-    assert.deepEqual(Object.values(shown(root)).map(r => [r.x, r.y]), xy);
+    assert.deepEqual(Object.values(shown(root)).map(r => [r.x, r.y, r.w, r.h]), rectangles);
     assert.deepEqual(writes(ff), []);
   });
 }

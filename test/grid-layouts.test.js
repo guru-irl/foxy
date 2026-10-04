@@ -15,12 +15,53 @@ test("derive keeps the real columns together at 17 and packs in left-edge order"
   assert.deepEqual(xy(layouts.derive(realLayout, 34, 17)),
     [[0, 0], [0, 4], [6, 0], [0, 9], [7, 9], [0, 18], [7, 18], [0, 27]]);
 });
-test("derive packs the real layout at 33, but keeps a fitting arrangement without packing", () => {
-  assert.equal(typeof layouts.derive, "function");
-  assert.deepEqual(xy(layouts.derive(realLayout, 34, 33)),
-    [[0, 0], [0, 4], [6, 0], [13, 0], [20, 0], [0, 9], [20, 9], [0, 18]]);
+test("derive squeezes the real layout at 33 without moving rows or separating stacks", () => {
+  assert.deepEqual(layouts.derive(realLayout, 34, 33), [
+    { id: "clock", x: 0, y: 0, w: 6, h: 4 }, { id: "pinned", x: 0, y: 4, w: 6, h: 3 },
+    { id: "group:tbr", x: 6, y: 0, w: 7, h: 9 }, { id: "group:dev", x: 13, y: 0, w: 6, h: 9 },
+    { id: "group:cov", x: 19, y: 0, w: 7, h: 9 }, { id: "group:oce", x: 26, y: 0, w: 7, h: 9 },
+    { id: "group:harness", x: 19, y: 9, w: 7, h: 8 }, { id: "group:telemetry", x: 26, y: 9, w: 7, h: 8 },
+  ]);
+});
+test("derive squeezes the real layout at 28 with every width at least five", () => {
+  const result = layouts.derive(realLayout, 34, 28);
+  assert.deepEqual(result, [
+    { id: "clock", x: 0, y: 0, w: 5, h: 4 }, { id: "pinned", x: 0, y: 4, w: 5, h: 3 },
+    { id: "group:tbr", x: 5, y: 0, w: 6, h: 9 }, { id: "group:dev", x: 11, y: 0, w: 5, h: 9 },
+    { id: "group:cov", x: 16, y: 0, w: 6, h: 9 }, { id: "group:oce", x: 22, y: 0, w: 6, h: 9 },
+    { id: "group:harness", x: 16, y: 9, w: 6, h: 8 }, { id: "group:telemetry", x: 22, y: 9, w: 6, h: 8 },
+  ]);
+  assert.ok(result.every(t => t.w >= 5));
+});
+test("derive keeps a fitting arrangement before trying squeeze", () => {
   const gaps = [{ id: "a", x: 0, y: 3, w: 3, h: 2 }, { id: "b", x: 7, y: 3, w: 3, h: 2 }];
-  assert.deepEqual(xy(layouts.derive(gaps, 10, 9)), [[0, 3], [6, 3]]);
+  assert.deepEqual(layouts.derive(gaps, 10, 9), [gaps[0], { ...gaps[1], x: 6 }]);
+});
+test("derive squeezes using the normalized right edge, not the saved column count", () => {
+  const tiles = [{ id: "group:a", x: 0, y: 3, w: 5, h: 2 }, { id: "group:b", x: 5, y: 3, w: 5, h: 2 }];
+  assert.deepEqual(layouts.derive(tiles, 20, 8), [
+    { id: "group:a", x: 0, y: 3, w: 4, h: 2 }, { id: "group:b", x: 4, y: 3, w: 4, h: 2 },
+  ]);
+});
+test("derive rejects squeeze below the clock minimum even when the 75 percent limit passes", () => {
+  const tiles = [{ id: "clock", x: 0, y: 0, w: 3, h: 2 }, { id: "group:a", x: 3, y: 0, w: 5, h: 2 }];
+  assert.deepEqual(layouts.derive(tiles, 8, 6), [tiles[0], { ...tiles[1], x: 0, y: 2 }]);
+  assert.deepEqual(layouts.derive(tiles, 8, 7), [tiles[0], { ...tiles[1], w: 4 }]);
+});
+test("derive rejects all of squeeze if any tile misses its rounded 75 percent width", () => {
+  const tiles = [{ id: "group:a", x: 0, y: 0, w: 8, h: 2 }, { id: "group:b", x: 8, y: 0, w: 8, h: 2 }];
+  for (const c of [10, 11]) {
+    assert.deepEqual(layouts.derive(tiles, 16, c), [tiles[0], { ...tiles[1], x: 0, y: 2 }]);
+  }
+  assert.deepEqual(layouts.derive(tiles, 16, 12), [
+    { id: "group:a", x: 0, y: 0, w: 6, h: 2 }, { id: "group:b", x: 6, y: 0, w: 6, h: 2 },
+  ]);
+});
+test("derive accepts widths equal to rounded 75 percent even when the exact ratio is smaller", () => {
+  const tiles = [{ id: "group:a", x: 0, y: 0, w: 7, h: 2 }, { id: "group:b", x: 7, y: 0, w: 7, h: 2 }];
+  assert.deepEqual(layouts.derive(tiles, 14, 10), [
+    { id: "group:a", x: 0, y: 0, w: 5, h: 2 }, { id: "group:b", x: 5, y: 0, w: 5, h: 2 },
+  ]);
 });
 test("derive repairs overlaps and fits a transitive stack wider than the window", () => {
   assert.equal(typeof layouts.derive, "function");
@@ -35,16 +76,33 @@ test("derive seeded property: all inputs once, bounded, clear, deterministic, im
   assert.equal(typeof layouts.derive, "function");
   let seed = 32004;
   const random = n => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed % n; };
-  for (let trial = 0; trial < 500; trial++) {
-    const c = 1 + random(30), k = c + 1 + random(40);
-    const input = Array.from({ length: 1 + random(30) }, (_, i) =>
-      ({ id: `group:${i}`, x: random(k), y: random(25), w: 1 + random(k), h: 1 + random(10) }));
+  for (let trial = 0; trial < 600; trial++) {
+    let c, k, input;
+    if (trial < 500) {
+      c = 1 + random(30); k = c + 1 + random(40);
+      input = Array.from({ length: 1 + random(30) }, (_, i) =>
+        ({ id: `group:${i}`, x: random(k), y: random(25), w: 1 + random(k), h: 1 + random(10) }));
+    } else {
+      // Adjacent full rows force squeeze; these widths survive losing one column.
+      const widths = Array.from({ length: 2 + random(5) }, () => 6 + random(5));
+      k = widths.reduce((sum, w) => sum + w, 0); c = k - 1;
+      let x = 0;
+      input = widths.flatMap((w, i) => {
+        const pair = [{ id: `group:${i}:top`, x, y: 0, w, h: 3 },
+          { id: `group:${i}:bottom`, x, y: 3, w, h: 2 }];
+        x += w; return pair;
+      });
+    }
     const original = structuredClone(input), result = layouts.derive(input, k, c);
     assert.deepEqual(input, original);
     assert.deepEqual(result, layouts.derive(input, k, c));
     assert.deepEqual(result.map(t => t.id).sort(), input.map(t => t.id).sort());
     assert.ok(result.every(t => t.x >= 0 && t.y >= 0 && t.x + t.w <= c), `bounds trial ${trial}`);
     assert.ok(result.every((t, i) => result.slice(i + 1).every(u => !overlaps(t, u))), `overlap trial ${trial}`);
+    if (trial >= 500) {
+      assert.deepEqual(result.map(t => [t.y, t.h]), input.map(t => [t.y, t.h]), `squeeze rows trial ${trial}`);
+      assert.ok(result.every((t, i) => t.w >= Math.round(0.75 * input[i].w)), `squeeze width trial ${trial}`);
+    }
   }
 });
 test("sourceLayout prefers exact, then largest narrower, then smallest wider", () => {

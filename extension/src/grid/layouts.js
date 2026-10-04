@@ -1,4 +1,4 @@
-import { fit, arrangement, firstFree, changedTiles, gestureWrites } from "./layout.js";
+import { fit, arrangement, firstFree, changedTiles, gestureWrites, kindOf, minSize } from "./layout.js";
 
 export function validTileId(id) {
   return ["clock", "pinned", "saved"].includes(id) || (id.startsWith("group:") && id.length > 6);
@@ -15,10 +15,16 @@ const bounds = tiles => {
     h: Math.max(...tiles.map(t => t.y + t.h)) - y };
 };
 
-/** Derive a display only. Keep fitting arrangements; otherwise pack whole stacks. */
+/** Derive a display only. Keep, then squeeze, otherwise pack whole stacks. */
 export function derive(tiles, k, c) {
   const normal = fit(tiles, k), kept = arrangement(normal, c);
   if (!kept.aside.length) return kept.tiles;
+  const edge = Math.max(...normal.map(t => t.x + t.w));
+  const boundary = b => Math.round(b * c / edge);
+  const squeezed = normal.map(t => ({ ...t, x: boundary(t.x), w: boundary(t.x + t.w) - boundary(t.x) }));
+  if (squeezed.every((t, i) => t.w >= minSize(kindOf(t.id)).w && t.w >= Math.round(0.75 * normal[i].w))) {
+    return squeezed;
+  }
   const stacks = [];
   for (const tile of [...normal].sort((a, b) => a.x - b.x || a.y - b.y || a.id.localeCompare(b.id))) {
     const stack = stacks.at(-1);
