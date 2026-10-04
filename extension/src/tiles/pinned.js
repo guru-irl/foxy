@@ -2,6 +2,22 @@ import { pinOrigin } from '../sync/names.js';
 import { normalizePinName } from '../sync/codec.js';
 import { openNameEditor } from '../board/edit.js';
 
+const hoveredPins = new WeakMap();
+const tooltipShows = new WeakMap();
+
+export function showPinnedTooltip(tip) { tooltipShows.get(tip)?.(); }
+
+// Runs after the controller has restored scroll offsets. A replacement icon
+// must still own the pointer position and the same tab identity.
+export function restorePinnedHover(root) {
+  const pointer = hoveredPins.get(root);
+  if (!pointer || !root.isConnected) return;
+  const row = document.elementFromPoint(pointer.x, pointer.y)?.closest('.pin-icon');
+  if (row && root.contains(row) && row.dataset.tabId === pointer.id) {
+    showPinnedTooltip(root.querySelector(`[data-pin-tooltip="${pointer.id}"]`));
+  }
+}
+
 const el = (tag, className) => Object.assign(document.createElement(tag), { className });
 function button(className, label, text = '') {
   const node = el('button', className);
@@ -24,8 +40,20 @@ export function pinnedTile(root, sections, handlers, editors) {
   tile.setAttribute('aria-label', 'Pinned tabs');
   const list = el('div', 'rows pinned-grid'); list.tabIndex = -1; list.dataset.zone = 'pinned';
   const overlays = el('div', 'pin-overlays');
-  function hideAll() { for (const tip of overlays.querySelectorAll('.pin-tooltip')) tip.hidden = true; }
-  list.addEventListener('scroll', hideAll, { passive: true });
+  const hideTimers = new Map();
+  function cancelHide(tip) { clearTimeout(hideTimers.get(tip)); hideTimers.delete(tip); }
+  function hide(tip) { cancelHide(tip); tip.hidden = true; }
+  function hideAll() { for (const tip of overlays.querySelectorAll('.pin-tooltip')) hide(tip); }
+  function hideLater(tip) {
+    cancelHide(tip);
+    hideTimers.set(tip, setTimeout(() => hide(tip), 150));
+  }
+  function onScroll() {
+    const focused = document.activeElement.closest?.('.pin-tooltip');
+    if (focused && overlays.contains(focused)) showPinnedTooltip(focused);
+    else hideAll();
+  }
+  list.addEventListener('scroll', onScroll, { passive: true });
   tile.addEventListener('pointerdown', event => { if (!event.target.closest('.row-open')) hideAll(); });
   tile.addEventListener('dragstart', hideAll);
 
@@ -48,16 +76,21 @@ export function pinnedTile(root, sections, handlers, editors) {
     const label = el('span', 'pin-tooltip-name'); label.textContent = tab.title;
     tip.append(label);
     if (!section.current) {
-      const remote = el('span', 'pin-tooltip-window'); remote.textContent = `OTHER WINDOW · Window ${tab.windowId}`;
+      const remote = el('span', 'pin-tooltip-window'); remote.textContent = 'OTHER WINDOW';
       tip.append(remote);
     }
-    if (tab.name && tab.origin && tab.allowed === false) {
+    const needsAccess = tab.name && tab.origin && tab.allowed === false;
+    if (needsAccess) {
+      const cue = el('span', 'pin-needs-access'); cue.setAttribute('aria-hidden', 'true'); open.append(cue);
+      open.setAttribute('aria-label', `${tab.title}, needs site access`);
       const allow = button('pin-allow', `Allow pin name on this site: ${tab.name}`, 'ALLOW');
       allow.addEventListener('click', event => { event.stopPropagation(); handlers.onAllowPin?.(tab.origin); });
       tip.append(allow);
       function tabTo(event, target) {
         if (event.key !== 'Tab' || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
-        event.preventDefault(); target.focus();
+        if (tip.hidden) show();
+        target.focus();
+        if (document.activeElement === target) event.preventDefault();
       }
       open.addEventListener('keydown', event => { if (!event.shiftKey) tabTo(event, allow); });
       allow.addEventListener('keydown', event => tabTo(event, event.shiftKey ? open : close));
@@ -74,15 +107,23 @@ export function pinnedTile(root, sections, handlers, editors) {
     }
     function show() {
       if (root.hasAttribute('data-dragging') || root.hasAttribute('data-grid-dragging') || root.querySelector('.name-editor')) return;
-      hideAll(); tip.hidden = false; locate(tip);
+      for (const other of overlays.querySelectorAll('.pin-tooltip')) if (other !== tip) hide(other);
+      cancelHide(tip); tip.hidden = false; locate(tip);
     }
     const owns = node => node instanceof Node && (row.contains(node) || tip.contains(node));
-    row.addEventListener('mouseenter', show);
+    const rememberPointer = event => hoveredPins.set(root, { id: String(tab.id), x: event.clientX, y: event.clientY });
+    tooltipShows.set(tip, show);
+    row.addEventListener('mouseenter', event => { rememberPointer(event); show(); });
+    row.addEventListener('mousemove', rememberPointer);
     row.addEventListener('focusin', show);
-    row.addEventListener('mouseleave', event => { if (!owns(event.relatedTarget)) tip.hidden = true; });
-    row.addEventListener('focusout', event => { if (!owns(event.relatedTarget)) tip.hidden = true; });
-    tip.addEventListener('mouseleave', event => { if (!owns(event.relatedTarget)) tip.hidden = true; });
-    tip.addEventListener('focusout', event => { if (!owns(event.relatedTarget)) tip.hidden = true; });
+    row.addEventListener('mouseleave', event => {
+      if (hoveredPins.get(root)?.id === String(tab.id)) hoveredPins.delete(root);
+      if (!owns(event.relatedTarget)) hideLater(tip);
+    });
+    row.addEventListener('focusout', event => { if (!owns(event.relatedTarget)) hide(tip); });
+    tip.addEventListener('mouseenter', () => cancelHide(tip));
+    tip.addEventListener('mouseleave', event => { if (!owns(event.relatedTarget)) hideLater(tip); });
+    tip.addEventListener('focusout', event => { if (!owns(event.relatedTarget)) hide(tip); });
     function rename() {
       if (root.querySelector('.pin-name-editor')) return;
       editors.get(root)?.finish(); hideAll();
@@ -103,7 +144,7 @@ export function pinnedTile(root, sections, handlers, editors) {
             name = normalizePinName(name);
             if (name === initialName) return;
             label.textContent = name || tab.title;
-            open.setAttribute('aria-label', label.textContent);
+            open.setAttribute('aria-label', label.textContent + (needsAccess ? ', needs site access' : ''));
             handlers.onRenamePin?.(tab.id, name || null, tab.origin ?? pinOrigin(tab.url));
           } finally { end(); }
         }, onCancel: end,
@@ -128,10 +169,12 @@ export function pinnedTile(root, sections, handlers, editors) {
     const offset = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -cols, ArrowDown: cols }[event.key];
     if (offset === undefined) return;
     event.preventDefault(); event.stopPropagation();
+    if (event.key === 'ArrowUp' && index < cols) return;
+    if (event.key === 'ArrowDown' && Math.floor(index / cols) === Math.floor((buttons.length - 1) / cols)) return;
     buttons[Math.max(0, Math.min(buttons.length - 1, index + offset))]?.focus();
   });
   tile.append(list);
-  return { tile, overlays };
+  return { tile, overlays, onScroll };
 }
 
 // Pin drop slots are row-major, but unlike tab rows their insertion axis is

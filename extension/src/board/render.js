@@ -1,4 +1,4 @@
-import { pinnedTile } from "../tiles/pinned.js";
+import { pinnedTile, restorePinnedHover } from "../tiles/pinned.js";
 import { colorKey, formatDate, formatTime } from "../model.js";
 import { attachDnd } from "./dnd.js";
 import { openNameEditor, openColorPicker } from "./edit.js";
@@ -97,10 +97,10 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   grid.style.setProperty("--cell-target", `${view.targetCell}px`);
   grid.style.setProperty("--gap", "16px");
   grid.style.setProperty("--pitch", `${view.cell + 16}px`);
-  let pinOverlays;
+  let pinOverlays, scrollPins;
   for (const tile of view.tiles) {
     const pinned = tile.kind === "pinned" ? pinnedTile(root, board.pinned, handlers, editors) : null;
-    if (pinned) pinOverlays = pinned.overlays;
+    if (pinned) { pinOverlays = pinned.overlays; scrollPins = pinned.onScroll; }
     const node = tile.kind === "group" ? groupColumn(root, tile.group, handlers)
       : tile.kind === "pinned" ? pinned.tile
       : tile.kind === "saved" ? savedColumn(root, board.saved, ui, handlers) : clockTile();
@@ -128,9 +128,7 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   const gear = button("settings-cell", "Settings");
   gear.setAttribute("aria-expanded", "false");
   root.replaceChildren(grid, rail, ...(pinOverlays ? [pinOverlays] : []), gear);
-  if (pinOverlays) grid.addEventListener("scroll", () => {
-    for (const tip of pinOverlays.querySelectorAll(".pin-tooltip")) tip.hidden = true;
-  }, { passive: true });
+  if (pinOverlays) grid.addEventListener('scroll', scrollPins, { passive: true });
   updateClock(root, settings);
   const previousBanner = banners.get(root);
   const missingCount = board.missing?.length ?? 0;
@@ -165,6 +163,7 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
     (target ?? grid).focus({ preventScroll: true });
   }
   watchLayout(root);
+  if (pinOverlays) requestAnimationFrame(() => restorePinnedHover(root));
 }
 
 // SAVED and the sibling banner are not tab/group focus identities. Preserve

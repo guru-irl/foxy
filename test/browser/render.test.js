@@ -67,7 +67,7 @@ test("remote window sections have a subheading and space-only boundaries", async
   const pins = node.querySelector('.rows[data-zone="pinned"]');
   assert.deepEqual([...pins.children].map(el => el.dataset.tabId), ["11", "31", "21"]);
   assert.equal(pins.querySelector(".subheading, .window-gap"), null);
-  assert.equal(node.querySelector('[data-pin-tooltip="21"] .pin-tooltip-window').textContent, "OTHER WINDOW · Window 2");
+  assert.equal(node.querySelector('[data-pin-tooltip="21"] .pin-tooltip-window').textContent, "OTHER WINDOW");
   assert.equal(node.querySelectorAll(".other-window").length, 1);
   assert.equal(node.querySelectorAll(".bring-here").length, 1);
   assert.equal(node.querySelector(".other-window").closest(".column").dataset.groupId, "201");

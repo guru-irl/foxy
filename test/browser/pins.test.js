@@ -61,7 +61,7 @@ test("pin icons use names in tooltips, expose ALLOW only without access, and rev
     groups: await ff.browser.tabGroups.query({}), currentWindowId: 1, selfTabId: 99, pins: info() });
   renderBoard(node, board, {}, {});
   assert.equal(tip(node, 21).querySelector(".pin-tooltip-name").textContent, "Home");
-  assert.equal(row(node, 21).querySelector(".row-open").getAttribute("aria-label"), "Home");
+  assert.equal(row(node, 21).querySelector(".row-open").getAttribute("aria-label"), "Home, needs site access");
   assert.equal(tip(node, 11).querySelector(".pin-allow"), null);
   const allow = tip(node, 21).querySelector(".pin-allow");
   assert.ok(allow); assert.equal(allow.textContent, "ALLOW");
@@ -311,4 +311,36 @@ test("a named pin's ALLOW action remains keyboard reachable beside its icon and 
   tab(allow, true); assert.equal(document.activeElement, open);
   tab(open); tab(allow); assert.equal(document.activeElement, close);
   tab(close, true); assert.equal(document.activeElement, allow);
+});
+
+for (const state of ['still pending', 'access granted', 'pin removed']) test(`ALLOW focus survives board refresh when ${state}`, async () => {
+  const { ff, node, control } = await controller();
+  const open = row(node, 21).querySelector('.row-open'); open.focus(); open.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+  const allow = tip(node, 21).querySelector('.pin-allow'); allow.focus(); assert.equal(document.activeElement, allow);
+  if (state === 'access granted') ff.withUserInput(() => ff.browser.permissions.request({ origins: ['https://remote.com/*'] }));
+  else if (state === 'pin removed') await ff.browser.tabs.remove(21);
+  else await ff.browser.tabs.update(11, { url: 'https://example.com/changed' });
+  await control.refresh(); await flush(ff);
+  if (state === 'still pending') {
+    const next = tip(node, 21).querySelector('.pin-allow'); assert.ok(next !== allow && next.isConnected, 'force a real rebuild');
+    assert.equal(tip(node, 21).hidden, false, 'restored ALLOW must be visible'); assert.equal(document.activeElement, next);
+  } else if (state === 'access granted') {
+    assert.equal(tip(node, 21).querySelector('.pin-allow'), null); assert.equal(document.activeElement, row(node, 21).querySelector('.row-open'));
+  } else assert.equal(document.activeElement, row(node, 11).querySelector('.row-open'), 'removed pin falls back to its neighbour');
+});
+
+test('ALLOW focus stays visible after a rebuild restores both board and pin scroll offsets', async () => {
+  const { ff, node, control } = await controller(); node.style.height = '180px';
+  const k = control.view.cols;
+  await ff.browser.storage.sync.set({ [`layout:${k}`]: { t: 1 }, [`tile:${k}:pinned`]: { x: 0, y: 8, w: 1, h: 1 } });
+  await control.refresh(); await flush(ff);
+  const grid = node.querySelector('.grid'), list = row(node, 21).closest('.rows');
+  grid.scrollTop = grid.scrollHeight; list.scrollTop = list.scrollHeight; await nextFrame(); await nextFrame();
+  const top = grid.scrollTop, pinsTop = list.scrollTop; assert.ok(top > 0 && pinsTop > 0, 'exercise both scroll restorations');
+  const open = row(node, 21).querySelector('.row-open'); open.focus({ preventScroll: true }); open.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+  tip(node, 21).querySelector('.pin-allow').focus({ preventScroll: true });
+  await ff.browser.tabs.update(11, { url: 'https://example.com/changed-again' }); await control.refresh(); await flush(ff);
+  assert.equal(node.querySelector('.grid').scrollTop, top); assert.equal(row(node, 21).closest('.rows').scrollTop, pinsTop);
+  assert.equal(document.activeElement, tip(node, 21).querySelector('.pin-allow'));
+  assert.equal(tip(node, 21).hidden, false, 'restored scroll events must not hide the focused permission action');
 });

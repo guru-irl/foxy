@@ -26,9 +26,10 @@ export function attachDnd(root, handlers, board) {
   function scrollStep() {
     frame = 0;
     if (!pointer || !root.isConnected) { stopScroll(); return; }
-    const { element, x, y } = pointer, old = element.scrollTop;
-    if (!element.isConnected || !scrollAtEdge(element, y)) { stopScroll(); return; }
-    if (element.scrollTop !== old) feedback(targetAt(document.elementFromPoint(x, y), x, y), x, y);
+    const { element, fallback, band, x, y } = pointer;
+    if (!element.isConnected || !(scrollAtEdge(element, y, band) ||
+        (fallback?.isConnected && scrollAtEdge(fallback, y)))) { stopScroll(); return; }
+    feedback(targetAt(document.elementFromPoint(x, y), x, y), x, y);
     frame = requestAnimationFrame(scrollStep);
   }
   function edgeScroll(event) {
@@ -40,7 +41,9 @@ export function attachDnd(root, handlers, board) {
     if (!accepts(event.dataTransfer) || !bounds || x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom) {
       stopScroll(); return;
     }
-    pointer = { element, x, y };
+    const pinned = element.matches('.pinned-grid');
+    pointer = { element, x, y, band: pinned ? Math.min(12, bounds.height / 4) : 48,
+      fallback: pinned ? target.closest('.grid') : null };
     if (!frame) frame = requestAnimationFrame(scrollStep);
   }
   function accepts(transfer) {

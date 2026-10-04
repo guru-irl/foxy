@@ -1,4 +1,5 @@
 import { msUntilNextMinute } from "./model.js";
+import { showPinnedTooltip } from "./tiles/pinned.js";
 import { buildBoard } from "./board/model.js";
 import { renderBoard, updateScrollEdges, updateClock, positionTiles } from "./board/render.js";
 import { resolveTabTarget } from "./board/targets.js";
@@ -783,7 +784,9 @@ function captureView(root) {
   const active = document.activeElement;
   let focus;
   if (root.contains(active)) {
-    const row = active.closest("[data-tab-id]");
+    const tip = active.closest('[data-pin-tooltip]');
+    const row = active.closest("[data-tab-id]") ?? (tip && [...root.querySelectorAll('.pin-icon')]
+      .find(row => row.dataset.tabId === tip.dataset.pinTooltip));
     const group = active.closest(".column[data-group-id]");
     if (row) {
       const list = row.closest(".rows");
@@ -811,7 +814,11 @@ function restoreView(root, { focus, top, tops }) {
       const container = focus.tabId !== undefined
         ? [...root.querySelectorAll("[data-tab-id]")].find(row => row.dataset.tabId === focus.tabId)
         : [...root.querySelectorAll(".column[data-group-id]")].find(col => col.dataset.groupId === focus.groupId);
-      active = container?.className === focus.className ? container
+      if (focus.className === 'pin-allow' && container) {
+        const tip = [...root.querySelectorAll('[data-pin-tooltip]')].find(tip => tip.dataset.pinTooltip === focus.tabId);
+        showPinnedTooltip(tip);
+        active = tip?.querySelector('.pin-allow') ?? container.querySelector('.row-open');
+      } else active = container?.className === focus.className ? container
         : [...(container?.querySelectorAll("*") ?? [])].find(el => el.className === focus.className);
       if (!container && focus.tabId !== undefined) {
         const rows = [...(list?.querySelectorAll(".row") ?? [])];

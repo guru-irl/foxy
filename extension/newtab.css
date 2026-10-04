@@ -968,7 +968,7 @@ button.group-name:focus-visible {
   box-sizing: border-box;
   width: var(--cell);
   height: var(--cell);
-  padding: 8px;
+  padding: 4px;
   cursor: grab;
 }
 .pin-icon:hover, .pin-icon:active, .pin-icon:focus-visible,
@@ -993,6 +993,16 @@ button.group-name:focus-visible {
   height: 16px;
   line-height: 16px;
   background: var(--card);
+}
+.pin-needs-access {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
 }
 .pin-active {
   position: absolute;

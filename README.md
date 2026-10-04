@@ -15,9 +15,9 @@ Version 3.2.0. Distributed as an unlisted add-on. Design: `docs/superpowers/spec
 ## Board
 
 - **Tiles:** groups, PINNED, SAVED and a clock on a scrolling grid that fills the page edge to edge. Groups and SAVED have scrolling lists.
-- **PINNED:** one icon per cell, in tab order. Hover shows the name, other-window label and ×; the active pin has a neutral dot. Extra pins scroll with edge fades. Default 6 × 2 cells, minimum 1 × 1.
+- **PINNED:** one icon per cell, in tab order. Hover shows the name, other-window label and ×; the active pin has a neutral bottom dot. A muted top-left dot means the name needs site access; hover or focus the icon for ALLOW. Extra pins scroll with edge fades. Default 6 × 2 cells, minimum 1 × 1.
 - **TABS rail:** ungrouped tabs stay on the right, with their own scroll. The Settings gear has its own cell below it.
-- **Move and resize:** drag a tile's header (empty space for PINNED), or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
+- **Move and resize:** drag a tile's header (empty space or the 4 px icon margins for PINNED, even at 1 × 1), or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
 - **Window widths:** each width keeps its own layout (up to 4). A width without one shows the closest: tiles narrow slightly, or columns of tiles pack together in order. Resizing saves nothing. Moving a tile updates the layout shown if the result still fits it; otherwise it saves a new layout for this width.
 - **Windows:** this window comes first; others are labelled. Tile places do not change tab order.
 - **Open a tab:** click it. A pin from another window moves here unless that setting is off.
@@ -52,7 +52,7 @@ Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their pl
 
 - **Sidebar:** the theme gives pins on about 30 sites short names, such as YOUTUBE or GMAIL, matched by title.
 - **Renamed pins:** the name is stored in the pin's bookmark and syncs to every device.
-- **Site access:** Firefox asks once per site when renaming a pin. Devices without access show ALLOW.
+- **Site access:** Firefox asks once per site when renaming a pin. Devices without access show a muted top-left dot on the icon and ALLOW in its tooltip.
 - **Trade-off:** names replace page titles in windows and history, hiding unread counts.
 
 ## Duplicate tabs
