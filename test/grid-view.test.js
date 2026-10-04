@@ -2,16 +2,23 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildView } from "../extension/src/grid/view.js";
 import { buildBoard } from "../extension/src/board/model.js";
-import { DEFAULT_SETTINGS, DEFAULT_DEVICE } from "../extension/src/settings/store.js";
+import { DEFAULT_SETTINGS as ALL_SETTINGS, DEFAULT_DEVICE } from "../extension/src/settings/store.js";
 
+// The weather tests below start from the product defaults without the memory tile.
+const DEFAULTS = { ...ALL_SETTINGS, showMemory: false };
+
+// These fixtures pin existing group geometry independently of optional widgets.
+const DEFAULT_SETTINGS = { ...ALL_SETTINGS, showMemory: false, showWeather: false };
 const group = (id, current = true) => ({ id, current, windowId: current ? 1 : 2, rows: [] });
 const board = { columns: [group(1), group(2)], saved: [], pinned: [], tabs: [] };
+// Geometry fixtures retain a three-cell rail; the default consumer test opts out.
+const geometrySettings = { ...DEFAULT_SETTINGS, railCells: 3 };
 const options = (overrides = {}) => {
   const { layout = [], ...rest } = overrides;
   const k = Math.max(7, ...layout.map(t => t.x + t.w));
   return { layouts: layout.length ? { [k]: { lastWriteMs: 0, tiles: layout } } : {},
-    synced: { ...DEFAULT_SETTINGS, showClock: false, showPinned: false },
-    device: DEFAULT_DEVICE, contentWidth: 944, folders: { 1: "a", 2: "b" }, ...rest };
+    synced: { ...geometrySettings, showClock: false, showPinned: false },
+    device: { ...DEFAULT_DEVICE, cellSize: "custom", customCell: 80 }, contentWidth: 944, folders: { 1: "a", 2: "b" }, ...rest };
 };
 
 test("new tiles use clock, pinned, current tab-strip groups, remote groups, saved order", () => {
@@ -19,11 +26,11 @@ test("new tiles use clock, pinned, current tab-strip groups, remote groups, save
     currentWindowId: 1, groups: [{ id: 3, windowId: 2 }, { id: 2, windowId: 1 }, { id: 1, windowId: 1 }],
     tabs: [{ id: 30, windowId: 2, groupId: 3, index: 0 }, { id: 20, windowId: 1, groupId: 2, index: 5 },
       { id: 10, windowId: 1, groupId: 1, index: 1 }], saved: [{ folderId: "closed" }] });
-  const view = buildView(ordered, options({ synced: DEFAULT_SETTINGS, contentWidth: 1232, folders: { 1: "a", 2: "b", 3: "c" } }));
+  const view = buildView(ordered, options({ synced: geometrySettings, contentWidth: 1232, folders: { 1: "a", 2: "b", 3: "c" } }));
   assert.deepEqual(view.newTiles, [
-    { id: "clock", x: 0, y: 0, w: 5, h: 2 }, { id: "pinned", x: 5, y: 0, w: 3, h: 4 },
-    { id: "group:a", x: 0, y: 2, w: 3, h: 4 }, { id: "group:b", x: 3, y: 4, w: 3, h: 4 },
-    { id: "group:c", x: 6, y: 4, w: 3, h: 4 }, { id: "saved", x: 0, y: 6, w: 3, h: 4 },
+    { id: "clock", x: 0, y: 0, w: 5, h: 2 }, { id: "pinned", x: 0, y: 2, w: 6, h: 2 },
+    { id: "group:a", x: 6, y: 0, w: 3, h: 4 }, { id: "group:b", x: 0, y: 4, w: 3, h: 4 },
+    { id: "group:c", x: 3, y: 4, w: 3, h: 4 }, { id: "saved", x: 6, y: 4, w: 3, h: 4 },
   ]);
 });
 
@@ -45,13 +52,13 @@ test("hidden kinds and closed groups keep saved keys but reserve no space", () =
 });
 
 test("enabled clock and pinned show even when empty; saved needs entries", () => {
-  const view = buildView({ ...board, columns: [], saved: [{ folderId: "c" }] }, options({ synced: DEFAULT_SETTINGS }));
+  const view = buildView({ ...board, columns: [], saved: [{ folderId: "c" }] }, options({ synced: geometrySettings }));
   assert.deepEqual(view.tiles.map(t => t.id), ["clock", "pinned", "saved"]);
-  assert.deepEqual(buildView({ ...board, columns: [] }, options({ synced: DEFAULT_SETTINGS })).tiles.map(t => t.id), ["clock", "pinned"]);
+  assert.deepEqual(buildView({ ...board, columns: [] }, options({ synced: geometrySettings })).tiles.map(t => t.id), ["clock", "pinned"]);
 });
 
 test("otherWindows false excludes remote group tiles", () => {
-  const view = buildView({ ...board, columns: [group(1), group(2, false)] }, options({ synced: { ...DEFAULT_SETTINGS, showClock: false, showPinned: false, otherWindows: false } }));
+  const view = buildView({ ...board, columns: [group(1), group(2, false)] }, options({ synced: { ...geometrySettings, showClock: false, showPinned: false, otherWindows: false } }));
   assert.deepEqual(view.tiles.map(t => t.id), ["group:a"]);
 });
 
@@ -75,7 +82,7 @@ test("narrow fit is display-only and retains the raw saved layout", () => {
 
 test("fractional cells fill the page and narrow fit leaves saved rectangles unchanged", () => {
   const layout = [{ id: "group:a", x: 7, y: 0, w: 3, h: 4 }, { id: "group:b", x: 0, y: 0, w: 3, h: 4 }];
-  const view = buildView(board, options({ layout, contentWidth: 701, synced: { ...DEFAULT_SETTINGS, showClock: false, showPinned: false, railCells: 2 } }));
+  const view = buildView(board, options({ layout, contentWidth: 701, synced: { ...geometrySettings, showClock: false, showPinned: false, railCells: 2 } }));
   assert.deepEqual([view.total, view.cols, view.railCells], [7, 5, 2]);
   assert.equal(view.cell, 717 / 7 - 16);
   assert.deepEqual(view.tiles.map(t => [t.x, t.y, t.w]), [[0, 4, 3], [0, 0, 3]]);
@@ -84,25 +91,25 @@ test("fractional cells fill the page and narrow fit leaves saved rectangles unch
 });
 
 test("new defaults use the cell setting and save their full size before display fit", () => {
-  const view = buildView(board, options({ contentWidth: 252, synced: DEFAULT_SETTINGS }));
+  const view = buildView(board, options({ contentWidth: 252, synced: geometrySettings }));
   assert.equal(view.cell, 118);
   assert.deepEqual(view.newTiles.map(({ id, x, y, w, h }) => [id, x, y, w, h]), [
-    ["clock", 0, 0, 5, 2], ["pinned", 0, 2, 3, 4], ["group:a", 0, 6, 3, 4], ["group:b", 0, 10, 3, 4],
+    ["clock", 0, 0, 5, 2], ["pinned", 0, 2, 6, 2], ["group:a", 0, 4, 3, 4], ["group:b", 0, 8, 3, 4],
   ]);
   assert.ok(view.tiles.every(t => t.w === 1));
 });
 
 // Stretching cells must affect display geometry, not a new tile's stored size.
 for (const [device, expected] of [
-  [{ ...DEFAULT_DEVICE, cellSize: "XL" }, [["clock", 3, 2], ["pinned", 2, 3], ["group:a", 2, 3], ["saved", 2, 3]]],
-  [{ ...DEFAULT_DEVICE, cellSize: "custom", customCell: 90 }, [["clock", 5, 2], ["pinned", 3, 4], ["group:a", 3, 4], ["saved", 3, 4]]],
+  [{ ...DEFAULT_DEVICE, cellSize: "custom", customCell: 144 }, [["clock", 3, 2], ["pinned", 6, 2], ["group:a", 2, 3], ["saved", 2, 3]]],
+  [{ ...DEFAULT_DEVICE, cellSize: "custom", customCell: 90 }, [["clock", 5, 2], ["pinned", 6, 2], ["group:a", 3, 4], ["saved", 3, 4]]],
 ]) {
   for (const contentWidth of [1600, 1000]) {
-    test(`${device.cellSize} defaults at width ${contentWidth} use the setting for every kind`, () => {
+    test(`${device.customCell}px custom defaults at width ${contentWidth} use the setting for every kind`, () => {
       const model = { ...board, columns: [group(1)], saved: [{ folderId: "closed" }] };
-      const view = buildView(model, options({ contentWidth, synced: DEFAULT_SETTINGS, device }));
+      const view = buildView(model, options({ contentWidth, synced: geometrySettings, device }));
       assert.deepEqual(view.newTiles.map(({ id, w, h }) => [id, w, h]), expected);
-      assert.ok(view.cell > (device.cellSize === "XL" ? 144 : 90), "the real cell is stretched");
+      assert.ok(view.cell > device.customCell, "the real cell is stretched");
     });
   }
 }
@@ -110,17 +117,17 @@ for (const [device, expected] of [
 for (const [contentWidth, cols] of [[272, 1], [400, 2]]) {
   test(`new tiles at width ${contentWidth} save full default sizes at the shown x/y`, () => {
     const model = { ...board, columns: [group(1)], saved: [{ folderId: "closed" }] };
-    const view = buildView(model, options({ contentWidth, synced: DEFAULT_SETTINGS }));
+    const view = buildView(model, options({ contentWidth, synced: geometrySettings }));
     assert.equal(view.cols, cols);
     assert.deepEqual(view.newTiles, [
       { id: "clock", x: 0, y: 0, w: 5, h: 2 },
-      { id: "pinned", x: 0, y: 2, w: 3, h: 4 },
-      { id: "group:a", x: 0, y: 6, w: 3, h: 4 },
-      { id: "saved", x: 0, y: 10, w: 3, h: 4 },
+      { id: "pinned", x: 0, y: 2, w: 6, h: 2 },
+      { id: "group:a", x: 0, y: 4, w: 3, h: 4 },
+      { id: "saved", x: 0, y: 8, w: 3, h: 4 },
     ]);
     assert.deepEqual(view.tiles.map(({ x, y, w, h }) => [x, y, w, h]),
-      [[0, 0, cols, 2], [0, 2, cols, 4], [0, 6, cols, 4], [0, 10, cols, 4]]);
-    const widened = buildView(model, options({ layout: view.newTiles, synced: DEFAULT_SETTINGS, contentWidth: 1600 }));
+      [[0, 0, cols, 2], [0, 2, cols, 2], [0, 4, cols, 4], [0, 8, cols, 4]]);
+    const widened = buildView(model, options({ layout: view.newTiles, synced: geometrySettings, contentWidth: 1600 }));
     assert.deepEqual(widened.tiles.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })), view.newTiles);
     assert.deepEqual(widened.newTiles, []);
   });
@@ -141,6 +148,17 @@ for (const [width, railCells, expected] of [[30, 100, [1, 2, 1]], [944, 100, [10
     assert.deepEqual([view.total, view.railCells, view.cols], expected);
   });
 }
+
+test("default S cells set geometry and full pixel-target tile sizes", () => {
+  const view = buildView(board, options({ device: DEFAULT_DEVICE, synced: DEFAULT_SETTINGS }));
+  assert.deepEqual([view.cell, view.total, view.cols, view.railCells], [48, 15, 10, 5]);
+  assert.deepEqual(view.newTiles, [
+    { id: "clock", x: 0, y: 0, w: 8, h: 4 },
+    { id: "pinned", x: 0, y: 4, w: 6, h: 2 },
+    { id: "group:a", x: 0, y: 6, w: 5, h: 6 },
+    { id: "group:b", x: 5, y: 6, w: 5, h: 6 },
+  ]);
+});
 
 test("device cell size changes the geometry and default target in cells", () => {
   const view = buildView(board, options({ device: { ...DEFAULT_DEVICE, cellSize: "S" } }));
@@ -164,7 +182,7 @@ test("source layout geometry places new groups at the source width before derivi
   const layout = [{ id: "group:a", x: 0, y: 0, w: 20, h: 9 }];
   const view = buildView(board, options({ layouts: { 34: { lastWriteMs: 1, tiles: layout } },
     contentWidth: 1392, device: { ...DEFAULT_DEVICE, cellSize: "S" },
-    synced: { ...DEFAULT_SETTINGS, showClock: false, showPinned: false, railCells: 5 } }));
+    synced: { ...geometrySettings, showClock: false, showPinned: false, railCells: 5 } }));
   assert.equal(view.cols, 17); assert.equal(view.k, 34);
   assert.deepEqual(view.newTiles, [{ id: "group:b", x: 20, y: 0, w: 5, h: 6 }]);
   assert.deepEqual(view.saved, layout);
@@ -175,9 +193,20 @@ test("source qualification ignores closed groups and hidden kinds, not just tota
   const view = buildView({ ...board, columns: [group(1)] }, options({
     layouts: { 17: { tiles: [{ id: "group:a", x: 0, y: 0, w: 5, h: 6 }] }, 34: { tiles: wide } },
     contentWidth: 1456, device: { ...DEFAULT_DEVICE, cellSize: "S" },
-    synced: { ...DEFAULT_SETTINGS, showClock: false, showPinned: false, railCells: 5 },
+    synced: { ...geometrySettings, showClock: false, showPinned: false, railCells: 5 },
   }));
   assert.equal(view.k, 34, "visible wide group can keep its arrangement when capped; closed group must not force packing");
   assert.deepEqual(view.tiles.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })),
     [{ id: "group:a", x: 0, y: 0, w: 18, h: 9 }]);
+});
+
+test("showWeather adds a weather tile after the others; off reserves no space", () => {
+  const on = buildView({ ...board, columns: [], saved: [{ folderId: "c" }] },
+    options({ synced: { ...DEFAULTS, showWeather: true }, device: { ...DEFAULT_DEVICE, cellSize: "S" }, contentWidth: 1232 }));
+  assert.deepEqual(on.tiles.map(t => t.id), ["clock", "pinned", "saved", "weather"]);
+  assert.equal(on.tiles.at(-1).kind, "weather");
+  // With the 6 x 2 pinned tile at S, the first 5 x 5 gap is below the clock.
+  assert.deepEqual(on.newTiles.at(-1), { id: "weather", x: 0, y: 4, w: 5, h: 5 });
+  const off = buildView({ ...board, columns: [] }, options({ synced: { ...DEFAULTS, showWeather: false } }));
+  assert.equal(off.tiles.some(t => t.id === "weather"), false);
 });

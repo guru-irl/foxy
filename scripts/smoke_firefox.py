@@ -105,6 +105,9 @@ def profile_prefs(port):
         "network.proxy.no_proxies_on": "127.0.0.1,localhost",
         "network.proxy.failover_direct": False,
         "network.trr.mode": 5,
+        # No location: Foxy's weather tile then has no place and requests nothing
+        # (it also waits for the locationInfo grant, which smoke never gives).
+        "geo.enabled": False,
     }
 
 
@@ -217,15 +220,16 @@ def poll(label, read, ready, timeout=WAIT_SECONDS, minimum=0):
 
 BOARD_SCRIPT = """
     const tiles = [...document.querySelectorAll('#board .grid .tile')].map(tile =>
+        tile.dataset.kind === 'pinned' && tile.querySelector('.pinned-grid') ? 'PINNED' :
         (tile.querySelector('.column-title, .group-name')?.textContent || '').trim());
     return {board: !!document.querySelector('#board .grid'), tiles,
-            rail: document.querySelector('#board .rail .column-title')?.textContent.trim() === 'TABS',
+            rail: document.querySelector('#board .rail .column-title')?.textContent.trim() === 'UNGROUPED TABS',
             clock: !!document.querySelector('#board .grid .tile .clock-time')?.textContent.trim(),
             fontsReady: document.fonts.status === 'loaded', url: location.href};
 """
 
 SETTINGS_SCRIPT = """
-    const gear = document.querySelector('#board > .settings-cell');
+    const gear = document.querySelector('#board > .rail > .settings-gear');
     if (!gear) throw new Error('settings gear missing');
     gear.click();
     const pane = document.querySelector('.settings-pane');
@@ -546,7 +550,7 @@ def run_checks(client, root, scratch, results, base):
         state = poll("board and fonts", lambda: client.script(BOARD_SCRIPT),
                      lambda s: s["board"] and s["fontsReady"] and s["clock"] and s["rail"] and
                      "PINNED" in {title.upper() for title in s["tiles"]}, minimum=3)
-        return ", ".join(filter(None, state["tiles"])) + "; TABS rail; clock tile; fonts ready"
+        return ", ".join(filter(None, state["tiles"])) + "; UNGROUPED TABS rail; clock tile; fonts ready"
     results.check("grid: tiles and rail rendered", board)
     results.check("settings: pane opens", lambda: check_settings(client))
 

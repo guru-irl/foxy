@@ -62,7 +62,7 @@ test("older preview scenarios answer with no saved groups or banner", async t =>
   assert.equal(board.columns.length, 3);
 });
 
-for (const [name, cell, width] of [["grid-m", 1616 / 16 - 16, 1600], ["grid-xl", 1616 / 10 - 16, 1600],
+for (const [name, cell, width] of [["grid-custom-80", 1616 / 16 - 16, 1600], ["grid-custom-144", 1616 / 10 - 16, 1600],
   ["grid-narrow", 716 / 7 - 16, 700], ["settings-open", 1616 / 16 - 16, 1600]]) {
   test(`${name} preview supplies saved geometry, settings and mapped group tiles`, async t => {
     const { api, board, reply } = await preview(t, name);
@@ -70,10 +70,11 @@ for (const [name, cell, width] of [["grid-m", 1616 / 16 - 16, 1600], ["grid-xl",
     assert.equal(board.saved.length, 3);
     const stored = await loadLayouts(api), layout = stored.layouts[9].tiles;
     const settings = await loadSettings(api);
-    const view = buildView(board, { layouts: stored.layouts, ...settings, contentWidth: width,
+    const view = buildView(board, { layouts: stored.layouts, ...settings,
+      synced: { ...settings.synced, showMemory: false }, contentWidth: width,
       folders: reply.folders });
     assert.equal(view.cell, cell);
-    assert.equal(view.tiles.length, 6);
+    assert.equal(view.tiles.length, 7);
     assert.equal(view.newTiles.length, 0, "fixture has saved positions for every tile");
     for (const tile of view.tiles) assert.ok(tile.x + tile.w <= view.cols);
     if (name === "grid-narrow") {

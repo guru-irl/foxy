@@ -28,6 +28,7 @@ for (const [name, handler] of Object.entries(sync.handlers)) {
   } else api[namespace][event].addListener(listener);
 }
 api.runtime.onMessage.addListener((message, sender) => {
+  if (message?.type === "foxy:memory") return undefined;
   if (typeof message?.type === "string" && message.type.startsWith("foxy:")) {
     return sync.onMessage(message, sender).catch(() => ({ ok: false }));
   }

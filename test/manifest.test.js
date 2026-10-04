@@ -6,12 +6,12 @@ const root = new URL("../extension/", import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), "utf8");
 const manifest = JSON.parse(read("manifest.json"));
 
-test("manifest and package name the add-on Foxy 3.2.0", () => {
+test("manifest and package name the add-on Foxy 3.3.0", () => {
   assert.equal(manifest.name, "Foxy");
-  assert.equal(manifest.version, "3.2.0");
+  assert.equal(manifest.version, "3.3.0");
   assert.equal(manifest.description, "A grid board of your tabs and tab groups, shared across devices through bookmarks.");
   const pkg = JSON.parse(readFileSync(new URL("../package.json", root), "utf8"));
-  assert.equal(pkg.version, "3.2.0");
+  assert.equal(pkg.version, "3.3.0");
 });
 
 test("manifest replaces the new tab page and the home page with newtab.html", () => {
@@ -20,8 +20,9 @@ test("manifest replaces the new tab page and the home page with newtab.html", ()
   assert.deepEqual(manifest.chrome_settings_overrides, { homepage: "newtab.html" });
 });
 
-test("manifest asks for tabs, tabGroups, bookmarks, storage, scripting and nativeMessaging and uses a module event page", () => {
+test("manifest asks for tabs, tabGroups, bookmarks, storage, scripting and nativeMessaging, geolocation only as optional, and uses a module event page", () => {
   assert.deepEqual(manifest.permissions, ["tabs", "tabGroups", "bookmarks", "storage", "scripting", "nativeMessaging"]);
+  assert.deepEqual(manifest.optional_permissions, ["geolocation"]);
   assert.equal(manifest.host_permissions, undefined);
   assert.deepEqual(manifest.optional_host_permissions, ["*://*/*"]);
   assert.deepEqual(manifest.background, { scripts: ["background.js"], type: "module" });
@@ -48,7 +49,7 @@ test("manifest has the gecko settings AMO needs", () => {
   const gecko = manifest.browser_specific_settings.gecko;
   assert.equal(gecko.id, "{4408f971-7930-41ea-9f93-b01231e40861}");
   assert.equal(gecko.strict_min_version, "140.0");
-  assert.deepEqual(gecko.data_collection_permissions, { required: ["none"] });
+  assert.deepEqual(gecko.data_collection_permissions, { required: ["none"], optional: ["locationInfo"] });
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
 });
 

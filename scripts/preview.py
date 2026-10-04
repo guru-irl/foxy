@@ -39,12 +39,16 @@ SCENARIOS = {
     "remote-header": ("scenario=remote-header", 1600, 1000),
     "many-groups": ("scenario=many-groups", 1600, 1000),
     "light": ("scenario=light&scheme=light", 1600, 1000),
-    "grid-m": ("scenario=grid-m", 1600, 1000),
-    "grid-xl": ("scenario=grid-xl", 1600, 1000),
+    "grid-custom-80": ("scenario=grid-custom-80", 1600, 1000),
+    "grid-custom-144": ("scenario=grid-custom-144", 1600, 1000),
     "grid-narrow": ("scenario=grid-narrow", 700, 1000),
     "settings-open": ("scenario=settings-open&settings=open", 1600, 1000),
     "settings-open-light": ("scenario=settings-open&settings=open&scheme=light", 1600, 1000),
     "narrow": ("scenario=one-window", 900, 900),
+    "weather": ("scenario=weather", 1600, 1000),
+    "weather-light": ("scenario=weather&scheme=light", 1600, 1000),
+    "weather-allow": ("scenario=weather&weather=ask&settings=open", 1600, 1000),
+    "weather-allow-light": ("scenario=weather&weather=ask&settings=open&scheme=light", 1600, 1000),
 }
 
 

@@ -36,7 +36,9 @@ async function setup() {
     tabs: [{ id: 10, windowId: 1, groupId: 1 }, { id: 99, windowId: 1 }] },
     message => message.type === "foxy:reconcile" ? { ok: true }
       : message.type === "foxy:saved" ? gate.then(() => ({ saved: [], missing: [], folders: { 1: "a" } })) : undefined);
-  await ff.browser.storage.sync.set({ "tile:10:clock": { x: 0, y: 0, w: 5, h: 2 } });
+  // These geometry fixtures use Custom 80, independent of the S default.
+  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
+  await ff.browser.storage.sync.set({ settings: { railCells: 3 }, "tile:10:clock": { x: 0, y: 0, w: 5, h: 2 } });
   const host = document.createElement("div"), node = document.createElement("div"), pane = document.createElement("aside");
   host.className = "page"; host.style.cssText = "width:1232px;height:600px";
   node.className = "board";
@@ -61,7 +63,7 @@ test("a clock move before the first valid saved reply is shown and persisted wit
     assert.deepEqual((await ff.browser.storage.sync.get("tile:10:clock"))["tile:10:clock"], { x: 0, y: 3, w: 5, h: 2 });
     assert.equal(writes(ff).length, 1, "held and new tiles share one save");
     assert.ok(writes(ff)[0]["tile:10:pinned"]); assert.ok(writes(ff)[0]["tile:10:group:a"]);
-    await ff.browser.storage.sync.set({ settings: { showDate: false } }); await flush(ff);
+    await ff.browser.storage.sync.set({ settings: { railCells: 3, showDate: false } }); await flush(ff);
     assert.deepEqual(rect(tile(node)), { x: 0, y: 3, w: 5, h: 2 });
   } finally { release(); }
 });
@@ -91,7 +93,7 @@ test("the last held move wins and remains shown over a remote change before the 
     release(); await flush(ff);
     assert.deepEqual((await ff.browser.storage.sync.get("tile:10:clock"))["tile:10:clock"], { x: 0, y: 4, w: 5, h: 2 });
     assert.equal(writes(ff).length, 1);
-    await ff.browser.storage.sync.set({ settings: { showDate: false } }); await flush(ff);
+    await ff.browser.storage.sync.set({ settings: { railCells: 3, showDate: false } }); await flush(ff);
     assert.deepEqual(rect(tile(node)), { x: 0, y: 4, w: 5, h: 2 });
   } finally { release(); }
 });
@@ -100,7 +102,7 @@ test("reset before the reply clears held moves and saves fresh default placement
   const { ff, node, pane, release } = await setup();
   try {
     drag(node); await frames();
-    node.querySelector(".settings-cell").click();
+    node.querySelector(".settings-gear").click();
     const reset = pane.querySelector(".settings-reset"); reset.click();
     await new Promise(resolve => setTimeout(resolve, 410)); reset.click(); await frames();
     assert.deepEqual(await ff.browser.storage.sync.get("tile:10:clock"), {});

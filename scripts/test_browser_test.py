@@ -19,6 +19,9 @@ SCRATCH = ROOT / ".spider" / "scratch" / "test-browser-test"
 
 
 class ResultsTest(unittest.TestCase):
+    def test_profile_disables_geolocation(self):
+        self.assertIn('user_pref("geo.enabled", false);', browser_test.PROFILE_PREFS.splitlines())
+
     def test_formats_passes_and_failures_in_order(self):
         self.assertEqual(
             browser_test.parse_results(

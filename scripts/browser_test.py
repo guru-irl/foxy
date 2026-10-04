@@ -50,6 +50,8 @@ user_pref("network.proxy.no_proxies_on", "127.0.0.1");
 user_pref("network.proxy.allow_hijacking_localhost", true);
 user_pref("network.proxy.failover_direct", false);
 user_pref("network.trr.mode", 5);
+// No location lookups; weather tests inject their own geolocation.
+user_pref("geo.enabled", false);
 user_pref("widget.macos.overlay-scrollbars", 0);
 user_pref("ui.useOverlayScrollbars", 0);
 '''

@@ -2,21 +2,21 @@ import { test, assert, fixture, nextFrame } from "./harness.js";
 import { renderBoard } from "./view.js";
 import { DEFAULT_SETTINGS, DEFAULT_DEVICE } from "../../extension/src/settings/store.js";
 
-async function clock(w = 3, h = 2, cellSize = "M") {
+async function clock(w = 3, h = 2, cell = 80) {
   const link = document.createElement("link"); link.rel = "stylesheet"; link.href = "/extension/newtab.css";
   await new Promise(resolve => { link.onload = resolve; document.head.append(link); });
   const node = document.createElement("div"); node.className = "board"; node.style.cssText = "width:1600px;height:700px";
   fixture().append(node);
   const { updateClock, renderTime } = await import("../../extension/src/main.js");
   renderBoard(node, { columns: [], pinned: [], tabs: [], saved: [] }, {}, {}, {
-    layout: [{ id: "clock", x: 0, y: 0, w, h }], device: { ...DEFAULT_DEVICE, cellSize },
+    layout: [{ id: "clock", x: 0, y: 0, w, h }], device: { ...DEFAULT_DEVICE, cellSize: cell === "S" ? "S" : "custom", customCell: cell === "S" ? 80 : cell },
   });
   await document.fonts.ready; await nextFrame();
   return { node, time: node.querySelector(".clock-time"), date: node.querySelector(".clock-date"), updateClock, renderTime };
 }
 
-const sizes = ["S", "M", "L", "XL"].flatMap(cell => [[3, 2], [5, 2], [3, 3]].map(([w, h]) => [cell, w, h]));
-sizes.push(["M", 8, 4]);
+const sizes = ["S", 80, 112, 144].flatMap(cell => [[3, 2], [5, 2], [3, 3]].map(([w, h]) => [cell, w, h]));
+sizes.push([80, 8, 4]);
 for (const [cell, w, h] of sizes) {
   test(`clock tile ${cell} ${w}x${h}: time and longest date fit all padded content edges`, async () => {
     const { node, time, date, updateClock } = await clock(w, h, cell);
@@ -48,7 +48,7 @@ for (const [cell, w, h] of sizes) {
 // The final reviewer's minimum-clock probe measured a 6.9 px S date.
 // Missing either width or height guard leaves an unreadable label visible.
 for (const [cell, w, h, visible] of [["S", 3, 2, false], ["S", 3, 3, false], ["S", 5, 2, false],
-  ["S", 5, 3, true], ["M", 3, 2, true], ["XL", 3, 2, true]]) {
+  ["S", 5, 3, true], [80, 3, 2, true], [144, 3, 2, true]]) {
   test(`clock ${cell} ${w}x${h} ${visible ? "shows a readable date" : "hides the date below 10 px"} and keeps time`, async () => {
     const { node, time, date, updateClock } = await clock(w, h, cell);
     for (const format of ["24", "12"]) {

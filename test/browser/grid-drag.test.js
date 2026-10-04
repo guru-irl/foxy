@@ -27,7 +27,9 @@ async function setup({ layout = initial, width = 1232, settings = {}, folders = 
       ...extraGroups.map(group => ({ id: group.id + 30, windowId: 1, groupId: group.id })), { id: 99, windowId: 1 }] },
     listener ?? (message => message.type === "foxy:reconcile" ? { ok: true }
       : message.type === "foxy:saved" ? { saved: [], missing: [], folders } : undefined));
-  await ff.browser.storage.sync.set({ ...layout, settings }); await ff.settle();
+  // These geometry fixtures use Custom 80, independent of the S default.
+  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
+  await ff.browser.storage.sync.set({ ...layout, settings: { railCells: 3, ...settings } }); await ff.settle();
   const root = document.createElement("div"); root.className = "board";
   root.style.cssText = `width:${width}px;height:600px`;
   let pane;
@@ -262,7 +264,7 @@ test("rail edge previews whole cells and grid fit, clamps and saves only changed
   assert.equal(root.querySelector(".rail").getBoundingClientRect().width, 464);
   assert.equal(root.querySelector(".grid").style.getPropertyValue("--cols"), "8"); assert.deepEqual(writes(ff), []);
   pointer("pointerup", document, target); await flush(ff);
-  assert.deepEqual(writes(ff), [{ settings: { railCells: 5 } }]);
+  assert.deepEqual(writes(ff), [{ settings: { showMemory: false, railCells: 5 } }]);
   ff.calls.length = 0; source = root.querySelector(".rail-resize"); start = down(source);
   pointer("pointermove", document, shifted(start, -4000, 0)); assert.equal(root.querySelector(".rail").style.getPropertyValue("--rail-cells"), "6");
   pointer("pointermove", document, shifted(start, 4000, 0)); assert.equal(root.querySelector(".rail").style.getPropertyValue("--rail-cells"), "2");
@@ -277,8 +279,8 @@ for (const { offset, cells } of [{ offset: 4000, cells: 2 }, { offset: -4000, ce
     pointer("pointermove", document, target);
     assert.equal(root.querySelector(".rail").style.getPropertyValue("--rail-cells"), String(cells));
     pointer("pointerup", document, target); await flush(ff);
-    assert.deepEqual(writes(ff), [{ settings: { railCells: cells } }]);
-    assert.deepEqual((await ff.browser.storage.sync.get("settings")).settings, { railCells: cells });
+    assert.deepEqual(writes(ff), [{ settings: { showMemory: false, railCells: cells } }]);
+    assert.deepEqual((await ff.browser.storage.sync.get("settings")).settings, { showMemory: false, railCells: cells });
   });
 }
 
@@ -299,7 +301,7 @@ for (const kind of ["move", "resize", "rail"]) {
       assert.equal(root.style.getPropertyValue("--card-alpha-dark"), "0.45");
       const localWrites = writes(ff).slice(1);
       assert.ok(localWrites.every(entry => !("tile:10:pinned" in entry)), "an unrelated remote tile must not be written back");
-      if (kind === "rail" && end === "release") assert.deepEqual(localWrites, [{ settings: { transparency: "high", railCells: 4 } }]);
+      if (kind === "rail" && end === "release") assert.deepEqual(localWrites, [{ settings: { showMemory: false, transparency: "high", railCells: 4 } }]);
       if (end === "cancel") assert.deepEqual(localWrites, []);
     });
   }
@@ -580,7 +582,7 @@ test("failed or malformed saved replies gate drag writes too", async () => {
     const { ff, root } = await setup({ listener: message => message.type === "foxy:reconcile" ? { ok: true }
       : message.type === "foxy:saved" ? { ok: false } : undefined });
     await new Promise(resolve => setTimeout(resolve, 550)); await flush(ff);
-    const source = tile(root, "pinned").querySelector(".column-title"), start = down(source);
+    const source = tile(root, "pinned").querySelector(".pinned-grid"), start = down(source);
     const before = rect(tile(root, "pinned")).y;
     pointer("pointermove", document, shifted(start, 0, 192));
     assert.equal(rect(tile(root, "pinned")).y, before + 2, "the gated drag must still preview");
@@ -692,7 +694,7 @@ for (const kind of ["move", "resize"]) {
 // Without grid isolation, the dragged tile's z-index escapes above the pane.
 test("a dragged tile stays below the open settings pane where they overlap", async () => {
   const { ff, root, pane } = await setup({ withPane: true });
-  root.querySelector(".settings-cell").click();
+  root.querySelector(".settings-gear").click();
   assert.equal(pane.hidden, false);
   await new Promise(resolve => setTimeout(resolve, 220));
   const grid = root.querySelector(".grid"), start = down(header(root));

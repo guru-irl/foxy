@@ -1,8 +1,8 @@
 export const GAP = 16;
-export const CELL_PRESETS = { S: 48, M: 80, L: 112, XL: 144 };
+export const CELL_PRESETS = { S: 48 };
 
 export function kindOf(id) {
-  return ["pinned", "saved", "clock"].includes(id) ? id : "group";
+  return ["pinned", "saved", "clock", "memory", "weather"].includes(id) ? id : "group";
 }
 
 export function totalColumns(contentWidth, cell) {
@@ -19,7 +19,8 @@ export function railLimits(total) {
 }
 
 export function minSize(kind) {
-  return { w: kind === "clock" ? 3 : 2, h: 2 };
+  if (kind === "memory") return { w: 4, h: 5 };
+  return kind === "pinned" || kind === "weather" ? { w: 1, h: 1 } : { w: kind === "clock" ? 3 : 2, h: 2 };
 }
 
 // A column count that is not a positive integer counts as one column, so
@@ -35,8 +36,10 @@ function whole(value) {
 export function defaultSize(kind, cell, cols) {
   cols = columns(cols);
   const min = minSize(kind);
-  const width = kind === "clock" ? 480 : 288;
-  const height = kind === "clock" ? 208 : 384;
+  if (kind === "memory") return { w: Math.min(cols, 5), h: 6 };
+  if (kind === "pinned") return { w: Math.min(cols, 6), h: 2 };
+  const width = kind === "clock" ? 480 : kind === "weather" ? 304 : 288;
+  const height = kind === "clock" ? 208 : kind === "weather" ? 304 : 384;
   return {
     w: Math.min(cols, Math.max(min.w, Math.round((width + GAP) / (cell + GAP)))),
     h: Math.max(min.h, Math.round((height + GAP) / (cell + GAP))),

@@ -1,24 +1,28 @@
 import { CELL_PRESETS } from "../grid/layout.js";
+import { validPlace } from "../weather/location.js";
 
 export const DEFAULT_SETTINGS = Object.freeze({
-  railCells: 3, showClock: true, showPinned: true, showSaved: true, timeFormat: "24",
+  railCells: 5, showClock: true, showPinned: true, showSaved: true, showMemory: true, timeFormat: "24",
   showDate: true, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true,
+  showWeather: true, tempUnit: "C",
 });
-export const DEFAULT_DEVICE = Object.freeze({ cellSize: "M", customCell: 80, density: "normal" });
+export const DEFAULT_DEVICE = Object.freeze({ cellSize: "S", customCell: 80, density: "normal", weatherPlace: "auto" });
 
 const integer = (value, min, max) => Number.isInteger(value) && value >= min && value <= max;
 const boolean = value => typeof value === "boolean";
 const syncedRules = {
   railCells: value => integer(value, 2, 10000),
-  showClock: boolean, showPinned: boolean, showSaved: boolean, showDate: boolean,
+  showClock: boolean, showPinned: boolean, showSaved: boolean, showMemory: boolean, showDate: boolean,
   otherWindows: boolean, pinsMoveHere: boolean, switchToOpenTab: boolean,
   timeFormat: value => ["24", "12"].includes(value),
   transparency: value => ["low", "medium", "high"].includes(value),
+  showWeather: boolean, tempUnit: value => ["C", "F"].includes(value),
 };
 const deviceRules = {
-  cellSize: value => ["S", "M", "L", "XL", "custom"].includes(value),
+  cellSize: value => ["S", "custom"].includes(value),
   customCell: value => integer(value, 40, 240),
   density: value => ["normal", "compact"].includes(value),
+  weatherPlace: validPlace,
 };
 
 async function loadScope(api, area, key, defaults, rules) {
@@ -68,6 +72,9 @@ async function writeSetting(api, scope, key, value) {
     const stored = (await api.storage[area].get(storageKey))[storageKey];
     const base = stored !== null && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
     written = { ...base, [key]: value };
+    // Reading legacy presets is display-only. Normalize on the next device
+    // write, leaving synced writes and unknown newer-version keys alone.
+    if (scope === "device" && ["M", "L", "XL"].includes(written.cellSize)) written.cellSize = "S";
     await api.storage[area].set({ [storageKey]: written });
   } catch (error) {
     console.warn(`Foxy: could not save ${storageKey}`, error);
@@ -86,7 +93,7 @@ export function cellPx(device) {
   if (device?.cellSize === "custom") {
     return Number.isInteger(device.customCell) ? Math.max(40, Math.min(240, device.customCell)) : 80;
   }
-  return Object.hasOwn(CELL_PRESETS, device?.cellSize) ? CELL_PRESETS[device.cellSize] : CELL_PRESETS.M;
+  return Object.hasOwn(CELL_PRESETS, device?.cellSize) ? CELL_PRESETS[device.cellSize] : CELL_PRESETS.S;
 }
 
 export function cardAlpha(transparency, scheme) {

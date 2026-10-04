@@ -1,4 +1,6 @@
 import { saveSetting, cardAlpha } from "./store.js";
+import { searchPlaces } from "../weather/location.js";
+import { hasConsent, requestConsent, watchConsent } from "../weather/consent.js";
 
 const panes = new WeakMap();
 let sequence = 0;
@@ -15,10 +17,16 @@ function button(text) {
 
 // Both pages use the same stores and the same failure rollback. A successful
 // save is applied to the board only by its existing storage-change listener.
-export function settingActions(api, onReset) {
+export function settingActions(api, onReset, fetch) {
   return {
     onChange(scope, key, value) { return saveSetting(api, scope, key, value); },
     onReset,
+    // A searched city is location data too: nothing is sent before the grant.
+    searchPlaces: async query => (await hasConsent(api) ? searchPlaces(query, fetch) : []),
+    weatherAllowed: () => hasConsent(api),
+    allowWeather: () => requestConsent(api),
+    allowMyLocation: () => requestConsent(api, "auto"),
+    watchWeather: listener => watchConsent(api, listener),
   };
 }
 
@@ -94,7 +102,7 @@ export function renderSettings(container, state, handlers) {
       pane.controls.push(() => node.setAttribute("aria-checked", String(pane.state.synced[key])));
     }
     const grid = section("Grid");
-    segmented(grid, "Cell size", "device", "cellSize", [["S", "S"], ["M", "M"], ["L", "L"], ["XL", "XL"], ["custom", "Custom"]], true);
+    segmented(grid, "Cell size", "device", "cellSize", [["S", "S"], ["custom", "Custom"]], true);
     const custom = el("div", "setting setting-custom"), customLabel = el("label", "setting-label", "Cell size in px");
     const field = el("input", "settings-number"); field.type = "number"; field.min = "40"; field.max = "240"; field.step = "1";
     field.id = `setting-${++sequence}`; field.dataset.key = "customCell"; customLabel.htmlFor = field.id;
@@ -108,11 +116,11 @@ export function renderSettings(container, state, handlers) {
       custom.hidden = field.hidden = pane.state.device.cellSize !== "custom";
       field.value = pane.state.device.customCell;
     });
-    const { row: rail, title: railLabel } = label(grid, "TABS rail width"), stepper = el("div", "settings-stepper");
+    const { row: rail, title: railLabel } = label(grid, "Ungrouped tabs rail width"), stepper = el("div", "settings-stepper");
     stepper.setAttribute("role", "group"); stepper.setAttribute("aria-labelledby", railLabel.id);
     const minus = button("−"), plus = button("+"), count = el("output", "", "");
     minus.dataset.rail = "minus"; plus.dataset.rail = "plus"; count.dataset.rail = "value";
-    minus.setAttribute("aria-label", "Decrease TABS rail width"); plus.setAttribute("aria-label", "Increase TABS rail width");
+    minus.setAttribute("aria-label", "Decrease ungrouped tabs rail width"); plus.setAttribute("aria-label", "Increase ungrouped tabs rail width");
     const railCells = () => Math.max(2, Math.min(pane.state.railMax, pane.state.synced.railCells));
     function showRail(value) {
       const cells = Math.max(2, Math.min(pane.state.railMax, value));
@@ -130,6 +138,8 @@ export function renderSettings(container, state, handlers) {
     });
     const tiles = section("Tiles");
     toggle(tiles, "Show clock", "showClock"); toggle(tiles, "Show pinned", "showPinned"); toggle(tiles, "Show saved", "showSaved");
+    toggle(tiles, "Show memory", "showMemory");
+    toggle(tiles, "Show weather", "showWeather");
     const reset = button("Reset layout"); reset.className = "settings-reset settings-pill"; tiles.append(reset);
     const clearConfirm = () => { clearTimeout(pane.timer); pane.confirmed = false; reset.textContent = "Reset layout"; };
     reset.addEventListener("keydown", event => {
@@ -150,6 +160,7 @@ export function renderSettings(container, state, handlers) {
     const clock = section("Clock");
     segmented(clock, "Time format", "synced", "timeFormat", [["24", "24-hour"], ["12", "12-hour"]]);
     toggle(clock, "Show date", "showDate");
+    weatherSection(section("Weather"));
     const cards = section("Cards");
     segmented(cards, "Transparency", "synced", "transparency", [["low", "Low"], ["medium", "Medium"], ["high", "High"]]);
     segmented(cards, "Row density", "device", "density", [["normal", "Normal"], ["compact", "Compact"]], true);
@@ -165,6 +176,81 @@ export function renderSettings(container, state, handlers) {
     new ResizeObserver(edges).observe(scroll);
     pane.updateEdges = edges;
     function update() { for (const control of pane.controls) control(); }
+    function weatherSection(weather) {
+      segmented(weather, "Temperature", "synced", "tempUnit", [["C", "°C"], ["F", "°F"]]);
+      const { row, title, caption } = label(weather, "Location", true);
+      row.classList.add("setting-place");
+      const current = el("output", "weather-current");
+      current.setAttribute("aria-labelledby", title.id);
+      const search = el("div", "weather-search"), input = el("input", "settings-text");
+      input.type = "search"; input.placeholder = "Search a city"; input.autocomplete = "off"; input.spellcheck = false;
+      input.setAttribute("aria-label", "Search a city"); input.setAttribute("aria-describedby", caption.id);
+      const results = el("div", "weather-results"); results.setAttribute("role", "group"); results.setAttribute("aria-label", "Matching places");
+      const auto = el("button", "weather-auto settings-pill", "Use my location"); auto.type = "button";
+      // A searched city is location data: until locationInfo is granted the field is a pill that asks.
+      const allow = el("button", "weather-allow settings-pill", "Allow weather"); allow.type = "button";
+      search.append(allow, input, results);
+      row.append(current, search, auto);
+      let timer = 0, token = 0, found = { query: null, places: [] }, allowed = !pane.handlers.weatherAllowed;
+      const setAllowed = value => {
+        allowed = value === true;
+        allow.hidden = allowed; input.hidden = !allowed;
+        if (!allowed) { clearTimeout(timer); ++token; results.replaceChildren(); found = { query: null, places: [] }; }
+      };
+      setAllowed(allowed);
+      pane.handlers.weatherAllowed?.().then(setAllowed, () => setAllowed(false));
+      pane.handlers.watchWeather?.(setAllowed);
+      // permissions.request needs the click: it runs here, before any await.
+      allow.addEventListener("click", () => {
+        pane.handlers.allowWeather?.().then(granted => { if (granted) { setAllowed(true); input.focus(); } });
+      });
+      const pick = place => {
+        clearTimeout(timer); ++token;
+        input.value = ""; results.replaceChildren(); found = { query: null, places: [] };
+        change("device", "weatherPlace", { name: place.name, lat: place.lat, lon: place.lon });
+      };
+      async function run(query) {
+        if (!allowed) return null;
+        const mine = ++token;
+        let places = [];
+        try { places = await pane.handlers.searchPlaces?.(query) ?? []; }
+        catch (error) { console.warn("Foxy: city search failed", error); }
+        if (mine !== token) return null;
+        found = { query, places };
+        results.replaceChildren(...places.map(place => {
+          const option = el("button", "weather-result"); option.type = "button";
+          option.append(el("span", "weather-result-name", place.name), el("span", "weather-result-detail", place.detail ?? ""));
+          option.addEventListener("click", () => pick(place));
+          return option;
+        }));
+        return places;
+      }
+      input.addEventListener("input", () => {
+        clearTimeout(timer); ++token;
+        const query = input.value.trim();
+        if (query.length < 2) { results.replaceChildren(); found = { query: null, places: [] }; return; }
+        timer = setTimeout(() => run(query), 300);
+      });
+      input.addEventListener("keydown", async event => {
+        if (event.key !== "Enter" || event.isComposing) return;
+        event.preventDefault();
+        const query = input.value.trim();
+        if (query.length < 2 || !allowed) return;
+        clearTimeout(timer);
+        const places = found.query === query ? found.places : await run(query);
+        if (places?.length && input.value.trim() === query) pick(places[0]);
+      });
+      auto.addEventListener("click", () => {
+        // Ask in this click (it must run before any await); switch only on a grant so a decline keeps the city.
+        const asked = pane.handlers.allowMyLocation?.() ?? Promise.resolve(true);
+        asked.then(granted => { if (granted) change("device", "weatherPlace", "auto"); }, () => {});
+      });
+      pane.controls.push(() => {
+        const place = pane.state.device.weatherPlace;
+        current.textContent = place && place !== "auto" ? place.name : "Current location";
+        auto.disabled = !place || place === "auto";
+      });
+    }
   }
   pane.state = state; pane.handlers = handlers;
   for (const control of pane.controls) control();

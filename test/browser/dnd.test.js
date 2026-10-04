@@ -82,7 +82,9 @@ function luminance(rgb) {
 async function flush(ff) { await ff.settle(); await nextFrame(); await nextFrame(); }
 async function controller(set = setup(), listener, layout = {}, options = {}) {
   const ff = createFirefox(set, listener), root = await makeRoot();
-  await ff.browser.storage.sync.set(layout); await ff.settle();
+  // These geometry fixtures use Custom 80, independent of the S default.
+  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
+  await ff.browser.storage.sync.set({ ...layout, settings: { railCells: 3, ...layout.settings } }); await ff.settle();
   const { createController } = await import("../../extension/src/main.js");
   const control = createController(root, ff.browser, undefined, options);
   await control.refresh();
@@ -180,7 +182,9 @@ for (const [zone, slot] of [["pinned", 0], ["pinned", 1], ["pinned", 2], ["tabs"
     const { root, calls } = await draw();
     const source = tab(root), dt = start(source), rows = root.querySelector(`.rows[data-zone="${zone}"]`);
     const list = [...rows.querySelectorAll(".row")];
-    const coords = slot === 0 ? point(list[0], 0.5, 0) : point(list[slot - 1], 0.5, 1);
+    const coords = zone === "pinned"
+      ? slot === 0 ? point(list[0], 0, 0.5) : point(list[slot - 1], 1, 0.5)
+      : slot === 0 ? point(list[0], 0.5, 0) : point(list[slot - 1], 0.5, 1);
     try {
       assert.ok(dispatchDrag("dragover", rows, { dataTransfer: dt, ...coords }).defaultPrevented);
       dispatchDrag("drop", rows, { dataTransfer: dt, ...coords });
@@ -188,20 +192,81 @@ for (const [zone, slot] of [["pinned", 0], ["pinned", 1], ["pinned", 2], ["tabs"
     } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
   });
 }
+// Treat the footer as the list's bottom edge, not as heading padding.
+// Removing the footer placement/scroll mapping must break these real drag events.
+async function longRail() {
+  const set = setup();
+  set.tabs = set.tabs.filter(t => t.id !== 15 && t.id !== 23);
+  for (let i = 0; i < 30; i++) set.tabs.push({ id: 1000 + i, windowId: 1 });
+  const result = await draw(set);
+  result.renderBoard(result.root, result.board, {}, result.handlers, {
+    device: { cellSize: "S", density: "normal" }, synced: { railCells: 2 },
+  });
+  await nextFrame(); await nextFrame();
+  return result;
+}
+function footerPoint(root, location) {
+  const gear = root.querySelector(".settings-gear"), rail = root.querySelector(".rail");
+  return location === "gear" ? { target: gear, ...point(gear) }
+    : { target: rail, clientX: rail.getBoundingClientRect().left + 20, clientY: point(gear).clientY };
+}
+for (const location of ["gear", "strip"]) {
+  test(`drop on rail footer ${location} inserts at the end with a bottom insertion line`, async () => {
+    const { root, calls } = await longRail(), rows = root.querySelector('.rail .rows');
+    rows.scrollTop = rows.scrollHeight;
+    await nextFrame(); await nextFrame();
+    const source = root.querySelector('[data-tab-id="12"]'), dt = start(source);
+    const { target, ...coords } = footerPoint(root, location), opts = { dataTransfer: dt, ...coords };
+    try {
+      assert.ok(dispatchDrag("dragover", target, opts).defaultPrevented);
+      const line = root.querySelector(".drop-line").getBoundingClientRect();
+      dispatchDrag("drop", target, opts);
+      assert.deepEqual(calls.tabs, [[12, { zone: "tabs", slot: 30, tabId: 12 }]]);
+      assert.ok(Math.abs(line.top + 1 - rows.getBoundingClientRect().bottom) <= 1,
+        "footer feedback is at the list bottom, not its top");
+    } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
+    clean(root);
+  });
+  test(`rail footer ${location} keeps edge scrolling until dragend`, async () => {
+    const { root } = await longRail(), rows = root.querySelector('.rail .rows');
+    const source = root.querySelector('[data-tab-id="12"]'), dt = start(source);
+    const { target, ...coords } = footerPoint(root, location), opts = { dataTransfer: dt, ...coords };
+    try {
+      dispatchDrag("dragover", rows, { dataTransfer: dt, ...point(rows, 0.5, 0.99) });
+      dispatchDrag("dragleave", rows, { ...opts, relatedTarget: target });
+      dispatchDrag("dragover", target, opts);
+      await nextFrame(); await nextFrame();
+      assert.ok(rows.scrollTop > 0, "a pointer beside or on the gear scrolls the list down");
+      const before = rows.scrollTop;
+      await nextFrame(); await nextFrame();
+      assert.ok(rows.scrollTop > before, "scrolling continues across animation frames");
+    } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
+    const stopped = rows.scrollTop;
+    await nextFrame(); await nextFrame();
+    assert.equal(rows.scrollTop, stopped, "dragend stops footer scrolling");
+    clean(root);
+  });
+}
+
 for (const zone of ["pinned", "tabs"]) {
   for (const slot of [1, 2]) {
-    test(`${zone} window-boundary marker at slot ${slot} sits at the preceding row bottom`, async () => {
+    test(`${zone} window-boundary marker at slot ${slot} sits between neighbouring tabs`, async () => {
       const set = setup(); set.windows.push({ id: 3 });
       set.tabs.push({ id: 31, windowId: 3 }, { id: 32, windowId: 3, pinned: true });
       const { root, calls } = await draw(set);
       const source = root.querySelector('[data-tab-id="12"]'), dt = start(source);
       const rows = root.querySelector(`.rows[data-zone="${zone}"]`), list = [...rows.querySelectorAll(".row")];
       const after = list[slot - 1].getBoundingClientRect(), before = list[slot].getBoundingClientRect();
-      const opts = { dataTransfer: dt, clientX: after.left + 10, clientY: (after.bottom + before.top) / 2 };
+      const opts = zone === "pinned"
+        ? { dataTransfer: dt, clientX: (after.right + before.left) / 2, clientY: after.top + 10 }
+        : { dataTransfer: dt, clientX: after.left + 10, clientY: (after.bottom + before.top) / 2 };
       try {
         dispatchDrag("dragover", rows, opts);
         const line = root.querySelector(".drop-line").getBoundingClientRect();
-        assert.ok(Math.abs(line.top + 1 - after.bottom) <= 1, "marker must sit on after.bottom, outside the window heading/gap");
+        if (zone === "pinned") {
+          assert.equal(line.width, 2);
+          assert.ok(Math.abs(line.left + 1 - (after.right + before.left) / 2) <= 1, "vertical marker sits in the cell gap");
+        } else assert.ok(Math.abs(line.top + 1 - after.bottom) <= 1, "marker must sit on after.bottom, outside the window heading/gap");
         dispatchDrag("drop", rows, opts);
         assert.deepEqual(calls.tabs, [[12, { zone, slot, tabId: 12 }]]);
       } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
@@ -217,7 +282,7 @@ for (const zone of ["pinned", "tabs"]) {
     const rows = root.querySelector(`.rows[data-zone="${zone}"]`);
     try {
       assert.ok(dispatchDrag("dragover", rows, { dataTransfer: dt, ...point(rows) }).defaultPrevented);
-      assert.equal(root.querySelector(".drop-line").getBoundingClientRect().height, 2);
+      assert.equal(root.querySelector(".drop-line").getBoundingClientRect()[zone === "pinned" ? "width" : "height"], 2);
       dispatchDrag("drop", rows, { dataTransfer: dt, ...point(rows) });
       assert.deepEqual(calls.tabs, [[12, { zone, slot: 0, tabId: 12 }]]);
     } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
@@ -226,7 +291,7 @@ for (const zone of ["pinned", "tabs"]) {
 for (const [selector, drop] of [
   ['.column[data-group-id="101"] .group-name', { zone: "group", groupId: 101, slot: 0, tabId: 15 }],
   ['.column[data-group-id="201"] .other-window', { zone: "group", groupId: 201, slot: 0, tabId: 15 }],
-  ['.fixed[data-zone="pinned"] .column-title', { zone: "pinned", slot: 0, tabId: 15 }],
+  ['.fixed[data-zone="pinned"]', { zone: "pinned", slot: 0, tabId: 15 }],
   ['.fixed[data-zone="tabs"] .column-title', { zone: "tabs", slot: 0, tabId: 15 }],
 ]) {
   test(`tab drop on ${selector} targets the column's slot zero`, async () => {
@@ -236,7 +301,7 @@ for (const [selector, drop] of [
     const source = tab(root), dt = start(source), target = root.querySelector(selector);
     root.querySelector('.rows[data-group-id="101"]').scrollTop = 160;
     try {
-      const opts = { dataTransfer: dt, ...point(target) };
+      const opts = { dataTransfer: dt, ...point(target, 0, 0) };
       assert.ok(dispatchDrag("dragover", target, opts).defaultPrevented, "a column heading accepts tab drops");
       assert.ok(target.closest(".column").classList.contains("drop-target"));
       if (drop.zone === "tabs") assert.equal(root.querySelector(".drop-line"), null, "the TABS title is a no-op for its first row");
@@ -365,6 +430,9 @@ for (const [kind, side, slot] of [["group", "right", 1], ["group", "below", 2], 
   test(`the gap ${side} of a ${kind} tile keeps its row insertion target`, async () => {
     const { root, calls } = await draw();
     const tile = root.querySelector(kind === "group" ? '.tile[data-group-id="101"]' : '.tile[data-kind="pinned"]');
+    // Keep the target and its trailing gap in view, clear of the new pin defaults.
+    for (const other of root.querySelectorAll(".tile")) other.style.setProperty("--y", "10");
+    tile.style.setProperty("--x", "0"); tile.style.setProperty("--y", "0");
     const rows = tile.querySelector(".rows"), bounds = tile.getBoundingClientRect();
     const coords = side === "right"
       ? { clientX: bounds.right + 8, clientY: rows.querySelector(".row").getBoundingClientRect().bottom }
@@ -470,7 +538,7 @@ test("empty-cell drop shows the unmapped tile at its rect, opens its editor and 
     assert.deepEqual(rectOf(tile), { x: 4, y: 2, w: 3, h: 4 });
     assert.ok(tile.querySelector(".name-editor"), "new group opens its name editor");
     assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set"), [], "unmapped placement is display-only");
-    assert.deepEqual(tileEntries(await ff.browser.storage.sync.get(null)), dropLayout);
+    assert.deepEqual(tileEntries(await ff.browser.storage.sync.get(null)), { ...dropLayout, settings: { railCells: 3 } });
     setReply({ saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote", [groupId]: "new" } });
     ff.fire("bookmarks.onCreated", "new", { id: "new", type: "folder" }); await flush(ff);
     assert.ok(root.querySelector(`[data-tile-id="local:${groupId}"]`), "mapping update is held by the editor");
@@ -483,7 +551,7 @@ test("empty-cell drop shows the unmapped tile at its rect, opens its editor and 
       "tile:13:pinned": { x: 5, y: 6, w: 3, h: 4 },
       "tile:13:group:remote": { x: 3, y: 10, w: 3, h: 4 },
     });
-    assert.deepEqual(await ff.browser.storage.sync.get(null), { ...dropLayout, ...writes[0].args[0] });
+    assert.deepEqual(await ff.browser.storage.sync.get(null), { ...dropLayout, settings: { railCells: 3 }, ...writes[0].args[0] });
     await control.refresh(); await flush(ff); await flush(ff);
     assert.equal(ff.calls.filter(c => c.api === "storage.sync.set").length, 1, "mapped pending entry is consumed once");
     assert.deepEqual(ff.errors, []);
@@ -523,7 +591,8 @@ for (const order of ["dropper-first", "dropper-second"]) {
     const { createController } = await import("../../extension/src/main.js");
     const pages = [];
     try {
-      await ff.browser.storage.sync.set(dropLayout); await ff.settle();
+      await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
+      await ff.browser.storage.sync.set({ ...dropLayout, settings: { railCells: 3 } }); await ff.settle();
       for (let i = 0; i < 2; i++) {
         const root = await makeRoot();
         const control = createController(root, ff.browser, undefined, timer.options);
@@ -1055,9 +1124,9 @@ test("a failed key check for a post-paint group retries on a later render instea
   } finally { console.warn = warn; if (root) { endName(root); root.remove(); } timer.restore(); }
 });
 
-// Using the stretched cell for defaults loses a row except at the exact XL pitch.
+// Using the stretched cell for defaults loses a row except at the exact Custom 144 pitch.
 for (const [width, pitch] of [[1000, 1016 / 6], [1366, 1382 / 8], [1584, 160], [1600, 161.6]]) {
-  test(`XL tab drop at ${width}px previews and saves the setting's 2 by 3 default`, async () => {
+  test(`Custom 144 tab drop at ${width}px previews and saves the setting's 2 by 3 default`, async () => {
     let reply = { folders: {}, saved: [], missing: [] };
     const set = { windows: [{ id: 1, focused: true }], selfTabId: 99, groups: [],
       tabs: [{ id: 15, windowId: 1 }, { id: 99, windowId: 1 }] };
@@ -1065,7 +1134,7 @@ for (const [width, pitch] of [[1000, 1016 / 6], [1366, 1382 / 8], [1584, 160], [
       ? { ok: true } : message.type === "foxy:saved" ? reply : undefined,
       { settings: { showClock: false, showPinned: false, showSaved: false } });
     root.style.width = `${width}px`;
-    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "XL" } });
+    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 144 } });
     await control.refresh(); await flush(ff); await flush(ff);
     const grid = root.querySelector(".grid"), bounds = grid.getBoundingClientRect();
     const coords = { clientX: bounds.left + 1.2 * pitch, clientY: bounds.top + 1.2 * pitch };
@@ -1127,3 +1196,40 @@ for (const [label, x, y, expected] of [
     } finally { dispatchDrag("dragend", source, { dataTransfer }); }
   });
 }
+
+
+for (const [targetSelector, drop] of [
+  ['.rows[data-group-id="101"]', {zone:'group', groupId:101, slot:0, tabId:21}],
+  ['.rows[data-group-id="201"]', {zone:'group', groupId:201, slot:0, tabId:21}],
+  ['.rail .rows', {zone:'tabs', slot:0, tabId:21}],
+  ['.pinned-grid', {zone:'pinned', slot:0, tabId:21}],
+]) {
+  test(`remote pin icon drags to ${targetSelector} with its tab identity`, async () => {
+    const { root, calls } = await draw();
+    const source = root.querySelector('[data-tab-id="21"] .row-open'), dataTransfer = start(source);
+    const target = root.querySelector(targetSelector);
+    try {
+      assert.equal(dataTransfer.getData(TAB), '21');
+      assert.ok(dispatchDrag('dragover', target, {dataTransfer, ...point(target, 0, 0)}).defaultPrevented);
+      dispatchDrag('drop', target, {dataTransfer, ...point(target, 0, 0)});
+      assert.deepEqual(calls.tabs, [[21, drop]]); assert.deepEqual(calls.opened, []);
+    } finally { dispatchDrag('dragend', source, {dataTransfer}); }
+    clean(root);
+  });
+}
+
+test('remote pin icon drags to an empty cell to create a group', async () => {
+  const { root, calls } = await draw();
+  const source = root.querySelector('[data-tab-id="21"] .row-open'), dataTransfer = start(source);
+  const grid = root.querySelector('.grid'), bounds = grid.getBoundingClientRect();
+  const pitch = parseFloat(grid.style.getPropertyValue('--pitch'));
+  const point = {clientX:bounds.left + 12 * pitch + 20, clientY:bounds.top + 20};
+  try {
+    assert.equal(document.elementFromPoint(point.clientX, point.clientY), grid);
+    assert.ok(dispatchDrag('dragover', grid, {dataTransfer, ...point}).defaultPrevented);
+    dispatchDrag('drop', grid, {dataTransfer, ...point});
+    assert.deepEqual(calls.tabs, [[21, {zone:'cell', tabId:21, rect:{x:10,y:0,w:3,h:4}}]]);
+    assert.deepEqual(calls.opened, []);
+  } finally { dispatchDrag('dragend', source, {dataTransfer}); }
+  clean(root);
+});
