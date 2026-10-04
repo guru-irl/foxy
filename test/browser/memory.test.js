@@ -50,12 +50,12 @@ test('memory header renders measured bytes, system use, neutral sparkline and si
   } finally {f.controller.stop();f.root.remove();}
 });
 
-test('memory formats sub-GB values and the GB boundary in binary units to one decimal', async () => {
+test('memory formats whole MB below 1 GB and GB to one decimal, in binary units', async () => {
   const f=setup();
   try {
-    f.api.runtime.sendMessage=async()=>({firefox:536870912,system:{total:38654705664,used:19327352832}});
+    f.api.runtime.sendMessage=async()=>({firefox:536870912+400000,system:{total:38654705664,used:19327352832}});
     f.render();await f.settle();
-    assert.equal(f.root.querySelector('.memory-total').textContent,'512.0 MB');
+    assert.equal(f.root.querySelector('.memory-total').textContent,'512 MB');
     assert.equal(f.root.querySelector('.memory-system').textContent,'of 36 GB · system 50 % used');
     f.api.runtime.sendMessage=async()=>({firefox:1073741824,system:{total:38654705664,used:19327352832}});
     await f.tick();assert.equal(f.root.querySelector('.memory-total').textContent,'1.0 GB');
