@@ -121,27 +121,30 @@ function fill(tile, body, state, settings, now) {
   const hero = el("div", "weather-now");
   hero.append(glyph(now_.glyph), el("div", "weather-temp", degrees(current.temp, unit)));
   hero.lastChild.setAttribute("aria-label", `${degrees(current.temp, unit)} ${unit === "F" ? "Fahrenheit" : "Celsius"}`);
+  // "Overcast · 30° / 21°" on one line under the reading.
   const summary = el("div", "weather-summary");
-  summary.append(el("div", "weather-condition", now_.label));
+  summary.append(el("span", "weather-condition", now_.label));
   if (today) {
-    const range = el("div", "weather-range");
-    range.append(el("span", "weather-hi", degrees(today.max, unit)), " ", el("span", "weather-lo", degrees(today.min, unit)));
+    const range = el("span", "weather-range");
+    range.append(el("span", "weather-hi", degrees(today.max, unit)), el("span", "weather-lo", ` / ${degrees(today.min, unit)}`));
     range.setAttribute("aria-label", `High ${degrees(today.max, unit)}, low ${degrees(today.min, unit)}`);
-    summary.append(range);
+    summary.append(el("span", "weather-sep", " · "), range);
   }
-  if (current.feels !== null) summary.append(el("div", "weather-feels", `Feels like ${degrees(current.feels, unit)}`));
-  hero.append(summary);
 
+  // One line; facts that do not fit the width wrap out of sight, whole.
   const details = el("div", "weather-details");
   const facts = [];
+  if (current.feels !== null) facts.push(`Feels like ${degrees(current.feels, unit)}`);
   if (current.wind !== null) { const w = wind(current.wind, unit); facts.push(`Wind ${w.value} ${w.unit}`); }
   if (current.humidity !== null) facts.push(`Humidity ${Math.round(current.humidity)} %`);
   if (current.precipitation !== null && current.precipitation > 0) {
     facts.push(unit === "F" ? `Precip ${(current.precipitation / 25.4).toFixed(2)} in` : `Precip ${current.precipitation} mm`);
   }
   for (const [i, fact] of facts.entries()) {
-    if (i) details.append(el("span", "weather-sep", "·"));
-    details.append(el("span", "", fact));
+    const item = el("span", "weather-fact");
+    if (i) item.append(el("span", "weather-sep", " · "));
+    item.append(fact);
+    details.append(item);
   }
 
   const hours = el("div", "weather-hours");
@@ -185,7 +188,10 @@ function fill(tile, body, state, settings, now) {
       list.append(row);
     }
   }
-  body.append(top, hero, details, hours, list);
+  body.append(top, hero, summary);
+  // No empty row when the forecast has none of the facts.
+  if (facts.length) body.append(details);
+  body.append(hours, list);
   edges(hours);
   hours.addEventListener("scroll", () => edges(hours), { passive: true });
   hours.addEventListener("wheel", wheel);

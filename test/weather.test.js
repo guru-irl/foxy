@@ -149,7 +149,7 @@ test("WMO codes map to labels and the in-house glyphs", () => {
     [61, true, "Light rain", "rain"], [65, true, "Heavy rain", "rain"], [67, true, "Freezing rain", "rain"],
     [73, true, "Snow", "snow"], [77, true, "Snow grains", "snow"], [80, true, "Light showers", "showers"],
     [82, true, "Heavy showers", "showers"], [86, true, "Snow showers", "snow"], [95, true, "Thunderstorm", "thunder"],
-    [99, true, "Thunderstorm with hail", "thunder"], [12345, true, "Unknown", "cloudy"]];
+    [96, true, "Thunderstorm, hail", "thunder"], [99, true, "Thunderstorm, hail", "thunder"], [12345, true, "Unknown", "cloudy"]];
   for (const [code, day, label, glyph] of cases) assert.deepEqual(condition(code, day), { label, glyph }, `code ${code}`);
   for (const name of ["clear-day", "clear-night", "partly-day", "partly-night", "cloudy", "fog", "drizzle", "rain",
     "snow", "showers", "thunder"]) assert.ok(Array.isArray(GLYPHS[name]) && GLYPHS[name].length, name);

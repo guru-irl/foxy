@@ -281,9 +281,16 @@ body {
 
 /* --- Weather ----------------------------------------------------------- */
 
-/* Tiers follow the tile's own size: small (glyph and temperature), medium
-   (plus condition, place, high / low), tall (plus the hourly strip) and
-   taller (plus 7 days). Colour is limited to the sun core, rain and bolt. */
+/* One left-aligned column whose parts follow the tile's own size: place,
+   reading (glyph and temperature), summary (condition, high / low), details,
+   the hourly strip and 7 days, with one even gap between them and spare
+   height at the bottom. When the height is short the details go first, then
+   the strip, then the summary. Small tiles show the reading only. Colour is
+   limited to the sun core, rain and bolt. The height steps below are the sums
+   of the parts: place 14, reading 40 (56 from 142 px), summary and details 16,
+   strip 82, day rows 28, gaps 8 (12 from 142 px), padding 12 (16). Below
+   220 px wide the summary takes two lines (32) and the reading is 32 high
+   with 4 px gaps until 158 px, so each later step is 16 px higher. */
 .weather {
   --weather-sun: light-dark(#d4951a, #f0c04f);
   --weather-rain: light-dark(#3b78c4, #82b4ee);
@@ -302,7 +309,7 @@ body {
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   height: 100%;
   padding: 12px 14px;
 }
@@ -347,11 +354,9 @@ body {
 .weather-updated { flex: none; color: var(--text-muted); letter-spacing: 0.04em; text-transform: none; }
 
 .weather-now {
-  display: grid;
-  grid-template-columns: auto 1fr;
+  display: flex;
   align-items: center;
-  column-gap: 8px;
-  row-gap: 4px;
+  gap: 8px;
   min-width: 0;
 }
 .weather-glyph { width: 32px; height: 32px; }
@@ -362,20 +367,16 @@ body {
   white-space: nowrap;
 }
 .weather-summary {
-  grid-column: 1 / -1;
+  display: flex;
   min-width: 0;
-}
-.weather-condition,
-.weather-range,
-.weather-feels {
-  overflow: hidden;
+  font-size: 13px;
+  line-height: 16px;
   white-space: nowrap;
-  text-overflow: ellipsis;
 }
-.weather-condition { font-size: 13px; line-height: 16px; }
-.weather-range { font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums; }
-.weather-lo, .weather-feels { color: var(--text-muted); }
-.weather-feels { display: none; font-size: 12px; line-height: 16px; }
+.weather-condition { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.weather-range { flex: none; font-variant-numeric: tabular-nums; }
+.weather-sep { flex: none; white-space: pre; color: var(--text-muted); }
+.weather-lo { color: var(--text-muted); }
 
 .weather-details,
 .weather-hours,
@@ -417,38 +418,37 @@ body {
   justify-content: center;
 }
 
-/* Wide medium: the summary sits to the right of the temperature. */
-@container (width >= 260px) {
-  .weather-now { grid-template-columns: auto auto 1fr; }
-  .weather-summary { grid-column: auto; text-align: right; }
+/* Place and reading need 86 px, the summary 110. */
+@container (height < 110px) {
+  .weather-summary { display: none; }
 }
 
-/* Tall: larger reading, details and the hourly strip at the bottom. */
-@container (height >= 260px) and (width >= 150px) {
-  .weather-body { gap: 10px; padding: 16px; }
+/* Medium below 260 px wide: the reading follows the width. */
+@container (height < 142px) and (150px <= width < 260px) {
+  .weather-temp { font-size: min(40px, 19cqw); }
+}
+
+/* From 142 px: the larger reading and gaps (place, reading, summary). */
+@container (height >= 142px) and (width >= 150px) {
+  .weather-body { gap: 12px; padding: 16px; }
   .weather .weather-glyph { width: 48px; height: 48px; stroke-width: 1.75px; }
   .weather-temp { font-size: 56px; }
-  .weather-feels { display: block; }
-  .weather-details {
-    display: block;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    color: var(--text-muted);
-    font-size: 11px;
-    line-height: 16px;
-  }
-  .weather-sep { margin-inline: 6px; opacity: 0.6; }
-  /* Without days, the reading sits centred between the place and the hours. */
-  .weather-now { margin-top: auto; }
-  .weather-details { margin-bottom: auto; }
+}
+
+/* Below 300 px wide the reading follows the width, so 101° and -13° fit
+   3-column tiles. */
+@container (height >= 142px) and (150px <= width < 300px) {
+  .weather-temp { font-size: min(56px, 21cqw); }
+}
+
+/* From 236 px: the hourly strip. */
+@container (height >= 236px) and (width >= 150px) {
   .weather-hours {
     --fade-start: 0px;
     --fade-end: 0px;
     display: flex;
     flex: none;
     gap: 2px;
-    margin-top: auto;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
@@ -485,43 +485,45 @@ body {
   .weather-hour-pop { min-height: 12px; color: var(--weather-rain); font-size: 9px; line-height: 12px; }
 }
 
-/* Tall below 300 px wide: the summary stays under the reading, and the
-   reading follows the width, so 101° and -13° fit 3-column tiles. */
-@container (height >= 260px) and (150px <= width < 300px) {
-  .weather-details { display: none; }
-  .weather-now { grid-template-columns: auto 1fr; }
-  .weather-summary { grid-column: 1 / -1; text-align: left; }
-  .weather-temp { font-size: min(56px, 21cqw); }
+/* From 264 px: the details line. Facts that do not fit the width wrap to a
+   second line, which is out of sight, so no fact is cut. */
+@container (height >= 264px) and (width >= 150px) {
+  .weather-details {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    height: 16px;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 16px;
+  }
+  .weather-fact { flex: none; white-space: nowrap; }
+  .weather-fact .weather-sep { white-space: pre; }
 }
 
-/* Medium below 260 px wide: the reading follows the width too. */
-@container (100px <= height < 260px) and (150px <= width < 260px) {
-  .weather-temp { font-size: min(40px, 19cqw, calc(100cqh - 70px)); }
-}
-
-/* Taller: seven days with a shared min / max scale. */
-@container (height >= 460px) and (width >= 150px) {
-  .weather-now, .weather-details { margin-block: 0; }
-  .weather-hours { margin-top: 0; }
+/* From 360 px: the days, 3 rows and one more every 28 px up to 7, with a
+   shared min / max scale. Rows grow to 36 px; the rest stays at the bottom. */
+@container (height >= 360px) and (width >= 150px) {
   .weather-days {
     display: flex;
-    flex: 1;
+    flex: 1 0 auto;
     flex-direction: column;
-    justify-content: space-evenly;
-    min-height: 0;
     margin: 0;
     padding: 0;
     list-style: none;
   }
   .weather-day {
     display: grid;
+    flex: 1 0 28px;
     grid-template-columns: minmax(36px, auto) 20px 32px 1fr 32px;
     align-items: center;
     gap: 8px;
-    min-height: 24px;
+    max-height: 36px;
     font-size: 12px;
     font-variant-numeric: tabular-nums;
   }
+  .weather-day:nth-child(n + 4) { display: none; }
   .weather-day-name { font-weight: 600; }
   .weather-day-glyph { width: 20px; height: 20px; }
   .weather-day-min { color: var(--text-muted); text-align: right; }
@@ -548,15 +550,38 @@ body {
     background: var(--text);
   }
 }
+@container (height >= 388px) and (width >= 150px) { .weather-day:nth-child(4) { display: grid; } }
+@container (height >= 416px) and (width >= 150px) { .weather-day:nth-child(5) { display: grid; } }
+@container (height >= 444px) and (width >= 150px) { .weather-day:nth-child(6) { display: grid; } }
+@container (height >= 472px) and (width >= 150px) { .weather-day:nth-child(7) { display: grid; } }
 
-/* Narrow taller tiles: no day glyph, tighter gaps, and the bar keeps room. */
-@container (height >= 460px) and (150px <= width < 220px) {
+/* Narrow tiles with days: no day glyph, tighter gaps, and the bar keeps room. */
+@container (height >= 360px) and (150px <= width < 220px) {
   .weather-day {
     grid-template-columns: auto auto minmax(20px, 1fr) auto;
     gap: 6px;
   }
   .weather .weather-day-glyph { display: none; }
 }
+
+/* 150 to 220 px wide: the condition and the high / low on two lines. */
+@container (150px <= width < 220px) {
+  .weather-summary { flex-direction: column; }
+  .weather-summary > .weather-sep { display: none; }
+}
+@container (100px <= height < 158px) and (150px <= width < 220px) {
+  .weather-body { gap: 8px; padding: 12px 14px; }
+  .weather[data-state="ok"] .weather-body { gap: 4px; }
+  .weather .weather-glyph { width: 32px; height: 32px; stroke-width: 1.5px; }
+  .weather-temp { font-size: 32px; }
+}
+@container (height < 252px) and (150px <= width < 220px) { .weather-hours { display: none; } }
+@container (height < 280px) and (150px <= width < 220px) { .weather-details { display: none; } }
+@container (height < 376px) and (150px <= width < 220px) { .weather-days { display: none; } }
+@container (height < 404px) and (150px <= width < 220px) { .weather-day:nth-child(4) { display: none; } }
+@container (height < 432px) and (150px <= width < 220px) { .weather-day:nth-child(5) { display: none; } }
+@container (height < 460px) and (150px <= width < 220px) { .weather-day:nth-child(6) { display: none; } }
+@container (height < 488px) and (150px <= width < 220px) { .weather-day:nth-child(7) { display: none; } }
 
 /* Small: glyph and temperature only, centred; side by side when wide. */
 @container (width < 150px) or (height < 100px) {
