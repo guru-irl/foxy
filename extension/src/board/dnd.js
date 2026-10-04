@@ -1,3 +1,4 @@
+import { pinnedPlacement } from "../tiles/pinned.js";
 import { slotFromPointer, resolveTabTarget } from "./targets.js";
 import { scrollAtEdge } from "../grid/scroll.js";
 import { GAP, clampRect, defaultSize } from "../grid/layout.js";
@@ -33,7 +34,7 @@ export function attachDnd(root, handlers, board) {
   function edgeScroll(event) {
     const target = event.target;
     const element = target instanceof Element && root.contains(target)
-      ? target.closest(".rail")?.querySelector(".rows") ?? target.closest(".grid") : null;
+      ? target.closest(".pinned-grid") ?? target.closest(".rail")?.querySelector(".rows") ?? target.closest(".grid") : null;
     const bounds = element?.getBoundingClientRect();
     const { clientX: x, clientY: y } = event;
     if (!accepts(event.dataTransfer) || !bounds || x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom) {
@@ -79,10 +80,11 @@ export function attachDnd(root, handlers, board) {
   function dropZone(target) {
     return target.matches(".rows") ? target : target.closest(".column").querySelector(".rows");
   }
-  function placement(target, y) {
+  function placement(target, x, y) {
     const zone = dropZone(target);
     // Headings and card padding mean the start, even when the list is scrolled.
     if (zone !== target) return { slot: 0, offset: zone.scrollTop };
+    if (zone.matches(".pinned-grid")) return pinnedPlacement(zone, x, y);
     const items = [...target.querySelectorAll(":scope > .row")];
     const rects = items.map(item => item.getBoundingClientRect());
     const slot = slotFromPointer(rects.map(r => (r.top + r.bottom) / 2), y);
@@ -107,7 +109,7 @@ export function attachDnd(root, handlers, board) {
       target.append(preview);
       return;
     }
-    const { slot, offset } = placement(target, y);
+    const { slot, offset, left } = placement(target, x, y);
     target.closest(".column").classList.add("drop-target");
     const zone = dropZone(target);
     if (state.board && state.source != null) {
@@ -118,14 +120,16 @@ export function attachDnd(root, handlers, board) {
     const line = document.createElement("div");
     line.className = "drop-line";
     line.setAttribute("aria-hidden", "true");
-    line.style.top = `${Math.max(0, offset - 1)}px`;
+    line.style.top = `${Math.max(0, offset - (left === undefined ? 1 : 0))}px`;
+    if (left !== undefined) line.style.left = `${left}px`;
     zone.append(line);
   }
 
   root.addEventListener("dragstart", event => {
     const source = event.target.closest?.(".row");
     if (!source || !root.contains(source) || !event.dataTransfer || event.target.closest("input, textarea") ||
-        source.closest(".column")?.querySelector(".name-editor, .color-picker")) return;
+        source.closest(".column")?.querySelector(".name-editor, .color-picker") ||
+        (source.closest(".pinned") && root.querySelector(".pin-name-editor"))) return;
     const id = source.dataset.tabId;
     if (id === undefined) return;
     event.dataTransfer.setData(TAB, id);
@@ -159,7 +163,7 @@ export function attachDnd(root, handlers, board) {
         rect: cellPlacement(target, event.clientX, event.clientY).rect });
       return;
     }
-    const { slot } = placement(target, event.clientY), zone = dropZone(target);
+    const { slot } = placement(target, event.clientX, event.clientY), zone = dropZone(target);
     const drop = { zone: zone.dataset.zone, slot, tabId: id };
     if (zone.dataset.groupId !== undefined) drop.groupId = Number(zone.dataset.groupId);
     state.handlers.onTabDrop?.(id, drop);

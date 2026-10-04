@@ -229,7 +229,7 @@ test("settings load and storage changes apply sizes, windows, visibility, densit
   assert.equal(node.querySelector('[data-kind="pinned"], [data-kind="saved"]'), null);
   assert.ok(node.querySelector('[data-kind="clock"]'));
   assert.ok(node.querySelector('[data-group-id="2"]'));
-  assert.equal(node.querySelector(".row").getBoundingClientRect().height, 24);
+  assert.equal(node.querySelector('[data-kind="group"] .row').getBoundingClientRect().height, 24);
   const header = node.querySelector(".column-header").getBoundingClientRect();
   const close = node.querySelector(".column-header .column-close").getBoundingClientRect();
   assert.ok(close.top >= header.top && close.bottom <= header.bottom, "compact headers must not clip their close control");
@@ -254,7 +254,7 @@ for (const hold of ["drag", "editor"]) {
     await flush(ff);
     assert.equal(node.querySelector('[data-kind="clock"]'), null);
     assert.deepEqual(rectStyle(node.querySelector('[data-group-id="1"]')), ["0", "10", "4", "3"]);
-    assert.equal(node.querySelector(".row").getBoundingClientRect().height, 24);
+    assert.equal(node.querySelector('[data-kind="group"] .row').getBoundingClientRect().height, 24);
   });
 }
 

@@ -1,5 +1,4 @@
-import { pinOrigin } from "../sync/names.js";
-import { normalizePinName } from "../sync/codec.js";
+import { pinnedTile } from "../tiles/pinned.js";
 import { colorKey, formatDate, formatTime } from "../model.js";
 import { attachDnd } from "./dnd.js";
 import { openNameEditor, openColorPicker } from "./edit.js";
@@ -98,9 +97,12 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   grid.style.setProperty("--cell-target", `${view.targetCell}px`);
   grid.style.setProperty("--gap", "16px");
   grid.style.setProperty("--pitch", `${view.cell + 16}px`);
+  let pinOverlays;
   for (const tile of view.tiles) {
+    const pinned = tile.kind === "pinned" ? pinnedTile(root, board.pinned, handlers, editors) : null;
+    if (pinned) pinOverlays = pinned.overlays;
     const node = tile.kind === "group" ? groupColumn(root, tile.group, handlers)
-      : tile.kind === "pinned" ? fixedColumn(root, "pinned", "PINNED", board.pinned, handlers)
+      : tile.kind === "pinned" ? pinned.tile
       : tile.kind === "saved" ? savedColumn(root, board.saved, ui, handlers) : clockTile();
     node.classList.add("tile");
     node.dataset.tileId = tile.id;
@@ -125,7 +127,10 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   rail.append(el("div", "rail-resize"));
   const gear = button("settings-cell", "Settings");
   gear.setAttribute("aria-expanded", "false");
-  root.replaceChildren(grid, rail, gear);
+  root.replaceChildren(grid, rail, ...(pinOverlays ? [pinOverlays] : []), gear);
+  if (pinOverlays) grid.addEventListener("scroll", () => {
+    for (const tip of pinOverlays.querySelectorAll(".pin-tooltip")) tip.hidden = true;
+  }, { passive: true });
   updateClock(root, settings);
   const previousBanner = banners.get(root);
   const missingCount = board.missing?.length ?? 0;
@@ -436,56 +441,6 @@ function tabRow(root, tab, handlers) {
     handlers.onOpen?.(tab);
   });
   row.append(open);
-  if (tab.pinned) {
-    const rename = button("row-rename", `Rename pin: ${tab.title}`);
-    const start = () => {
-      if (row.querySelector(".name-editor")) return;
-      editors.get(root)?.finish();
-      handlers.onEditState?.(true, null, tab.id);
-      const active = { finish: null, cancel: null };
-      editors.set(root, active);
-      // Keep the favicon visible, with the input as a sibling, not inside a button.
-      const favicon = open.firstElementChild;
-      row.insertBefore(favicon, open);
-      const end = () => {
-        open.prepend(favicon);
-        if (editors.get(root) !== active) return;
-        editors.delete(root);
-        handlers.onEditEnd?.(null, tab.id);
-      };
-      const initialName = normalizePinName(tab.name ?? tab.title);
-      const initial = initialName.slice(0, 200);
-      const editor = openNameEditor(open, {
-        initial, className: "name-editor pin-name-editor", updateLabel: false, maxLength: 200,
-        onSave: name => {
-          try {
-            // Clipping alone is not a rename. Compare edits to the full title too.
-            if (name === initial.trim()) return;
-            name = normalizePinName(name);
-            if (name === initialName) return;
-            label.textContent = name || tab.title;
-            handlers.onRenamePin?.(tab.id, name || null, tab.origin ?? pinOrigin(tab.url));
-          } finally { end(); }
-        }, onCancel: end,
-      });
-      active.finish = editor.save;
-      active.cancel = editor.cancel;
-    };
-    rename.addEventListener("click", event => { event.stopPropagation(); start(); });
-    row.addEventListener("keydown", event => {
-      if (event.key !== "F2" || event.isComposing || event.target.matches("input")) return;
-      event.preventDefault(); event.stopPropagation(); start();
-    });
-    if (tab.name && tab.origin && tab.allowed === false) {
-      const allow = button("pin-allow", `Allow pin name on this site: ${tab.name}`, "ALLOW");
-      allow.addEventListener("click", event => {
-        event.stopPropagation();
-        handlers.onAllowPin?.(tab.origin);
-      });
-      row.append(allow);
-    }
-    row.append(rename);
-  }
   row.append(close);
   return row;
 }

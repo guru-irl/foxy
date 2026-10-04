@@ -3,7 +3,7 @@ import { colorKey } from "../model.js";
 const COLORS = ["blue", "cyan", "green", "grey", "orange", "pink", "purple", "red", "yellow"];
 
 /** Replace a title in place; both explicit completion and blur are single-shot. */
-export function openNameEditor(nameEl, { initial, onSave, onCancel, className = "group-name name-editor", updateLabel = true, maxLength }) {
+export function openNameEditor(nameEl, { initial, onSave, onCancel, className = "group-name name-editor", updateLabel = true, maxLength, mount }) {
   const input = document.createElement("input");
   input.className = className;
   input.type = "text";
@@ -28,7 +28,8 @@ export function openNameEditor(nameEl, { initial, onSave, onCancel, className = 
       nameEl.title = nameEl.textContent;
       nameEl.setAttribute("aria-label", `Rename ${title || "Unnamed"}`);
     }
-    input.replaceWith(nameEl);
+    if (mount) input.remove();
+    else input.replaceWith(nameEl);
     if (focused) nameEl.focus({ preventScroll: true });
     if (save) onSave(input.value.trim());
     else onCancel();
@@ -43,7 +44,8 @@ export function openNameEditor(nameEl, { initial, onSave, onCancel, className = 
   input.addEventListener("click", event => event.stopPropagation());
   input.addEventListener("blur", blur);
   input.addEventListener("keydown", keydown);
-  nameEl.replaceWith(input);
+  if (mount) mount.append(input);
+  else nameEl.replaceWith(input);
   input.focus(); input.select();
   return { save: () => finish(true), cancel: () => finish(false) };
 }

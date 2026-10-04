@@ -14,16 +14,17 @@ Version 3.2.0. Distributed as an unlisted add-on. Design: `docs/superpowers/spec
 
 ## Board
 
-- **Tiles:** groups, PINNED, SAVED and a clock on a scrolling grid that fills the page edge to edge, with scrolling tab lists.
+- **Tiles:** groups, PINNED, SAVED and a clock on a scrolling grid that fills the page edge to edge. Groups and SAVED have scrolling lists.
+- **PINNED:** one icon per cell, in tab order. Hover shows the name, other-window label and ×; the active pin has a neutral dot. Extra pins scroll with edge fades. Default 6 × 2 cells, minimum 1 × 1.
 - **TABS rail:** ungrouped tabs stay on the right, with their own scroll. The Settings gear has its own cell below it.
-- **Move and resize:** drag a tile's header, or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
+- **Move and resize:** drag a tile's header (empty space for PINNED), or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
 - **Window widths:** each width keeps its own layout (up to 4). A width without one shows the closest: tiles narrow slightly, or columns of tiles pack together in order. Resizing saves nothing. Moving a tile updates the layout shown if the result still fits it; otherwise it saves a new layout for this width.
 - **Windows:** this window comes first; others are labelled. Tile places do not change tab order.
 - **Open a tab:** click it. A pin from another window moves here unless that setting is off.
 - **Move tabs:** drag to a group, TABS or PINNED. Drop on empty grid space to create and name a group.
 - **Groups:** click the name to rename or the dot to recolour, use the arrow to bring a group here, × to close it on this device.
-- **Close a tab:** × on its row.
-- **Rename a pin:** the pencil or F2. Enter or click away saves, Escape cancels, an empty name removes it.
+- **Close a tab:** × on its row or pinned icon.
+- **Rename a pin:** focus its icon and press F2, or right-click it. Enter or click away saves, Escape cancels, an empty name removes it. Arrow keys move between icons.
 - **Page closing:** picking a tab closes Foxy only when it has no history, without a Recently Closed entry.
 
 ## Settings

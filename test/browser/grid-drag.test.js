@@ -580,7 +580,7 @@ test("failed or malformed saved replies gate drag writes too", async () => {
     const { ff, root } = await setup({ listener: message => message.type === "foxy:reconcile" ? { ok: true }
       : message.type === "foxy:saved" ? { ok: false } : undefined });
     await new Promise(resolve => setTimeout(resolve, 550)); await flush(ff);
-    const source = tile(root, "pinned").querySelector(".column-title"), start = down(source);
+    const source = tile(root, "pinned").querySelector(".pinned-grid"), start = down(source);
     const before = rect(tile(root, "pinned")).y;
     pointer("pointermove", document, shifted(start, 0, 192));
     assert.equal(rect(tile(root, "pinned")).y, before + 2, "the gated drag must still preview");

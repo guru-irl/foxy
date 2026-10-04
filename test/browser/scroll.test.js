@@ -65,7 +65,7 @@ for (const selector of ['.rows[data-zone="pinned"]', '.rows[data-zone="tabs"]', 
 
 test("even one pixel of hidden row content gets an edge hint", async () => {
   const { root } = await draw({ height: 1000 });
-  const rows = root.querySelector('.rows[data-zone="pinned"]');
+  const rows = root.querySelector('.rows[data-zone="tabs"]');
   rows.style.flex = "none";
   rows.style.height = `${rows.scrollHeight - 1}px`;
   await nextFrame(); await nextFrame();
@@ -120,7 +120,7 @@ test("scroll edge refresh reads every container before writing any edge attribut
   }
 });
 
-for (const sourceSelector of [".row"]) {
+for (const sourceSelector of [".row-open"]) {
   test(`dragging a ${sourceSelector} disables all scroll masks until dragend`, async () => {
     const states = [];
     const { root } = await draw({}, { onDragState: active => states.push(active) });
@@ -142,7 +142,7 @@ for (const sourceSelector of [".row"]) {
 for (const selector of [".grid", '.rail .rows[data-zone="tabs"]']) {
   test(`tab drag continuously scrolls both vertical edges of ${selector} at 12px per frame`, async () => {
     const { root } = await draw({ height: 360 });
-    const area = root.querySelector(selector), source = root.querySelector(".row");
+    const area = root.querySelector(selector), source = root.querySelector(".row-open");
     const dataTransfer = new DataTransfer();
     dispatchDrag("dragstart", source, { dataTransfer });
     const bounds = area.getBoundingClientRect(), x = bounds.left + 20;
@@ -172,7 +172,7 @@ for (const selector of [".grid", '.rail .rows[data-zone="tabs"]']) {
   for (const stop of ["drop", "leave", "centre", "foreign"]) {
     test(`${selector} edge-scroll stops on ${stop}`, async () => {
       const { root } = await draw({ height: 360 });
-      const area = root.querySelector(selector), source = root.querySelector(".row");
+      const area = root.querySelector(selector), source = root.querySelector(".row-open");
       const dataTransfer = new DataTransfer();
       dispatchDrag("dragstart", source, { dataTransfer });
       const bounds = area.getBoundingClientRect(), x = bounds.left + 20, y = bounds.bottom - 1;
@@ -215,7 +215,8 @@ test("masked scrolled rows still accept a drag and show its insertion line", asy
   assert.ok(over.defaultPrevented);
   const line = list.querySelector(".drop-line"); assert.ok(line);
   assert.equal(getComputedStyle(line).pointerEvents, "none");
-  assert.equal(line.getBoundingClientRect().height, 2);
+  assert.equal(line.getBoundingClientRect().width, 2);
+  assert.ok(line.getBoundingClientRect().height >= 48);
   dispatchDrag("drop", row, { dataTransfer, clientX: r.left + 20, clientY: r.top + 8 });
   assert.deepEqual(drops, [[10, { zone: "pinned", slot: 3, tabId: 10 }]]);
   assert.equal(list.querySelector(".drop-line"), null);
@@ -224,6 +225,7 @@ test("masked scrolled rows still accept a drag and show its insertion line", asy
 for (const [scheme, expected] of [["dark", "rgba(22, 22, 24, 0.6)"], ["light", "rgba(246, 246, 247, 0.7)"]]) {
   test(`glass cards have the requested ${scheme} transparency`, async () => {
     const { root } = await draw(); root.style.colorScheme = scheme;
-    assert.equal(getComputedStyle(root.querySelector(".column")).backgroundColor, expected);
+    assert.equal(getComputedStyle(root.querySelector(".group")).backgroundColor, expected);
+    assert.equal(getComputedStyle(root.querySelector(".pin-icon .row-open")).backgroundColor, expected);
   });
 }

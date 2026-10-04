@@ -58,12 +58,16 @@ async function draw(handlers = {}) {
 // A renderer that drops, reorders or conflates current/remote columns fails these literal contracts.
 test("remote window sections have a subheading and space-only boundaries", async () => {
   const node = await draw();
-  for (const zone of ["pinned", "tabs"]) {
+  for (const zone of ["tabs"]) {
     const rows = node.querySelector(`.rows[data-zone="${zone}"]`);
     assert.deepEqual([...rows.children].map(el => el.className), ["row", "subheading", "row", "window-gap", "row"]);
     assert.equal(rows.querySelector(".subheading").textContent, "OTHER WINDOWS");
     assert.ok(rows.querySelector(".window-gap").getBoundingClientRect().height >= 16);
   }
+  const pins = node.querySelector('.rows[data-zone="pinned"]');
+  assert.deepEqual([...pins.children].map(el => el.dataset.tabId), ["11", "31", "21"]);
+  assert.equal(pins.querySelector(".subheading, .window-gap"), null);
+  assert.equal(node.querySelector('[data-pin-tooltip="21"] .pin-tooltip-window').textContent, "OTHER WINDOW · Window 2");
   assert.equal(node.querySelectorAll(".other-window").length, 1);
   assert.equal(node.querySelectorAll(".bring-here").length, 1);
   assert.equal(node.querySelector(".other-window").closest(".column").dataset.groupId, "201");
@@ -148,7 +152,9 @@ test("unnamed and long groups retain cell-sized glass tiles without masking shor
     assert.equal(style.borderTopWidth, "0px");
     assert.equal(style.outlineStyle, "none");
     assert.equal(style.boxShadow, "none");
-    if (el.classList.contains("column")) assert.equal(el.offsetWidth, 272);
+    if (el.matches(".pinned")) assert.equal(el.offsetWidth, 560);
+    else if (el.classList.contains("column")) assert.equal(el.offsetWidth, 272);
+    else if (el.matches(".pin-icon")) assert.equal(el.offsetHeight, 80);
     else assert.equal(el.offsetHeight, 32);
   }
   const name = node.querySelector('[data-group-id="201"] .group-name');
@@ -167,7 +173,7 @@ for (const state of ["hover", "active", "focus-visible"]) {
   for (const kind of ["row", "group name"]) {
     test(`${kind} ${state} paints only its containing surface`, async () => {
       const node = await draw(); node.style.colorScheme = "dark";
-      const button = node.querySelector(kind === "row" ? ".row-open" : ".group-name");
+      const button = node.querySelector(kind === "row" ? '.group .row-open' : ".group-name");
       const container = button.parentElement;
       const elements = state === "hover" ? [button, container] : [button];
       withPseudoState(elements, state, () => {
@@ -350,7 +356,8 @@ test("controller retains grid and row scroll and focus through rebuild", async (
   const set = setup();
   for (let i = 0; i < 30; i++) set.tabs.push({ id: 1000 + i, windowId: 1, groupId: 101, title: `Tab ${i}` });
   const { ff, node, control } = await controller(set);
-  node.style.width = "900px";
+  node.style.width = "900px"; node.style.height = "300px";
+  await control.refresh();
   const row = node.querySelector('[data-tab-id="1000"]');
   row.focus({ preventScroll: true });
   node.querySelector('.rows[data-group-id="101"]').scrollTop = 120;

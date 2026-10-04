@@ -66,7 +66,7 @@ for (const [total, want] of [[25, { min: 2, max: 12 }], [3, { min: 2, max: 2 }],
 
 for (const [id, kind, size] of [
   ["group:a", "group", { w: 2, h: 2 }],
-  ["pinned", "pinned", { w: 2, h: 2 }],
+  ["pinned", "pinned", { w: 1, h: 1 }],
   ["saved", "saved", { w: 2, h: 2 }],
   ["clock", "clock", { w: 3, h: 2 }],
 ]) {
@@ -78,7 +78,7 @@ for (const [id, kind, size] of [
 
 for (const [kind, cell, cols, want] of [
   ["group", 80, 25, { w: 3, h: 4 }],
-  ["pinned", 80, 25, { w: 3, h: 4 }],
+  ["pinned", 80, 25, { w: 6, h: 2 }],
   ["saved", 80, 25, { w: 3, h: 4 }],
   ["clock", 80, 25, { w: 5, h: 2 }],
   ["group", 48, 25, { w: 5, h: 6 }],
@@ -174,7 +174,7 @@ test("place adds a new tile and clamps it to the minimum and column count", () =
     { id: "clock", x: 20, y: 0, w: 5, h: 2 },
   ]);
   assert.deepEqual(place([], "pinned", { x: 5, y: 0, w: 1, h: 1 }, 1), [
-    { id: "pinned", x: 0, y: 0, w: 1, h: 2 },
+    { id: "pinned", x: 0, y: 0, w: 1, h: 1 },
   ]);
 });
 

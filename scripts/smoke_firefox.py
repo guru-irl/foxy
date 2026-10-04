@@ -217,6 +217,7 @@ def poll(label, read, ready, timeout=WAIT_SECONDS, minimum=0):
 
 BOARD_SCRIPT = """
     const tiles = [...document.querySelectorAll('#board .grid .tile')].map(tile =>
+        tile.dataset.kind === 'pinned' && tile.querySelector('.pinned-grid') ? 'PINNED' :
         (tile.querySelector('.column-title, .group-name')?.textContent || '').trim());
     return {board: !!document.querySelector('#board .grid'), tiles,
             rail: document.querySelector('#board .rail .column-title')?.textContent.trim() === 'TABS',

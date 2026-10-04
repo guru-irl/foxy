@@ -944,3 +944,98 @@ button.group-name:focus-visible {
   font-stretch: 100%;
   text-transform: none;
 }
+
+/* --- Pinned cells ------------------------------------------------------- */
+.pinned {
+  padding: 0;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+}
+.pinned-grid {
+  display: grid;
+  flex: none;
+  height: 100%;
+  grid-template-columns: repeat(var(--w), var(--cell));
+  grid-auto-rows: var(--cell);
+  gap: var(--gap);
+  align-content: start;
+  scrollbar-width: none;
+}
+.pin-icon {
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  width: var(--cell);
+  height: var(--cell);
+  padding: 8px;
+  cursor: grab;
+}
+.pin-icon:hover, .pin-icon:active, .pin-icon:focus-visible,
+.pin-icon:has(.row-open:active), .pin-icon:has(.row-open:focus-visible) { background: transparent; }
+.pin-icon .row-open {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  background: var(--card);
+  border-radius: 8px;
+  text-align: center;
+}
+.pin-icon .row-open:hover { background: color-mix(in srgb, var(--card) 92%, var(--text)); }
+.pin-icon .row-open:active, .pin-icon .row-open:focus-visible { background: color-mix(in srgb, var(--card) 85%, var(--text)); }
+.pin-icon .row-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  background: var(--card);
+}
+.pin-active {
+  position: absolute;
+  bottom: 2px;
+  left: calc(50% - 1.5px);
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.pin-tooltip {
+  position: fixed;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  max-width: min(360px, calc(100vw - 8px));
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: light-dark(rgba(246, 246, 246, 0.96), rgba(22, 22, 22, 0.96));
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  font-size: 12px;
+}
+.pin-tooltip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pin-tooltip-window { flex: none; font-size: 10px; color: var(--text-muted); }
+.pin-tooltip .pin-allow { flex: none; }
+.pin-overlays .pin-name-editor {
+  position: fixed;
+  z-index: 5;
+  width: 240px;
+  max-width: calc(100vw - 8px);
+  height: 32px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  color: var(--text);
+  background: light-dark(rgba(246, 246, 246, 0.96), rgba(22, 22, 22, 0.96));
+}
+.pinned-grid .drop-line { right: auto; width: 2px; height: var(--cell); }
