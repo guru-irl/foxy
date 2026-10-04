@@ -36,6 +36,16 @@ class Page(BaseHTTPRequestHandler):
         if self.path.startswith("/slow"):
             time.sleep(2)
         body = b"<title>Switch smoke</title><p>Local switch regression</p>"
+        if self.path == "/chain/a":
+            body += b"""<script>addEventListener('load', () => setTimeout(() => {
+                location.href = '/evergreen-assets/safelinks/smoke';
+            }, 1000));</script>"""
+        elif self.path == "/evergreen-assets/safelinks/smoke":
+            # Any host with this path is a real hop. Wait beyond SETTLE_MS
+            # after load so treating it as a normal page would fail the check.
+            body += b"""<script>addEventListener('load', () => setTimeout(() => {
+                location.href = '/chain/b';
+            }, 10000));</script>"""
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.send_header("Content-Length", str(len(body)))
@@ -46,7 +56,7 @@ class Page(BaseHTTPRequestHandler):
         pass
 
 
-def check_link(client, url, *, suspend, scratch, label):
+def check_link(client, url, *, suspend, scratch, label, external_url=None):
     panel = client.script("""
         const tab = gBrowser.addTab(arguments[0], {inBackground: true,
             triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal()});
@@ -70,7 +80,12 @@ def check_link(client, url, *, suspend, scratch, label):
         """, [smoke.ADDON_ID], chrome=True)
     before = client.script(STATE, [smoke.ADDON_ID], chrome=True)["background"]
     client.script("window.__switchEvents.length = 0;", chrome=True)
-    client.script(OPEN_EXTERNAL, [url], chrome=True)
+    client.script(OPEN_EXTERNAL, [external_url or url], chrome=True)
+    if external_url:
+        idle = smoke.poll("background idle during hop", lambda: client.script(STATE, [smoke.ADDON_ID], chrome=True),
+                          lambda state: state["background"] == "stopped" and any(
+                              "/evergreen-assets/safelinks/" in tab["url"] for tab in state["tabs"]))
+        (scratch / (label + "-idle.json")).write_text(json.dumps(idle, indent=2), encoding="utf-8")
     state = smoke.poll("external duplicate closed", lambda: client.script(STATE, [smoke.ADDON_ID], chrome=True),
                        lambda state: any(event["type"] == "TabClose" for event in state["events"]))
     (scratch / (label + ".json")).write_text(json.dumps(state, indent=2), encoding="utf-8")
@@ -142,6 +157,9 @@ def run(root=ROOT):
                           suspend=False, scratch=scratch, label="awake"))
             results.check("external link after idle wake (slow commit)", lambda: check_link(client, origin + "/slow",
                           suspend=True, scratch=scratch, label="idle"))
+            results.check("client-side chain through a completed Safe Links hop", lambda: check_link(
+                          client, origin + "/chain/b", external_url=origin + "/chain/a",
+                          suspend=False, scratch=scratch, label="hops"))
     except smoke.CheckFailed:
         pass
     except Exception as error:
