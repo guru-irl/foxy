@@ -1,7 +1,7 @@
 import { fit, arrangement, firstFree, changedTiles, gestureWrites, kindOf, minSize } from "./layout.js";
 
 export function validTileId(id) {
-  return ["clock", "pinned", "saved"].includes(id) || (id.startsWith("group:") && id.length > 6);
+  return ["clock", "pinned", "saved", "memory"].includes(id) || (id.startsWith("group:") && id.length > 6);
 }
 export function validTileRect(rect) {
   return rect !== null && typeof rect === "object" && !Array.isArray(rect)

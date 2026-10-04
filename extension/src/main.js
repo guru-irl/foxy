@@ -1,3 +1,4 @@
+import { createMemoryController } from "./tiles/memory.js";
 import { msUntilNextMinute } from "./model.js";
 import { buildBoard } from "./board/model.js";
 import { renderBoard, updateScrollEdges, updateClock, positionTiles } from "./board/render.js";
@@ -42,6 +43,7 @@ function startClock(root, settings) {
 /** All board interactions share this state; DnD and editors set it via handlers. */
 export function createController(root, api, ui = { editGroupId: null, dragging: false, editing: false },
   { maxWait = 30000, newGroupDelay = 1000 } = {}) {
+  const memory = createMemoryController(root, api);
   ui.confirmFolderId ??= null;
   ui.gridDragging ??= false;
   ui.busy ??= new Set();
@@ -427,6 +429,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       root.style.setProperty("--card-alpha-light", cardAlpha(gridState.synced.transparency, "light"));
       root.style.setProperty("--row", gridState.device.density === "compact" ? "24px" : "32px");
       renderBoard(root, board, view, ui, handlers, gridState.synced);
+      memory.update();
       gear()?.setAttribute("aria-expanded", String(settingsPane ? !settingsPane.hidden : false));
       if (settingsPane?.id) gear()?.setAttribute("aria-controls", settingsPane.id);
       restoreView(root, saved);
@@ -723,6 +726,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   const onChange = () => schedule();
   window.addEventListener("pagehide", () => {
     unloaded = true;
+    memory.stop();
     detachGridDrag();
     for (const id of deferredGroups.keys()) clearDeferredGroup(id);
   }, { once: true });
@@ -784,7 +788,11 @@ function captureView(root) {
   if (root.contains(active)) {
     const row = active.closest("[data-tab-id]");
     const group = active.closest(".column[data-group-id]");
-    if (row) {
+    const memoryRow = active.closest('[data-kind="memory"] .memory-row');
+    if (memoryRow) {
+      focus = { memoryHost: memoryRow.dataset.host,
+        index: [...memoryRow.parentElement.querySelectorAll('.memory-row')].indexOf(memoryRow) };
+    } else if (row) {
       const list = row.closest(".rows");
       focus = { tabId: row.dataset.tabId, className: active.className,
         rowsKey: rowsKey(list), index: [...list.querySelectorAll(".row")].indexOf(row) };
@@ -803,7 +811,12 @@ function restoreView(root, { focus, top, tops }) {
   if (focus && !editor) {
     let active;
     const list = [...root.querySelectorAll(".rows")].find(list => rowsKey(list) === focus.rowsKey);
-    if (focus.gear) active = root.querySelector(".settings-gear");
+    if (focus.memoryHost !== undefined) {
+      const sites = root.querySelector('[data-kind="memory"] .memory-sites');
+      const rows = [...(sites?.querySelectorAll('.memory-row') ?? [])];
+      const row = rows.find(row => row.dataset.host === focus.memoryHost) ?? rows[Math.min(focus.index, rows.length - 1)];
+      active = row?.querySelector('.memory-unload') ?? sites ?? root.querySelector('.grid');
+    } else if (focus.gear) active = root.querySelector(".settings-gear");
     else if (focus.grid) active = root.querySelector(".grid");
     else if (focus.tabId === undefined && focus.rowsKey !== undefined) active = list;
     else {

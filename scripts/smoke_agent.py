@@ -11,11 +11,25 @@ import subprocess
 import sys
 
 from firefox_env import firefox_environment
+from install_agent import install
 
 from smoke_firefox import (ADDON_ID, FIREFOX, Results, CheckFailed, connect_firefox,
                           write_profile, safe_profile_path, quit_firefox, poll)
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def register_smoke_host(root, scratch, client):
+    manifest = install(Path(root) / 'agent/foxy_host.py', home=Path(scratch) / 'home')
+    # Override both lookup directories in this disposable Firefox only. Never
+    # replace the installed user manifest or accidentally measure its helper.
+    client.script("""
+      const directory = Cc['@mozilla.org/file/local;1'].createInstance(Ci.nsIFile);
+      directory.initWithPath(arguments[0]);
+      for (const key of ['XREUserNativeManifests', 'XRESysNativeManifests']) {
+        Services.dirsvc.set(key, directory);
+      }
+    """, [str(manifest.parent.parent)], chrome=True)
 
 
 def cli(root, env, *args, expected=0):
@@ -51,6 +65,7 @@ def run(*, root=ROOT, firefox=FIREFOX):
                     session = client.command('WebDriver:NewSession', {'capabilities': {'alwaysMatch': {
                         'timeouts': {'script': 10000, 'pageLoad': 15000, 'implicit': 0}}}})
                     print('Firefox: ' + session['capabilities']['browserVersion'], flush=True)
+                    register_smoke_host(root, scratch, client)
                     addon = client.command('Addon:Install', {'path': str(root / 'extension'), 'temporary': True})['value']
                     results.record('install', addon == ADDON_ID, addon)
                     poll('agent socket', lambda: sock_path.exists(), bool)
@@ -65,6 +80,14 @@ def run(*, root=ROOT, firefox=FIREFOX):
                     base = client.script("return WebExtensionPolicy.getByID(arguments[0]).getURL('');", [addon], chrome=True)
                     client.command('Marionette:SetContext', {'value': 'content'})
                     client.command('WebDriver:Navigate', {'url': base + 'newtab.html'})
+                    memory = client.script("return await browser.runtime.sendMessage({type:'foxy:memory'});")
+                    results.record('memory from worktree helper', isinstance(memory, dict) and
+                        memory.get('firefox', 0) > 0 and memory.get('processes', 0) > 0 and
+                        memory.get('system', {}).get('total', 0) > 0, json.dumps(memory))
+                    total = poll('memory tile renders a number', lambda: client.script(
+                        "return document.querySelector('[data-kind=memory] .memory-total')?.textContent;"),
+                        lambda text: bool(text) and text.endswith((' MB', ' GB')) and float(text[:-3]) > 0)
+                    results.record('memory tile renders a number', True, total)
                     before = client.script("return {active: (await browser.tabs.query({active:true})).map(t=>t.id), win: (await browser.windows.getLastFocused()).id};")
                     add = json.loads(cli(root, env, 'add', ' agent SMOKE ', 'https://example.com/agent-b', 'https://example.com/agent-a#duplicate', '--json').stdout)
                     results.record('add open; duplicate skipped', add['ok'] and add['added'] == 1 and add['skipped'] == 1, json.dumps(add))

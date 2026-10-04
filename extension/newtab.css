@@ -949,3 +949,93 @@ button.group-name:focus-visible {
   font-stretch: 100%;
   text-transform: none;
 }
+
+/* --- Memory ------------------------------------------------------------ */
+.memory { container: memory / size; }
+.memory-summary {
+  flex: none;
+  padding: 4px 10px 8px;
+}
+.memory-total {
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.memory-system {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.memory-unavailable,
+.memory-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.memory-total:empty,
+.memory-system:empty { display: none; }
+.memory-unavailable { padding: 4px 0; }
+.memory-empty { padding: 8px 10px; }
+.memory-sparkline {
+  display: block;
+  width: 100%;
+  height: 32px;
+  margin-top: 8px;
+  color: var(--text-muted);
+}
+.memory-sparkline polyline {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.memory-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--row);
+  padding: 0 10px;
+  border-radius: 999px;
+}
+.memory-row:hover,
+.memory-row:focus-within { background: var(--hover); }
+.memory-host {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.memory-count {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.memory-unload {
+  position: absolute;
+  right: 4px;
+  padding: 0 8px;
+  height: 24px;
+  border-radius: 999px;
+  background: light-dark(rgba(246, 246, 247, 0.98), rgba(22, 22, 24, 0.98));
+  color: var(--text-muted);
+  font: normal 700 10px / 24px "Foxy Sans", system-ui, sans-serif;
+  opacity: 0;
+}
+.memory-row:hover .memory-unload,
+.memory-row:focus-within .memory-unload { opacity: 1; }
+.memory-unload:hover,
+.memory-unload:focus-visible { background: light-dark(#e5e5e5, #383838); }
+@container memory (height < 320px) {
+  .memory-sparkline { display: none; }
+}
+@container memory (height < 260px) {
+  .memory-system { display: none; }
+}
