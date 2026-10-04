@@ -1,0 +1,60 @@
+export const CLOSE_MESSAGE = { type: "blank-and-close" };
+
+/** Replace the sending page's history entry with about:blank before closing it. */
+export async function blankAndClose(api, tabId, { timeoutMs = 2000, discardTimeoutMs = 1000 } = {}) {
+  let finish;
+  const completed = new Promise((resolve) => { finish = resolve; });
+  const onUpdated = (id, changeInfo, tab) => {
+    if (id === tabId && changeInfo.status === "complete" && tab.url === "about:blank") finish();
+  };
+  api.tabs.onUpdated.addListener(onUpdated, { tabId, properties: ["status"] });
+  const timer = setTimeout(finish, timeoutMs);
+  let blanked = true;
+  try {
+    try {
+      await api.tabs.update(tabId, { url: "about:blank", loadReplace: true });
+    } catch (error) {
+      blanked = false;
+      console.warn("Foxy: could not blank the page before closing it", tabId, error);
+      finish();
+    }
+    await completed;
+  } finally {
+    api.tabs.onUpdated.removeListener(onUpdated);
+    clearTimeout(timer);
+  }
+  if (blanked) {
+    // SessionStore caches history on a timer; prepareDiscardBrowser flushes
+    // session state even when the discard itself is refused.
+    let discardTimer;
+    const timedOut = Symbol("discard timed out");
+    try {
+      const result = await Promise.race([
+        api.tabs.discard(tabId),
+        new Promise((resolve) => {
+          discardTimer = setTimeout(() => resolve(timedOut), discardTimeoutMs);
+        }),
+      ]);
+      if (result === timedOut) {
+        console.warn("Foxy: flushing the page's state timed out, closing it anyway", tabId);
+      }
+    } catch (error) {
+      console.warn("Foxy: could not flush the page's state before closing it", tabId, error);
+    } finally {
+      clearTimeout(discardTimer);
+    }
+  }
+  try {
+    await api.tabs.remove(tabId);
+  } catch (error) {
+    console.warn("Foxy: could not close the new tab page", tabId, error);
+  }
+}
+
+/** Accept a close request only from a tab in this extension; never trust message tab ids. */
+export function handleMessage(api, message, sender) {
+  if (message?.type !== CLOSE_MESSAGE.type || sender?.id !== api.runtime.id || !Number.isInteger(sender.tab?.id)) {
+    return undefined;
+  }
+  return blankAndClose(api, sender.tab.id);
+}

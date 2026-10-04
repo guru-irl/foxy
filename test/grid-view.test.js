@@ -161,11 +161,23 @@ test("board otherWindows false filters pins, groups and loose tabs to this windo
 
 
 test("source layout geometry places new groups at the source width before deriving", () => {
-  const layout = [{ id: "group:a", x: 0, y: 0, w: 7, h: 9 }];
+  const layout = [{ id: "group:a", x: 0, y: 0, w: 20, h: 9 }];
   const view = buildView(board, options({ layouts: { 34: { lastWriteMs: 1, tiles: layout } },
     contentWidth: 1392, device: { ...DEFAULT_DEVICE, cellSize: "S" },
     synced: { ...DEFAULT_SETTINGS, showClock: false, showPinned: false, railCells: 5 } }));
   assert.equal(view.cols, 17); assert.equal(view.k, 34);
-  assert.deepEqual(view.newTiles, [{ id: "group:b", x: 7, y: 0, w: 5, h: 6 }]);
+  assert.deepEqual(view.newTiles, [{ id: "group:b", x: 20, y: 0, w: 5, h: 6 }]);
   assert.deepEqual(view.saved, layout);
+});
+
+test("source qualification ignores closed groups and hidden kinds, not just total saved bounds", () => {
+  const wide = [{ id: "group:a", x: 0, y: 0, w: 20, h: 9 }, { id: "group:closed", x: 20, y: 0, w: 14, h: 9 }];
+  const view = buildView({ ...board, columns: [group(1)] }, options({
+    layouts: { 17: { tiles: [{ id: "group:a", x: 0, y: 0, w: 5, h: 6 }] }, 34: { tiles: wide } },
+    contentWidth: 1456, device: { ...DEFAULT_DEVICE, cellSize: "S" },
+    synced: { ...DEFAULT_SETTINGS, showClock: false, showPinned: false, railCells: 5 },
+  }));
+  assert.equal(view.k, 34, "visible wide group can keep its arrangement when capped; closed group must not force packing");
+  assert.deepEqual(view.tiles.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })),
+    [{ id: "group:a", x: 0, y: 0, w: 18, h: 9 }]);
 });

@@ -43,12 +43,12 @@ test("derive squeezes using the normalized right edge, not the saved column coun
     { id: "group:a", x: 0, y: 3, w: 4, h: 2 }, { id: "group:b", x: 4, y: 3, w: 4, h: 2 },
   ]);
 });
-test("derive rejects squeeze below the clock minimum even when the 75 percent limit passes", () => {
+test("derive rejects squeeze below the clock minimum even when the 70 percent limit passes", () => {
   const tiles = [{ id: "clock", x: 0, y: 0, w: 3, h: 2 }, { id: "group:a", x: 3, y: 0, w: 5, h: 2 }];
   assert.deepEqual(layouts.derive(tiles, 8, 6), [tiles[0], { ...tiles[1], x: 0, y: 2 }]);
   assert.deepEqual(layouts.derive(tiles, 8, 7), [tiles[0], { ...tiles[1], w: 4 }]);
 });
-test("derive rejects all of squeeze if any tile misses its rounded 75 percent width", () => {
+test("derive rejects all of squeeze if any tile misses its rounded 70 percent width", () => {
   const tiles = [{ id: "group:a", x: 0, y: 0, w: 8, h: 2 }, { id: "group:b", x: 8, y: 0, w: 8, h: 2 }];
   for (const c of [10, 11]) {
     assert.deepEqual(layouts.derive(tiles, 16, c), [tiles[0], { ...tiles[1], x: 0, y: 2 }]);
@@ -57,7 +57,7 @@ test("derive rejects all of squeeze if any tile misses its rounded 75 percent wi
     { id: "group:a", x: 0, y: 0, w: 6, h: 2 }, { id: "group:b", x: 6, y: 0, w: 6, h: 2 },
   ]);
 });
-test("derive accepts widths equal to rounded 75 percent even when the exact ratio is smaller", () => {
+test("derive accepts widths equal to rounded 70 percent even when the exact ratio is smaller", () => {
   const tiles = [{ id: "group:a", x: 0, y: 0, w: 7, h: 2 }, { id: "group:b", x: 7, y: 0, w: 7, h: 2 }];
   assert.deepEqual(layouts.derive(tiles, 14, 10), [
     { id: "group:a", x: 0, y: 0, w: 5, h: 2 }, { id: "group:b", x: 5, y: 0, w: 5, h: 2 },
@@ -101,16 +101,34 @@ test("derive seeded property: all inputs once, bounded, clear, deterministic, im
     assert.ok(result.every((t, i) => result.slice(i + 1).every(u => !overlaps(t, u))), `overlap trial ${trial}`);
     if (trial >= 500) {
       assert.deepEqual(result.map(t => [t.y, t.h]), input.map(t => [t.y, t.h]), `squeeze rows trial ${trial}`);
-      assert.ok(result.every((t, i) => t.w >= Math.round(0.75 * input[i].w)), `squeeze width trial ${trial}`);
+      assert.ok(result.every((t, i) => t.w >= Math.round(0.7 * input[i].w)), `squeeze width trial ${trial}`);
     }
   }
 });
-test("sourceLayout prefers exact, then largest narrower, then smallest wider", () => {
-  assert.equal(typeof layouts.sourceLayout, "function");
-  for (const [available, c, want] of [[{}, 17, 17], [{ 17: 1, 34: 2 }, 17, 17],
-    [{ 10: 1, 17: 2, 34: 3 }, 33, 17], [{ 20: 1, 34: 2 }, 17, 20]]) {
-    assert.equal(layouts.sourceLayout(available, c), want);
-  }
+test("source choice fills width from the smallest keepable/squeezable wider layout before narrower fallbacks", () => {
+  const narrow = [{ id: "clock", x: 0, y: 0, w: 6, h: 4 }];
+  const available = { 17: { tiles: narrow }, 34: { tiles: realLayout } };
+  for (let c = 18; c <= 33; c++) assert.equal(layouts.sourceLayout(available, c), c >= 24 ? 34 : 17, `columns ${c}`);
+  assert.equal(layouts.sourceLayout(available, 17), 17);
+  assert.equal(layouts.sourceLayout(available, 34), 34);
+  assert.equal(layouts.sourceLayout(available, 35), 34);
+  assert.equal(layouts.sourceLayout({}, 17), 17);
+  assert.equal(layouts.sourceLayout({ 34: { tiles: realLayout } }, 17), 34);
+  // Exact wins over a wider fit; otherwise the smallest qualifying wider wins,
+  // even across equal distances to the narrower and wider widths.
+  const ties = { 30: { tiles: narrow }, 34: { tiles: realLayout }, 35: { tiles: realLayout } };
+  assert.equal(layouts.sourceLayout(ties, 30), 30);
+  assert.equal(layouts.sourceLayout(ties, 32), 34);
+  assert.equal(layouts.sourceLayout(ties, 33), 34);
+  assert.equal(layouts.sourceLayout({ 17: { tiles: narrow }, 20: { tiles: narrow }, 34: { tiles: realLayout } }, 23), 20);
+});
+test("real layout now squeezes at 25 columns with rounded 70 percent widths", () => {
+  assert.deepEqual(layouts.derive(realLayout, 34, 25), [
+    { id: "clock", x: 0, y: 0, w: 4, h: 4 }, { id: "pinned", x: 0, y: 4, w: 4, h: 3 },
+    { id: "group:tbr", x: 4, y: 0, w: 6, h: 9 }, { id: "group:dev", x: 10, y: 0, w: 5, h: 9 },
+    { id: "group:cov", x: 15, y: 0, w: 5, h: 9 }, { id: "group:oce", x: 20, y: 0, w: 5, h: 9 },
+    { id: "group:harness", x: 15, y: 9, w: 5, h: 8 }, { id: "group:telemetry", x: 20, y: 9, w: 5, h: 8 },
+  ]);
 });
 test("targetLayout updates the source only when placed tiles fit its width, with no-op release ignored", () => {
   assert.equal(typeof layouts.targetLayout, "function");

@@ -373,7 +373,7 @@ test("reset removes tile keys and layouts once, and an open board places visible
   assert.equal(ff.calls.slice(before).filter(c => c.api === "storage.sync.remove").length, 0);
   await waitForConfirm(); reset.click(); await flush(ff);
   const removals = ff.calls.slice(before).filter(c => c.api === "storage.sync.remove"); assert.equal(removals.length, 1);
-  assert.ok(removals[0].args[0].includes("tile:10:hidden")); assert.ok(removals[0].args[0].every(key => key.startsWith("tile:") || key === "layouts"));
+  assert.ok(removals[0].args[0].includes("tile:10:hidden")); assert.ok(removals[0].args[0].every(key => key.startsWith("tile:") || key.startsWith("layout:") || key === "layouts"));
   const stored = await ff.browser.storage.sync.get(null);
   assert.equal(stored.keep, 7); assert.equal(stored.settings.showPinned, false); assert.equal(stored["tile:10:hidden"], undefined);
   assert.deepEqual(stored["tile:10:clock"], { x: 0, y: 0, w: 5, h: 2 });
@@ -472,7 +472,7 @@ test("options.html renders the shared pane, saves and resets tile keys and layou
   assert.equal(writes(ff).length - before, 1); assert.equal(node.style.getPropertyValue("--row"), "24px");
   const reset = pane.querySelector(".settings-reset"), start = ff.calls.length; reset.click(); await waitForConfirm(); reset.click(); await flush(ff);
   const removals = ff.calls.slice(start).filter(c => c.api === "storage.sync.remove"); assert.equal(removals.length, 1);
-  assert.ok(removals[0].args[0].every(key => key.startsWith("tile:") || key === "layouts"));
+  assert.ok(removals[0].args[0].every(key => key.startsWith("tile:") || key.startsWith("layout:") || key === "layouts"));
   const stored = await ff.browser.storage.sync.get(null); assert.equal(stored.keep, 7);
   assert.deepEqual(stored.settings, { transparency: "high" });
   assert.equal(stored["tile:10:orphan"], undefined); assert.equal((await ff.browser.storage.local.get("deviceSettings")).deviceSettings.density, "compact");

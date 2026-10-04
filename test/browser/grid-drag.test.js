@@ -45,7 +45,7 @@ const tile = (root, id = "group:a") => [...root.querySelectorAll(".tile")].find(
 const header = root => tile(root).querySelector(".column-header");
 const rect = node => ({ x: Number(node.style.getPropertyValue("--x")), y: Number(node.style.getPropertyValue("--y")),
   w: Number(node.style.getPropertyValue("--w")), h: Number(node.style.getPropertyValue("--h")) });
-const writes = ff => ff.calls.filter(call => call.api === "storage.sync.set").map(call => Object.fromEntries(Object.entries(call.args[0]).filter(([key]) => key !== "layouts")));
+const writes = ff => ff.calls.filter(call => call.api === "storage.sync.set").map(call => Object.fromEntries(Object.entries(call.args[0]).filter(([key]) => !key.startsWith("layout:"))));
 function point(node, x = 0.5, y = 0.5) {
   const bounds = node.getBoundingClientRect();
   return { clientX: bounds.left + bounds.width * x, clientY: bounds.top + bounds.height * y };

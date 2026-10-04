@@ -24,7 +24,7 @@ export function settingActions(api, onReset) {
 
 export async function resetLayout(api) {
   const stored = await api.storage.sync.get(null);
-  await api.storage.sync.remove(Object.keys(stored).filter(key => key.startsWith("tile:") || key === "layouts"));
+  await api.storage.sync.remove(Object.keys(stored).filter(key => key.startsWith("tile:") || key.startsWith("layout:") || key === "layouts"));
 }
 
 /** Shared pane. Repeated calls update values without replacing focused nodes. */

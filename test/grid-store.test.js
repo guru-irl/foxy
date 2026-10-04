@@ -51,10 +51,10 @@ test("saveTiles writes only the given rectangles in one set and does nothing for
   ], { now: 123 });
   await saveTiles(ff.browser, 17, []);
   assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set"), [{ api: "storage.sync.set", args: [{
-    "tile:17:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:17:clock": { x: 3, y: 0, w: 5, h: 2 }, layouts: { 17: 123 },
+    "tile:17:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:17:clock": { x: 3, y: 0, w: 5, h: 2 }, "layout:17": { t: 123 },
   }] }]);
   assert.deepEqual(await ff.browser.storage.sync.get(), {
-    settings: { showClock: false }, "tile:17:saved": rect, layouts: { 17: 123 },
+    settings: { showClock: false }, "tile:17:saved": rect, "layout:17": { t: 123 },
     "tile:17:group:a": { x: 0, y: 2, w: 3, h: 4 }, "tile:17:clock": { x: 3, y: 0, w: 5, h: 2 },
   });
 });
@@ -102,7 +102,7 @@ test("different tile edits survive and the same tile is last writer wins with sy
   assert.deepEqual((await loadLayouts(ff.browser)).layouts[17]?.tiles ?? [], [
     { id: "group:a", x: 2, y: 6, w: 4, h: 4 }, { id: "group:b", x: 4, y: 2, w: 3, h: 4 },
   ]);
-  assert.deepEqual(changes, [["tile:17:group:a", "layouts"], ["tile:17:group:b", "layouts"], ["tile:17:group:a", "layouts"]]);
+  assert.deepEqual(changes, [["tile:17:group:a", "layout:17"], ["tile:17:group:b", "layout:17"], ["tile:17:group:a", "layout:17"]]);
   off();
 });
 

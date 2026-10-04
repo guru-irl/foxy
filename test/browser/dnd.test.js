@@ -430,7 +430,7 @@ test("scrolled grid drop lands the group tile in the content cell under the poin
   } finally { dispatchDrag("dragend", source, { dataTransfer }); endName(root); }
 });
 
-const tileEntries = entries => Object.fromEntries(Object.entries(entries).filter(([key]) => key !== "layouts"));
+const tileEntries = entries => Object.fromEntries(Object.entries(entries).filter(([key]) => !key.startsWith("layout:")));
 const dropLayout = {
   "tile:13:clock": { x: 0, y: 0, w: 5, h: 2 },
   "tile:13:pinned": { x: 5, y: 0, w: 3, h: 4 },

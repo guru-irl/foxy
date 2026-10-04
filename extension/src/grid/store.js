@@ -6,11 +6,18 @@ export function parseTileKey(key) {
   return match && Number.isSafeInteger(Number(match[1])) && validTileId(match[2])
     ? { k: Number(match[1]), id: match[2] } : null;
 }
+const metaWidth = key => {
+  const match = /^layout:([1-9]\d*)$/.exec(key);
+  return match && Number.isSafeInteger(Number(match[1])) ? Number(match[1]) : null;
+};
+const timestamp = ms => Number.isFinite(ms) && ms >= 0 ? ms : 0;
 function timestamps(entries) {
-  const raw = entries.layouts;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-  return Object.fromEntries(Object.entries(raw).filter(([k, ms]) =>
-    /^[1-9]\d*$/.test(k) && Number.isSafeInteger(Number(k)) && Number.isFinite(ms) && ms >= 0));
+  const times = {};
+  for (const key of Object.keys(entries)) {
+    const k = metaWidth(key) ?? parseTileKey(key)?.k;
+    if (k != null) times[k] = timestamp(entries[`layout:${k}`]?.t);
+  }
+  return times;
 }
 async function readTiles(api) {
   try { return await api.storage.sync.get(null); }
@@ -23,52 +30,79 @@ export async function loadLayouts(api) {
   for (const [key, rect] of Object.entries(entries)) {
     const parsed = parseTileKey(key);
     if (!parsed || !validTileRect(rect)) continue;
-    const { k, id } = parsed;
-    layouts[k] ??= { lastWriteMs: 0, tiles: [] };
-    const { x, y, w, h } = rect;
+    const { k, id } = parsed, { x, y, w, h } = rect;
     layouts[k].tiles.push({ id, x, y, w, h });
   }
-  const legacy = migrateLegacy(entries);
-  if (legacy) {
-    const current = layouts[legacy.k] ?? { lastWriteMs: 0, tiles: [] };
-    layouts[legacy.k] = { ...current,
-      tiles: [...new Map([...current.tiles, ...legacy.tiles].map(t => [t.id, t])).values()] };
-  }
+  const legacy = Object.keys(layouts).length ? null : migrateLegacy(entries);
+  if (legacy) layouts[legacy.k] = { lastWriteMs: 0, tiles: legacy.tiles };
   return { layouts, legacy };
 }
 
-async function writeTiles(api, entries, k, tiles, { now = Date.now(), inUse = k } = {}) {
-  const times = timestamps(entries);
-  // Include tile-only layouts whose metadata has not arrived through sync yet.
-  for (const key of Object.keys(entries)) {
-    const parsed = parseTileKey(key);
-    if (parsed) times[parsed.k] ??= 0;
-  }
-  if (!Object.hasOwn(times, k) && Object.keys(times).length >= 4) {
-    const evicted = Object.keys(times).map(Number).filter(width => width !== inUse)
-      .sort((a, b) => times[a] - times[b] || a - b)[0];
-    await api.storage.sync.remove(Object.keys(entries).filter(key => key.startsWith(`tile:${evicted}:`)));
-    delete times[evicted];
-  }
-  times[k] = now;
-  await api.storage.sync.set({ ...Object.fromEntries(tiles.map(({ id, x, y, w, h }) =>
-    [tileKey(k, id), { x, y, w, h }])), layouts: times });
+const shownWrites = new WeakMap(), shownTimes = new WeakMap();
+/** Serialize local read/merge writes within this page; never emit sync traffic. */
+export function markLayoutShown(api, k, now = Date.now()) {
+  const area = api.storage.local, cached = shownTimes.get(area) ?? {};
+  shownTimes.set(area, cached);
+  const recent = () => Object.hasOwn(cached, k) && now - cached[k] < 60000;
+  if (recent()) return Promise.resolve();
+  const job = (shownWrites.get(area) ?? Promise.resolve()).then(async () => {
+    if (recent()) return;
+    const { layoutsShown = {} } = await area.get("layoutsShown");
+    if (Object.hasOwn(layoutsShown, k) && now - timestamp(layoutsShown[k]) < 60000) {
+      cached[k] = timestamp(layoutsShown[k]); return;
+    }
+    await area.set({ layoutsShown: { ...layoutsShown, [k]: now } });
+    cached[k] = now;
+  }).catch(error => { console.warn("Foxy: could not record shown layout", error); });
+  shownWrites.set(area, job);
+  return job;
 }
 
+/** Re-read after each successful write, or after a sync merge. */
+export async function evictLayouts(api, inUse) {
+  try {
+    const entries = await api.storage.sync.get(null), times = timestamps(entries);
+    if (Object.keys(times).length <= 4) return;
+    const { layoutsShown = {} } = await api.storage.local.get("layoutsShown");
+    const victims = [];
+    while (Object.keys(times).length > 4) {
+      const k = Object.keys(times).map(Number).filter(width => width !== inUse)
+        .sort((a, b) => Math.max(times[a], timestamp(layoutsShown[a])) - Math.max(times[b], timestamp(layoutsShown[b])) || a - b)[0];
+      victims.push(k); delete times[k];
+    }
+    await api.storage.sync.remove(Object.keys(entries).filter(key =>
+      victims.some(k => key === `layout:${k}` || key.startsWith(`tile:${k}:`))));
+  } catch (error) { console.warn("Foxy: could not evict tile layouts", error); throw error; }
+}
+
+async function writeTiles(api, k, tiles, { now = Date.now(), inUse = k } = {}) {
+  await api.storage.sync.set({ ...Object.fromEntries(tiles.map(({ id, x, y, w, h }) =>
+    [tileKey(k, id), { x, y, w, h }])), [`layout:${k}`]: { t: now } });
+  await evictLayouts(api, inUse);
+}
 export async function saveTiles(api, k, tiles, options) {
   if (!tiles.length) return;
-  try { await writeTiles(api, await api.storage.sync.get(null), k, tiles, options); }
+  try { await writeTiles(api, k, tiles, options); }
   catch (error) { console.warn("Foxy: could not save tile layout", error); throw error; }
 }
 
-/** Called only at a writable publish. Failed sets never remove legacy data. */
+/** Copy once at a writable publish. Old devices keep their legacy arrangement. */
 export async function migrateLayouts(api, options) {
   try {
-    const entries = await api.storage.sync.get(null), legacy = migrateLegacy(entries);
-    if (!legacy) return;
-    await writeTiles(api, entries, legacy.k, legacy.tiles, options);
-    await api.storage.sync.remove(legacy.keys);
+    const entries = await api.storage.sync.get(null);
+    if (Object.keys(timestamps(entries)).length) return;
+    const legacy = migrateLegacy(entries);
+    if (legacy) await writeTiles(api, legacy.k, legacy.tiles, options);
   } catch (error) { console.warn("Foxy: could not migrate tile layout", error); throw error; }
+}
+
+/** The controller captures the source and write gates before queuing this job. */
+export async function persistLayouts(api, { inUse, batches, migrate, prune, keep, evict }) {
+  await markLayoutShown(api, inUse);
+  if (migrate) await migrateLayouts(api, { inUse });
+  for (const [k, writes] of batches) await saveTiles(api, k, writes, { inUse });
+  if (prune) await pruneTiles(api, keep);
+  if (evict) await evictLayouts(api, inUse);
 }
 
 const groupId = key => parseTileKey(key)?.id ?? (key.startsWith("tile:group:") ? key.slice(5) : null);
@@ -95,8 +129,8 @@ export async function pruneTiles(api, keepFolderIds) {
 export function watchStorage(api, onChange) {
   const listener = (changes, area) => {
     const keys = Object.keys(changes).filter(key => area === "sync"
-      ? key.startsWith("tile:") || key === "layouts" || key === "settings" : area === "local" && key === "deviceSettings");
-    if (keys.length) onChange(keys);
+      ? key.startsWith("tile:") || key.startsWith("layout:") || key === "settings" : area === "local" && key === "deviceSettings");
+    if (keys.length) onChange(keys, changes);
   };
   api.storage.onChanged.addListener(listener);
   return () => api.storage.onChanged.removeListener(listener);

@@ -35,7 +35,7 @@ async function setup(width, settings = {}) {
 const tile = (root, id) => [...root.querySelectorAll(".tile")].find(node => node.dataset.tileId === id);
 const rect = node => Object.fromEntries(["x", "y", "w", "h"].map(key => [key, Number(node.style.getPropertyValue(`--${key}`))]));
 const shown = root => Object.fromEntries([...root.querySelectorAll(".tile")].map(node => [node.dataset.tileId, rect(node)]));
-const writes = ff => ff.calls.filter(call => call.api === "storage.sync.set").map(call => Object.fromEntries(Object.entries(call.args[0]).filter(([key]) => key !== "layouts")));
+const writes = ff => ff.calls.filter(call => call.api === "storage.sync.set").map(call => Object.fromEntries(Object.entries(call.args[0]).filter(([key]) => !key.startsWith("layout:"))));
 function pointer(type, target, coords) {
   target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1,
     pointerType: "mouse", isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1, ...coords }));

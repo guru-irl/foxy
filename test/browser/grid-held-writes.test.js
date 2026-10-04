@@ -11,7 +11,7 @@ async function flush(ff) { await frames(); for (let i = 0; i < 5; i++) { await f
 const tile = node => node.querySelector('[data-tile-id="clock"]');
 const rect = node => ({ x: Number(node.style.getPropertyValue("--x")), y: Number(node.style.getPropertyValue("--y")),
   w: Number(node.style.getPropertyValue("--w")), h: Number(node.style.getPropertyValue("--h")) });
-const writes = ff => ff.calls.filter(call => call.api === "storage.sync.set").map(call => Object.fromEntries(Object.entries(call.args[0]).filter(([key]) => key !== "layouts")));
+const writes = ff => ff.calls.filter(call => call.api === "storage.sync.set").map(call => Object.fromEntries(Object.entries(call.args[0]).filter(([key]) => !key.startsWith("layout:"))));
 function pointer(type, target, coords) {
   target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1,
     pointerType: "mouse", isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1, ...coords }));
