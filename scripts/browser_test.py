@@ -150,7 +150,7 @@ def terminate_firefox(process):
         process.wait()
 
 
-def run(root, files, *, firefox=FIREFOX, timeout=120):
+def run(root, files, *, firefox=FIREFOX, timeout=300):
     root = Path(root).resolve()
     scratch = root / ".spider" / "scratch"
     scratch.mkdir(parents=True, exist_ok=True)

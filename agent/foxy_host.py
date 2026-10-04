@@ -136,7 +136,7 @@ class Relay:
                             reply = self.request(json.loads(line))
                         except (ValueError, UnicodeError) as error:
                             reply = {'ok': False, 'error': str(error)}
-                        connection.sendall(json.dumps(reply, ensure_ascii=False).encode() + b'\n')
+                        connection.sendall(json.dumps(reply, ensure_ascii=False, separators=(',', ':')).encode() + b'\n')
                         if invalid_length:
                             break
             except OSError:

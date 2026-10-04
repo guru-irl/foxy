@@ -37,5 +37,15 @@ class FirefoxEnvironmentTests(unittest.TestCase):
                 self.fail('non-scratch environment was accepted')
 
 
+    def test_every_firefox_launcher_uses_the_scratch_environment(self):
+        scripts = Path(__file__).resolve().parent
+        launchers = [path for path in sorted(scripts.glob('*.py'))
+                     if not path.name.startswith('test_') and "--headless" in path.read_text()]
+        self.assertTrue(launchers)
+        for path in launchers:
+            with self.subTest(path.name):
+                self.assertIn('firefox_environment(', path.read_text())
+
+
 if __name__ == '__main__':
     unittest.main()

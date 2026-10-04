@@ -150,6 +150,24 @@ class HostTests(unittest.TestCase):
         process.stdin.flush()
         self.assertEqual(json.loads(next_client.makefile('rb').readline()), {'ok': True, 'open': []})
 
+    def test_reply_just_under_the_limit_with_many_fields_reaches_the_cli(self):
+        process = self.start()
+        wait_for(self.sock_path.exists)
+        env = {**os.environ, 'FOXY_AGENT_SOCK': str(self.sock_path), 'TMPDIR': self.directory.name}
+        client = subprocess.Popen([str(CLI), 'tabs', 'Work', '--json'], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: client.poll() is None and (client.kill(), client.communicate()))
+        request = read_frame(process.stdout)
+        reply = {'id': request['id'], 'ok': True, 'tabs': [{'title': 'a', 'url': 'b'}] * 20000, 'pad': ''}
+        compact = len(json.dumps(reply, separators=(',', ':')).encode())
+        reply['pad'] = 'x' * (1024 * 1024 - 64 - compact)
+        body = json.dumps(reply, ensure_ascii=False, separators=(',', ':')).encode()  # Firefox frames are compact
+        process.stdin.write(struct.pack('<I', len(body)) + body)
+        process.stdin.flush()
+        output, error = client.communicate(timeout=5)
+        self.assertEqual(client.returncode, 0, error)
+        self.assertEqual(len(json.loads(output)['tabs']), 20000)
+
     def test_replaces_stale_socket_but_not_a_live_host(self):
         with socket.socket(socket.AF_UNIX) as stale:
             stale.bind(str(self.sock_path))
@@ -291,6 +309,8 @@ class CliTests(unittest.TestCase):
         self.assertIn('Later', result.stdout)
         self.assertIn('closed', result.stdout)
         self.assertIn('skipped 1', result.stdout)
+        one, _ = self.invoke(['add', 'Later', 'https://example.com/'], {**reply, 'added': 1})
+        self.assertIn('Added 1 bookmark to', one.stdout)
         result, _ = self.invoke(['add', 'Later', 'https://example.com/', '--json'], reply)
         self.assertTrue(json.loads(result.stdout)['closed'])
 

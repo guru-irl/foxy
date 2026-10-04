@@ -4,7 +4,6 @@
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
-import os
 from pathlib import Path
 import socket
 import subprocess
@@ -12,6 +11,7 @@ import sys
 import threading
 import time
 
+from firefox_env import firefox_environment
 import smoke_firefox as smoke
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -108,13 +108,10 @@ def run(root=ROOT):
         smoke.write_profile(profile, port)
         with (profile / "user.js").open("a") as prefs:
             prefs.write('user_pref("extensions.background.idle.timeout", 3000);\n')
-        temp = scratch / "tmp"
-        temp.mkdir()
-        with (scratch / "firefox.log").open("wb") as log:
+        with firefox_environment(scratch) as env, (scratch / "firefox.log").open("wb") as log:
             process = subprocess.Popen([smoke.FIREFOX, "--headless", "--no-remote", "--marionette",
                 "--remote-allow-system-access", "-profile", str(profile), "about:blank"],
-                env={**os.environ, "TMPDIR": str(temp), "TMP": str(temp), "TEMP": str(temp)},
-                start_new_session=True, stdout=log, stderr=log)
+                env=env, start_new_session=True, stdout=log, stderr=log)
             client = smoke.connect_firefox(process, port)
             client.command("WebDriver:NewSession", {"capabilities": {"alwaysMatch": {"timeouts": {"script": 10000}}}})
             client.command("Addon:Install", {"path": str(Path(root) / "extension"), "temporary": True})

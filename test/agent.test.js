@@ -179,6 +179,23 @@ test('native port connects on startup and retries after 5 seconds then every 60 
   assert.equal(failed[2].ms,60000);
 });
 
+test('a host that fails by disconnecting retries 5 s then 60 s; a connection that lived 5 s retries after 5 s', async () => {
+  const {ff,handle}=await fixture();
+  const scheduled=[], ports=[];
+  let clock=0;
+  const portFactory=()=>{
+    const port={onMessage:{addListener:fn=>port.receive=fn},onDisconnect:{addListener:fn=>port.disconnect=fn},postMessage:()=>{}};
+    ports.push(port); return port;
+  };
+  await agent.connectAgent({api:ff.browser,handle,portFactory,now:()=>clock,schedule:(fn,ms)=>scheduled.push({fn,ms})});
+  ports[0].disconnect();
+  assert.equal(scheduled[0].ms,5000);
+  scheduled[0].fn(); ports[1].disconnect();
+  assert.equal(scheduled[1].ms,60000);
+  scheduled[1].fn(); clock+=5000; ports[2].disconnect();
+  assert.equal(scheduled[2].ms,5000,'a host that ran 5 s counts as connected');
+});
+
 
 test('new refuses an existing open name after trimming and case folding, suggesting add', async () => {
   const {ff,handle} = await fixture();

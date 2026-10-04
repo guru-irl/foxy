@@ -54,7 +54,7 @@ def exchange(request):
         with socket.socket(socket.AF_UNIX) as connection:
             connection.settimeout(11)
             connection.connect(path)
-            body = json.dumps(request).encode() + b'\n'
+            body = json.dumps(request, separators=(',', ':')).encode() + b'\n'
             if len(body) > MAX_MESSAGE:
                 return {'ok': False, 'error': 'Request too large'}
             connection.sendall(body)
@@ -84,7 +84,8 @@ def render(reply, command):
     if command == 'tabs':
         return '\n'.join(f"{tab['title']}\n  {tab['url']}" for tab in reply.get('tabs', [])) or 'No tabs'
     if reply.get('closed'):
-        return (f"Added {reply.get('added', 0)} bookmarks to saved group "
+        added = reply.get('added', 0)
+        return (f"Added {added} bookmark{'' if added == 1 else 's'} to saved group "
                 f"{reply['group']['title']} (closed); skipped {reply.get('skipped', 0)}")
     return f"Added {reply.get('added', 0)}; skipped {reply.get('skipped', 0)}"
 

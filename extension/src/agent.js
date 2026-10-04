@@ -123,7 +123,7 @@ export function createAgentHandler({ api, saved, mark = markOwn }) {
 }
 
 /** The factory and scheduler let tests exercise the real request dispatch. */
-export async function connectAgent({ api, handle, portFactory = name => api.runtime.connectNative(name), schedule = setTimeout }) {
+export async function connectAgent({ api, handle, portFactory = name => api.runtime.connectNative(name), schedule = setTimeout, now = Date.now }) {
   if ((await api.runtime.getPlatformInfo()).os === 'win') return;
   // Firefox timers are numbers; Node timers must not retain a test process.
   const retry = delay => schedule(() => connect(false), delay)?.unref?.();
@@ -132,6 +132,7 @@ export async function connectAgent({ api, handle, portFactory = name => api.runt
     try { port = portFactory('foxy_agent'); }
     catch { retry(first ? 5000 : 60000); return; }
     let connected = true;
+    const started = now();
     let queue = Promise.resolve();
     port.onMessage.addListener(request => {
       first = true;
@@ -151,7 +152,8 @@ export async function connectAgent({ api, handle, portFactory = name => api.runt
     port.onDisconnect.addListener(() => {
       if (!connected) return;
       connected = false;
-      retry(first ? 5000 : 60000);
+      // A host that ran for a while (or answered) was working: come back quickly.
+      retry(first || now() - started >= 5000 ? 5000 : 60000);
     });
   }
   connect();
