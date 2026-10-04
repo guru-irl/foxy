@@ -72,6 +72,7 @@ Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their pl
 | `bookmarks` | Save groups and pins |
 | `storage` | Remember mappings and pending changes; tile layout and settings (synced), device settings (local) |
 | `scripting` | Keep a renamed pin's title |
+| `nativeMessaging` | Connect the local agent CLI to Foxy |
 | Site access (optional) | Requested per site when you rename a pin there |
 
 Foxy makes no network requests of its own.
@@ -88,6 +89,27 @@ Foxy makes no network requests of its own.
 2. Click **Keep changes** when Firefox asks about the new tab and home pages.
 
 To remove: uninstall in about:addons. The `Foxy` bookmark folders stay; delete them by hand if you want.
+
+## Agents
+
+On macOS or Linux, agents can list groups and add URLs through the running
+Firefox with Foxy 3.2.0 or newer. Python 3 is required; no packages are needed.
+Install the native host once (keep this repo in place):
+
+```sh
+python3 scripts/install_agent.py
+agent/foxy groups --json
+agent/foxy tabs "To be reviewed" --json
+agent/foxy add "To be reviewed" https://example.com/review
+agent/foxy new "Dev server" http://localhost:3000 --color blue
+```
+
+Tabs are added in the background; saved closed groups stay closed. Missing
+groups refuse unless `add --create` is supplied. Exit codes: 0 done, 1 refused,
+2 Foxy not reachable. Every command accepts `--json`. Agent guidance is in
+`skills/foxy-tabs/SKILL.md`. Remove the host with
+`python3 scripts/install_agent.py --uninstall`. The bridge supports macOS and
+Linux, not Windows.
 
 ## Theme
 

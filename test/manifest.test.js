@@ -20,8 +20,8 @@ test("manifest replaces the new tab page and the home page with newtab.html", ()
   assert.deepEqual(manifest.chrome_settings_overrides, { homepage: "newtab.html" });
 });
 
-test("manifest asks for tabs, tabGroups, bookmarks, storage and scripting and uses a module event page", () => {
-  assert.deepEqual(manifest.permissions, ["tabs", "tabGroups", "bookmarks", "storage", "scripting"]);
+test("manifest asks for tabs, tabGroups, bookmarks, storage, scripting and nativeMessaging and uses a module event page", () => {
+  assert.deepEqual(manifest.permissions, ["tabs", "tabGroups", "bookmarks", "storage", "scripting", "nativeMessaging"]);
   assert.equal(manifest.host_permissions, undefined);
   assert.deepEqual(manifest.optional_host_permissions, ["*://*/*"]);
   assert.deepEqual(manifest.background, { scripts: ["background.js"], type: "module" });

@@ -3,7 +3,7 @@
   "name": "Foxy",
   "version": "3.1.1",
   "description": "A grid board of your tabs and tab groups, shared across devices through bookmarks.",
-  "permissions": ["tabs", "tabGroups", "bookmarks", "storage", "scripting"],
+  "permissions": ["tabs", "tabGroups", "bookmarks", "storage", "scripting", "nativeMessaging"],
   "optional_host_permissions": ["*://*/*"],
   "background": {
     "scripts": ["background.js"],

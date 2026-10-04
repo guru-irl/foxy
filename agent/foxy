@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Inspect Foxy tab groups and add URLs without changing the active tab."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import socket
+import sys
+
+MAX_MESSAGE = 1024 * 1024
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        self.exit(1, f'foxy: {message}\n')
+
+
+def parser():
+    result = Parser(description=__doc__)
+    result.add_argument('--json', action='store_true')
+    commands = result.add_subparsers(dest='command', required=True)
+    for name in ('groups', 'tabs', 'add', 'new'):
+        command = commands.add_parser(name)
+        command.add_argument('--json', action='store_true', default=argparse.SUPPRESS)
+        if name in ('tabs', 'add'):
+            command.add_argument('group')
+        if name == 'new':
+            command.add_argument('title')
+        if name in ('add', 'new'):
+            command.add_argument('urls', nargs='+')
+            command.add_argument('--color')
+        if name == 'add':
+            command.add_argument('--create', action='store_true')
+    return result
+
+
+def exchange(request):
+    path = str(Path(os.environ.get('FOXY_AGENT_SOCK', '~/.config/foxy/agent.sock')).expanduser())
+    try:
+        with socket.socket(socket.AF_UNIX) as connection:
+            connection.settimeout(11)
+            connection.connect(path)
+            body = json.dumps(request).encode() + b'\n'
+            if len(body) > MAX_MESSAGE:
+                return {'ok': False, 'error': 'Request too large'}
+            connection.sendall(body)
+            with connection.makefile('rb') as stream:
+                line = stream.readline(MAX_MESSAGE + 1)
+            if not line.endswith(b'\n') or len(line) > MAX_MESSAGE:
+                raise ValueError('Invalid host reply')
+            reply = json.loads(line)
+            if not isinstance(reply, dict) or type(reply.get('ok')) is not bool:
+                raise ValueError('Invalid host reply')
+            return reply
+    except (OSError, ValueError, UnicodeError):
+        return {'ok': False, 'unreachable': True,
+            'error': 'Foxy is not reachable. Firefox must be running with Foxy 3.2.0 or newer and the agent host installed.'}
+
+
+def render(reply, command):
+    if command == 'groups':
+        lines = []
+        for group in reply.get('open', []):
+            lines.append(f"{group['title']} ({group['color']}, window {group['windowId']}, "
+                f"{'collapsed' if group['collapsed'] else 'expanded'}, {group['count']} tabs"
+                + (', last focused' if group.get('lastFocused') else '') + ')')
+        for group in reply.get('saved', []):
+            lines.append(f"{group['title']} ({group['color']}, saved closed, {group['count']} tabs)")
+        return '\n'.join(lines) or 'No groups'
+    if command == 'tabs':
+        return '\n'.join(f"{tab['title']}\n  {tab['url']}" for tab in reply.get('tabs', [])) or 'No tabs'
+    return f"Added {reply.get('added', 0)}; skipped {reply.get('skipped', 0)}"
+
+
+def main(argv=None):
+    args = parser().parse_args(argv)
+    request = {key: value for key, value in vars(args).items()
+        if key != 'json' and value is not None and not (key == 'create' and value is False)}
+    reply = exchange(request)
+    if args.json:
+        print(json.dumps(reply, ensure_ascii=False))
+    elif reply['ok']:
+        print(render(reply, args.command))
+    else:
+        print(reply.get('error', 'Request refused'), file=sys.stderr)
+    return 0 if reply['ok'] else 2 if reply.get('unreachable') else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
