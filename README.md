@@ -16,7 +16,7 @@ Version 3.3.0. Distributed as an unlisted add-on. Design: `docs/superpowers/spec
 
 - **Tiles:** groups, PINNED, SAVED, a clock, MEMORY and weather on a scrolling grid that fills the page edge to edge. Groups and SAVED have scrolling lists.
 - **PINNED:** one icon per cell, in tab order. Hover shows the name, other-window label and ×; the active pin has a neutral bottom dot. A muted top-left dot means the name needs site access; hover or focus the icon for ALLOW. Extra pins scroll with edge fades. Default 6 × 2 cells, minimum 1 × 1.
-- **Memory:** the helper measures Firefox's process total and system use, with a five-minute sparkline. Loaded sites are grouped by host; UNLOAD discards inactive tabs. Firefox cannot report per-site memory. Without the helper, the tile shows installation guidance.
+- **Memory:** the helper measures Firefox's process total and system use, with a five-minute sparkline. Loaded sites are grouped by host; UNLOAD discards inactive tabs. Firefox cannot report per-site memory. Without the helper, the tile shows installation guidance; see Agents to install it.
 - **Weather:** your location (rounded to about 1 km) or a city you pick in Settings. The tile shows more as it grows: temperature, then condition, place and high / low, then the next 24 hours (scroll them with the wheel, the arrow keys or a swipe), then 7 days. It refreshes every 15 minutes while a Foxy page is visible; offline it shows the last reading and when it was updated.
 - **UNGROUPED TABS rail:** ungrouped tabs stay on the right, running to the board bottom with their own scroll. A round Settings gear sits inside the rail at its bottom right; the tab list ends above it.
 - **Move and resize:** drag a tile's header (empty space or the 4 px icon margins for PINNED, even at 1 × 1; the weather tile by its body), or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
@@ -90,8 +90,8 @@ Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their pl
 | `bookmarks` | Save groups and pins |
 | `storage` | Remember mappings and pending changes; tile layout and settings (synced), device settings (local) |
 | `scripting` | Keep a renamed pin's title |
-| `nativeMessaging` | Connect the local agent CLI to Foxy |
-| `geolocation` (optional) | Weather for where you are. Asked together with location data collection by "Allow weather" while Location is Current location; a searched city does not need it. Firefox may use your system's or a network location service to find you; coordinates are rounded to 2 decimals before any request |
+| `nativeMessaging` | Connect the local helper: the agent CLI and the MEMORY tile |
+| `geolocation` (optional) | Weather for where you are, asked by "Allow weather". Not needed for a searched city. Coordinates are rounded to 2 decimals before any request |
 | Location data collection (optional) | Asked by "Allow weather"; until you allow it, weather sends nothing. Turn either off in about:addons: the tile asks again and the cached forecast and place name are deleted |
 | Site access (optional) | Requested per site when you rename a pin there |
 
@@ -127,6 +127,7 @@ agent/foxy new "Dev server" http://localhost:3000 --color blue
 
 - **Behaviour:** tabs open in the background and never take focus; saved closed groups get bookmarks and stay closed; a missing group is refused unless `add --create`.
 - **Exit codes:** 0 done, 1 refused, 2 Foxy not reachable. Every command accepts `--json`.
+- **Update:** the helper runs from this repo, so `git pull` here before installing a newer Foxy. An older helper leaves MEMORY on "Memory unavailable".
 - **Remove:** `python3 scripts/install_agent.py --uninstall`.
 
 ## Theme

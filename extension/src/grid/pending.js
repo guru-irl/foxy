@@ -62,7 +62,7 @@ export function showPending(board, folders, next, pending) {
     metadata.set(id, { id, kind: "group", group });
     next.tiles = place(next.tiles, id, rect, next.cols);
   }
-  const order = ["clock", "pinned", ...board.columns.map(group => folders[group.id] ? `group:${folders[group.id]}` : `local:${group.id}`), "saved", "weather"];
+  const order = ["clock", "pinned", ...board.columns.map(group => folders[group.id] ? `group:${folders[group.id]}` : `local:${group.id}`), "saved", "memory", "weather"];
   next.tiles = next.tiles.map(tile => ({ ...metadata.get(tile.id), ...tile }))
     .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
 }

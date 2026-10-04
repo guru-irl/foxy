@@ -73,6 +73,8 @@ test('memory formats whole MB below 1 GB and GB to one decimal, in binary units'
     assert.equal(f.root.querySelector('.memory-system').textContent,'of 36 GB · system 50 % used');
     f.api.runtime.sendMessage=async()=>({firefox:1073741824,system:{total:38654705664,used:19327352832}});
     await f.tick();assert.equal(f.root.querySelector('.memory-total').textContent,'1.0 GB');
+    f.api.runtime.sendMessage=async()=>({firefox:1073741824-100000,system:{total:38654705664,used:19327352832}});
+    await f.tick();assert.equal(f.root.querySelector('.memory-total').textContent,'1.0 GB','never 1024 MB');
   } finally {f.controller.stop();f.root.remove();}
 });
 

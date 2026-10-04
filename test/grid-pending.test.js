@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PendingLayoutWrites } from "../extension/src/grid/pending.js";
+import { PendingLayoutWrites, showPending } from "../extension/src/grid/pending.js";
 const clock = { id: "clock", x: 0, y: 1, w: 6, h: 4 };
 const local = { id: "local:2", x: 0, y: 8, w: 5, h: 6 };
 
@@ -36,4 +36,13 @@ test("a target awaiting an authoritative removal check keeps its snapshot withou
   const pending = new PendingLayoutWrites(); pending.capture({ k: 17, writes: [clock, local] });
   assert.deepEqual([...pending.resolve({ 2: "oce" }, new Set([17])).batches], []);
   assert.deepEqual([...pending.resolve({ 2: "oce" }).batches], [[17, [clock, { ...local, id: "group:oce" }]]]);
+});
+
+// DOM (and so keyboard) order follows the board's reading order; an unknown kind would sort first.
+test("displayed tiles are ordered clock, pinned, groups, saved, memory, weather", () => {
+  const rect = (id, x) => ({ id, x, y: 0, w: 1, h: 1 });
+  const board = { columns: [{ id: 2 }] };
+  const next = { cols: 20, tiles: [rect("weather", 0), rect("memory", 1), rect("saved", 2), rect("group:oce", 3), rect("pinned", 4), rect("clock", 5)] };
+  showPending(board, { 2: "oce" }, next, new Map());
+  assert.deepEqual(next.tiles.map(t => t.id), ["clock", "pinned", "group:oce", "saved", "memory", "weather"]);
 });

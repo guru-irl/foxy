@@ -91,7 +91,7 @@ function paint(tile, reply, sites, samples, unload, lastGood) {
   const available = validMemory(reply);
   const measured = available ? reply : reply?.unavailable ? undefined : lastGood;
   tile.querySelector('.memory-total').textContent = measured
-    ? measured.firefox < 1024 ** 3 ? `${Math.round(measured.firefox / 1024 ** 2)} MB` : `${(measured.firefox / 1024 ** 3).toFixed(1)} GB`
+    ? Math.round(measured.firefox / 1024 ** 2) < 1024 ? `${Math.round(measured.firefox / 1024 ** 2)} MB` : `${(measured.firefox / 1024 ** 3).toFixed(1)} GB`
     : '';
   tile.querySelector('.memory-system').textContent = measured
     ? `of ${Number((measured.system.total / 1024 ** 3).toFixed(1))} GB · system ${Math.round(measured.system.used / measured.system.total * 100)} % used` : '';
