@@ -188,7 +188,10 @@ function fill(tile, body, state, settings, now) {
       list.append(row);
     }
   }
-  body.append(top, hero, summary, details, hours, list);
+  body.append(top, hero, summary);
+  // No empty row when the forecast has none of the facts.
+  if (facts.length) body.append(details);
+  body.append(hours, list);
   edges(hours);
   hours.addEventListener("scroll", () => edges(hours), { passive: true });
   hours.addEventListener("wheel", wheel);

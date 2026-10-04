@@ -100,6 +100,25 @@ test("medium tier shows condition, place and high / low; tall adds the hourly st
   assert.ok(strip.hasAttribute("data-scroll-end"), "edge fade marker at the end");
 });
 
+test("no details row when the forecast has no feels-like, wind, humidity or precipitation", async () => {
+  const state = okState();
+  state.data = { ...state.data, current: { ...state.data.current, feels: null, wind: null, humidity: null, precipitation: null } };
+  const weather = await tile(5, 8, state);
+  assert.equal(weather.querySelector(".weather-details"), null);
+  assert.ok(weather.querySelector(".weather-hours"), "the strip still renders");
+});
+
+test("the longest condition fits whole in 3- and 4-column tiles, in Fahrenheit", async () => {
+  for (const [w, h] of [[3, 3], [4, 4], [4, 6]]) {
+    const state = okState();
+    state.data = { ...state.data, current: { ...state.data.current, code: 99 } };
+    const weather = await tile(w, h, state, { synced: { ...SYNCED, tempUnit: "F" } });
+    const label = weather.querySelector(".weather-condition");
+    assert.equal(label.textContent, "Thunderstorm, hail");
+    assert.ok(label.scrollWidth <= label.clientWidth, `${w}x${h}: ${label.scrollWidth} > ${label.clientWidth}`);
+  }
+});
+
 test("Fahrenheit converts every temperature on the tile", async () => {
   const weather = await tile(5, 8, okState(), { synced: { ...SYNCED, tempUnit: "F" } });
   assert.equal(weather.querySelector(".weather-temp").textContent, "58°");
