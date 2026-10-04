@@ -107,7 +107,8 @@ export function createFirefox(setup = {}) {
   function tabObject(t) {
     return { id: t.id, windowId: t.windowId, index: t.index, pinned: t.pinned, groupId: t.groupId,
       url: t.url, title: t.title, favIconUrl: t.favIconUrl, active: t.active, discarded: t.discarded,
-      hidden: false, status: t.status, lastAccessed: t.lastAccessed, incognito: t.incognito || windowById(t.windowId).incognito };
+      hidden: false, status: t.status, lastAccessed: t.lastAccessed, incognito: t.incognito || windowById(t.windowId).incognito,
+      cookieStoreId: t.cookieStoreId };
   }
   function windowObject(w, populate = false) {
     const result = { id: w.id, focused: w.focused, type: w.type, incognito: w.incognito };
@@ -164,6 +165,7 @@ export function createFirefox(setup = {}) {
     return { id: t.id, windowId: t.windowId, url, title: t.title ?? url, pinned: t.pinned ?? false,
       groupId: t.pinned ? -1 : t.groupId ?? -1, active: t.active ?? false, discarded: t.discarded ?? false,
       status: t.status ?? "complete", incognito: t.incognito ?? false,
+      cookieStoreId: t.cookieStoreId ?? ((t.incognito || windowById(t.windowId).incognito) ? "firefox-private" : "firefox-default"),
       favIconUrl: t.favIconUrl, lastAccessed: t.lastAccessed ?? stamp };
   }
   for (const tab of setup.tabs ?? []) windowTabs(tab.windowId).push(makeTab(tab));

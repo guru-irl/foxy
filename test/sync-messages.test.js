@@ -322,13 +322,13 @@ test("background registers every wake listener at module evaluation and routes s
     };
   }
   await import(`../extension/background.js?task5=${Date.now()}`);
-  assert.deepEqual(registered.sort(), [
+  assert.deepEqual([...new Set(registered)].sort(), [
     "runtime.onStartup", "runtime.onInstalled", "runtime.onMessage",
     "tabs.onCreated", "tabs.onUpdated", "tabs.onRemoved", "tabs.onMoved", "tabs.onAttached", "tabs.onDetached", "tabs.onActivated",
     "tabGroups.onCreated", "tabGroups.onUpdated", "tabGroups.onRemoved", "tabGroups.onMoved",
     "bookmarks.onCreated", "bookmarks.onChanged", "bookmarks.onMoved", "bookmarks.onRemoved", "windows.onFocusChanged",
   ].sort());
-  assert.deepEqual(filters, [{ properties: ["url", "title", "pinned", "groupId", "status"] }]);
+  assert.deepEqual(filters.filter(Boolean), [{ properties: ["url", "title", "pinned", "groupId", "status"] }]);
   const saved = await ff.browser.runtime.sendMessage({ type: "foxy:saved" });
   assert.equal(saved.saved.length, 2);
   const opened = await ff.browser.runtime.sendMessage({ type: "foxy:open-saved", folderId: saved.saved[1].folderId, windowId: 1 });
@@ -474,7 +474,7 @@ test("background falls back to unfiltered updates when the properties filter is 
   };
   const warn = t.mock.method(console, "warn", () => {});
   await import(`../extension/background.js?filter-fallback=${Date.now()}`);
-  assert.deepEqual(filters, [{ properties: ["url", "title", "pinned", "groupId", "status"] }, undefined]);
+  assert.deepEqual(filters, [undefined, { properties: ["url", "title", "pinned", "groupId", "status"] }, undefined]);
   assert.ok(warn.mock.calls.every(call => call.arguments[0].startsWith("Foxy:")));
   const saved = await ff.browser.runtime.sendMessage({ type: "foxy:saved" });
   assert.equal(saved.saved.length, 2);

@@ -79,7 +79,7 @@ test("tab snapshots have complete defaults, setup activation and increasing acce
   const tab = await ff.browser.tabs.get(1);
   assert.deepEqual(tab, { id: 1, windowId: 1, index: 0, pinned: false, groupId: -1,
     url: "about:blank", title: "about:blank", favIconUrl: undefined, active: false,
-    discarded: false, hidden: false, status: "complete", lastAccessed: 1, incognito: false });
+    discarded: false, hidden: false, status: "complete", lastAccessed: 1, incognito: false, cookieStoreId: "firefox-default" });
   assert.equal((await ff.browser.tabs.get(2)).lastAccessed, 2);
   assert.equal((await ff.browser.tabs.get(2)).active, true);
   tab.title = "changed";
