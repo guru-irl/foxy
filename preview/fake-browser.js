@@ -31,7 +31,7 @@ globalThis.browser = ff.browser;
 // Open the real pane through its gear once main.js has rendered the board.
 if (params.get("settings") === "open") {
   const observer = new MutationObserver(() => {
-    const gear = document.querySelector(".settings-cell");
+    const gear = document.querySelector(".settings-gear");
     if (!gear) return;
     observer.disconnect();
     gear.click();

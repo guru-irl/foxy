@@ -100,7 +100,7 @@ test("reset before the reply clears held moves and saves fresh default placement
   const { ff, node, pane, release } = await setup();
   try {
     drag(node); await frames();
-    node.querySelector(".settings-cell").click();
+    node.querySelector(".settings-gear").click();
     const reset = pane.querySelector(".settings-reset"); reset.click();
     await new Promise(resolve => setTimeout(resolve, 410)); reset.click(); await frames();
     assert.deepEqual(await ff.browser.storage.sync.get("tile:10:clock"), {});

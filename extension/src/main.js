@@ -83,7 +83,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     page.style.minWidth = minimum;
     return width;
   };
-  const gear = () => root.querySelector(".settings-cell");
+  const gear = () => root.querySelector(".settings-gear");
   function setPaneOpen(open) {
     if (!settingsPane) return;
     settingsPane.hidden = !open;
@@ -92,7 +92,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     else gear()?.focus({ preventScroll: true });
   }
   root.addEventListener("click", event => {
-    if (event.target.closest(".settings-cell")) setPaneOpen(settingsPane?.hidden);
+    if (event.target.closest(".settings-gear")) setPaneOpen(settingsPane?.hidden);
   });
   window.addEventListener("keydown", event => {
     if (!event.defaultPrevented && event.key === "Escape" && root.isConnected && settingsPane && !settingsPane.hidden) {
@@ -434,7 +434,6 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     }
     if (page !== root) page.style.minWidth = root.style.getPropertyValue("--board-min-width");
     if (settingsPane) {
-      settingsPane.style.setProperty("--cell", `${view.cell}px`);
       settingsPane.style.setProperty("--board-width", root.style.getPropertyValue("--board-width"));
       renderSettings(settingsPane, { synced: gridState.synced, device: gridState.device,
         railMax: railLimits(view.total).max }, paneHandlers);
@@ -791,7 +790,7 @@ function captureView(root) {
         rowsKey: rowsKey(list), index: [...list.querySelectorAll(".row")].indexOf(row) };
     } else if (active.matches(".rows")) focus = { rowsKey: rowsKey(active) };
     else if (active.matches(".grid")) focus = { grid: true };
-    else if (active.matches(".settings-cell")) focus = { gear: true };
+    else if (active.matches(".settings-gear")) focus = { gear: true };
     else if (group) focus = { groupId: group.dataset.groupId, className: active.className,
       index: [...root.querySelectorAll(".column[data-group-id]")].indexOf(group) };
   }
@@ -804,7 +803,7 @@ function restoreView(root, { focus, top, tops }) {
   if (focus && !editor) {
     let active;
     const list = [...root.querySelectorAll(".rows")].find(list => rowsKey(list) === focus.rowsKey);
-    if (focus.gear) active = root.querySelector(".settings-cell");
+    if (focus.gear) active = root.querySelector(".settings-gear");
     else if (focus.grid) active = root.querySelector(".grid");
     else if (focus.tabId === undefined && focus.rowsKey !== undefined) active = list;
     else {

@@ -15,7 +15,7 @@ Version 3.2.0. Distributed as an unlisted add-on. Design: `docs/superpowers/spec
 ## Board
 
 - **Tiles:** groups, PINNED, SAVED and a clock on a scrolling grid that fills the page edge to edge, with scrolling tab lists.
-- **TABS rail:** ungrouped tabs stay on the right, with their own scroll. The Settings gear has its own cell below it.
+- **UNGROUPED TABS rail:** ungrouped tabs stay on the right, running to the board bottom with their own scroll. A round Settings gear sits inside the rail at its bottom right; the tab list ends above it.
 - **Move and resize:** drag a tile's header, or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
 - **Window widths:** each width keeps its own layout (up to 4). A width without one shows the closest: tiles narrow slightly, or columns of tiles pack together in order. Resizing saves nothing. Moving a tile updates the layout shown if the result still fits it; otherwise it saves a new layout for this width.
 - **Windows:** this window comes first; others are labelled. Tile places do not change tab order.
@@ -28,7 +28,7 @@ Version 3.2.0. Distributed as an unlisted add-on. Design: `docs/superpowers/spec
 
 ## Settings
 
-Open the gear in the bottom right corner. Changes apply immediately; Escape or the gear closes the pane.
+Open the gear inside the rail's bottom right corner. The pane opens at the page's top right, 360 px wide, and ends one gap above the gear so it stays clickable. Changes apply immediately; Escape or the gear closes the pane.
 The same settings are in about:addons, Foxy, Options.
 
 | Setting | Values | Scope |

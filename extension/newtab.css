@@ -32,6 +32,7 @@
   --text-muted: light-dark(rgba(0, 0, 0, 0.55), rgba(255, 255, 255, 0.6));
   --gap: 16px;
   --column-padding: 8px;
+  --settings-gear-size: 32px;
   --title-padding: 10px;
   --card-alpha-light: 0.7;
   --card-alpha-dark: 0.6;
@@ -75,8 +76,8 @@ body {
   --setting-accent: light-dark(#286ac4, #8cb9f4);
   position: absolute;
   top: 0;
-  right: calc(100% - var(--board-width, 100%));
-  bottom: calc(var(--cell) + var(--gap));
+  right: 0;
+  bottom: calc(var(--column-padding) + var(--settings-gear-size) + var(--gap));
   z-index: 2;
   box-sizing: border-box;
   width: 360px;
@@ -250,7 +251,6 @@ body {
    can change each card's fill in either colour scheme. */
 .column,
 .clock,
-.settings-cell,
 .banner {
   --card: light-dark(rgba(246, 246, 247, var(--card-alpha-light)), rgba(22, 22, 24, var(--card-alpha-dark)));
 }
@@ -428,12 +428,12 @@ button.dot {
   white-space: nowrap;
 }
 
-/* Square cells fill the width; the grid scrolls beside the shorter rail. */
+/* Square cells fill the width; the grid and rail reach the board bottom. */
 .board {
   display: flex;
   justify-content: flex-start;
   flex: 1;
-  min-height: calc(var(--cell) + 2 * var(--gap) + 2 * var(--column-padding));
+  min-height: 0;
   position: relative;
   gap: var(--gap);
 }
@@ -455,7 +455,11 @@ button.dot {
   position: relative;
   flex: none;
   width: calc(var(--rail-cells) * var(--pitch) - var(--gap));
-  height: max(0px, calc(100% - var(--cell) - var(--gap)));
+  height: 100%;
+}
+
+.rail .rows {
+  margin-bottom: calc(var(--settings-gear-size) + var(--gap));
 }
 
 .tile {
@@ -563,24 +567,24 @@ button.dot {
   mask-image: none;
 }
 
-.settings-cell {
+.settings-gear {
   position: absolute;
-  right: 0;
-  bottom: 0;
+  right: var(--column-padding);
+  bottom: var(--column-padding);
   z-index: 3;
   display: grid;
   place-items: center;
-  width: var(--cell);
-  height: var(--cell);
-  border-radius: 12px;
-  background: var(--card);
+  width: var(--settings-gear-size);
+  height: var(--settings-gear-size);
+  border-radius: 50%;
+  background: var(--hover);
 }
 
-.settings-cell:hover { background: color-mix(in srgb, var(--card) 92%, var(--text)); }
-.settings-cell:active,
-.settings-cell:focus-visible { background: color-mix(in srgb, var(--card) 85%, var(--text)); }
+.settings-gear:hover { background: var(--pressed); }
+.settings-gear:active,
+.settings-gear:focus-visible { background: color-mix(in srgb, var(--pressed) 85%, var(--text)); }
 
-.settings-cell::before {
+.settings-gear::before {
   content: "";
   width: 16px;
   height: 16px;
