@@ -182,7 +182,9 @@ for (const [zone, slot] of [["pinned", 0], ["pinned", 1], ["pinned", 2], ["tabs"
     const { root, calls } = await draw();
     const source = tab(root), dt = start(source), rows = root.querySelector(`.rows[data-zone="${zone}"]`);
     const list = [...rows.querySelectorAll(".row")];
-    const coords = slot === 0 ? point(list[0], 0.5, 0) : point(list[slot - 1], 0.5, 1);
+    const coords = zone === "pinned"
+      ? slot === 0 ? point(list[0], 0, 0.5) : point(list[slot - 1], 1, 0.5)
+      : slot === 0 ? point(list[0], 0.5, 0) : point(list[slot - 1], 0.5, 1);
     try {
       assert.ok(dispatchDrag("dragover", rows, { dataTransfer: dt, ...coords }).defaultPrevented);
       dispatchDrag("drop", rows, { dataTransfer: dt, ...coords });
@@ -248,18 +250,23 @@ for (const location of ["gear", "strip"]) {
 
 for (const zone of ["pinned", "tabs"]) {
   for (const slot of [1, 2]) {
-    test(`${zone} window-boundary marker at slot ${slot} sits at the preceding row bottom`, async () => {
+    test(`${zone} window-boundary marker at slot ${slot} sits between neighbouring tabs`, async () => {
       const set = setup(); set.windows.push({ id: 3 });
       set.tabs.push({ id: 31, windowId: 3 }, { id: 32, windowId: 3, pinned: true });
       const { root, calls } = await draw(set);
       const source = root.querySelector('[data-tab-id="12"]'), dt = start(source);
       const rows = root.querySelector(`.rows[data-zone="${zone}"]`), list = [...rows.querySelectorAll(".row")];
       const after = list[slot - 1].getBoundingClientRect(), before = list[slot].getBoundingClientRect();
-      const opts = { dataTransfer: dt, clientX: after.left + 10, clientY: (after.bottom + before.top) / 2 };
+      const opts = zone === "pinned"
+        ? { dataTransfer: dt, clientX: (after.right + before.left) / 2, clientY: after.top + 10 }
+        : { dataTransfer: dt, clientX: after.left + 10, clientY: (after.bottom + before.top) / 2 };
       try {
         dispatchDrag("dragover", rows, opts);
         const line = root.querySelector(".drop-line").getBoundingClientRect();
-        assert.ok(Math.abs(line.top + 1 - after.bottom) <= 1, "marker must sit on after.bottom, outside the window heading/gap");
+        if (zone === "pinned") {
+          assert.equal(line.width, 2);
+          assert.ok(Math.abs(line.left + 1 - (after.right + before.left) / 2) <= 1, "vertical marker sits in the cell gap");
+        } else assert.ok(Math.abs(line.top + 1 - after.bottom) <= 1, "marker must sit on after.bottom, outside the window heading/gap");
         dispatchDrag("drop", rows, opts);
         assert.deepEqual(calls.tabs, [[12, { zone, slot, tabId: 12 }]]);
       } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
@@ -275,7 +282,7 @@ for (const zone of ["pinned", "tabs"]) {
     const rows = root.querySelector(`.rows[data-zone="${zone}"]`);
     try {
       assert.ok(dispatchDrag("dragover", rows, { dataTransfer: dt, ...point(rows) }).defaultPrevented);
-      assert.equal(root.querySelector(".drop-line").getBoundingClientRect().height, 2);
+      assert.equal(root.querySelector(".drop-line").getBoundingClientRect()[zone === "pinned" ? "width" : "height"], 2);
       dispatchDrag("drop", rows, { dataTransfer: dt, ...point(rows) });
       assert.deepEqual(calls.tabs, [[12, { zone, slot: 0, tabId: 12 }]]);
     } finally { dispatchDrag("dragend", source, { dataTransfer: dt }); }
@@ -284,7 +291,7 @@ for (const zone of ["pinned", "tabs"]) {
 for (const [selector, drop] of [
   ['.column[data-group-id="101"] .group-name', { zone: "group", groupId: 101, slot: 0, tabId: 15 }],
   ['.column[data-group-id="201"] .other-window', { zone: "group", groupId: 201, slot: 0, tabId: 15 }],
-  ['.fixed[data-zone="pinned"] .column-title', { zone: "pinned", slot: 0, tabId: 15 }],
+  ['.fixed[data-zone="pinned"]', { zone: "pinned", slot: 0, tabId: 15 }],
   ['.fixed[data-zone="tabs"] .column-title', { zone: "tabs", slot: 0, tabId: 15 }],
 ]) {
   test(`tab drop on ${selector} targets the column's slot zero`, async () => {
@@ -294,7 +301,7 @@ for (const [selector, drop] of [
     const source = tab(root), dt = start(source), target = root.querySelector(selector);
     root.querySelector('.rows[data-group-id="101"]').scrollTop = 160;
     try {
-      const opts = { dataTransfer: dt, ...point(target) };
+      const opts = { dataTransfer: dt, ...point(target, 0, 0) };
       assert.ok(dispatchDrag("dragover", target, opts).defaultPrevented, "a column heading accepts tab drops");
       assert.ok(target.closest(".column").classList.contains("drop-target"));
       if (drop.zone === "tabs") assert.equal(root.querySelector(".drop-line"), null, "the TABS title is a no-op for its first row");
@@ -423,6 +430,9 @@ for (const [kind, side, slot] of [["group", "right", 1], ["group", "below", 2], 
   test(`the gap ${side} of a ${kind} tile keeps its row insertion target`, async () => {
     const { root, calls } = await draw();
     const tile = root.querySelector(kind === "group" ? '.tile[data-group-id="101"]' : '.tile[data-kind="pinned"]');
+    // Keep the target and its trailing gap in view, clear of the new pin defaults.
+    for (const other of root.querySelectorAll(".tile")) other.style.setProperty("--y", "10");
+    tile.style.setProperty("--x", "0"); tile.style.setProperty("--y", "0");
     const rows = tile.querySelector(".rows"), bounds = tile.getBoundingClientRect();
     const coords = side === "right"
       ? { clientX: bounds.right + 8, clientY: rows.querySelector(".row").getBoundingClientRect().bottom }
@@ -1186,3 +1196,40 @@ for (const [label, x, y, expected] of [
     } finally { dispatchDrag("dragend", source, { dataTransfer }); }
   });
 }
+
+
+for (const [targetSelector, drop] of [
+  ['.rows[data-group-id="101"]', {zone:'group', groupId:101, slot:0, tabId:21}],
+  ['.rows[data-group-id="201"]', {zone:'group', groupId:201, slot:0, tabId:21}],
+  ['.rail .rows', {zone:'tabs', slot:0, tabId:21}],
+  ['.pinned-grid', {zone:'pinned', slot:0, tabId:21}],
+]) {
+  test(`remote pin icon drags to ${targetSelector} with its tab identity`, async () => {
+    const { root, calls } = await draw();
+    const source = root.querySelector('[data-tab-id="21"] .row-open'), dataTransfer = start(source);
+    const target = root.querySelector(targetSelector);
+    try {
+      assert.equal(dataTransfer.getData(TAB), '21');
+      assert.ok(dispatchDrag('dragover', target, {dataTransfer, ...point(target, 0, 0)}).defaultPrevented);
+      dispatchDrag('drop', target, {dataTransfer, ...point(target, 0, 0)});
+      assert.deepEqual(calls.tabs, [[21, drop]]); assert.deepEqual(calls.opened, []);
+    } finally { dispatchDrag('dragend', source, {dataTransfer}); }
+    clean(root);
+  });
+}
+
+test('remote pin icon drags to an empty cell to create a group', async () => {
+  const { root, calls } = await draw();
+  const source = root.querySelector('[data-tab-id="21"] .row-open'), dataTransfer = start(source);
+  const grid = root.querySelector('.grid'), bounds = grid.getBoundingClientRect();
+  const pitch = parseFloat(grid.style.getPropertyValue('--pitch'));
+  const point = {clientX:bounds.left + 12 * pitch + 20, clientY:bounds.top + 20};
+  try {
+    assert.equal(document.elementFromPoint(point.clientX, point.clientY), grid);
+    assert.ok(dispatchDrag('dragover', grid, {dataTransfer, ...point}).defaultPrevented);
+    dispatchDrag('drop', grid, {dataTransfer, ...point});
+    assert.deepEqual(calls.tabs, [[21, {zone:'cell', tabId:21, rect:{x:10,y:0,w:3,h:4}}]]);
+    assert.deepEqual(calls.opened, []);
+  } finally { dispatchDrag('dragend', source, {dataTransfer}); }
+  clean(root);
+});

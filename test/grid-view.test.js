@@ -25,9 +25,9 @@ test("new tiles use clock, pinned, current tab-strip groups, remote groups, save
       { id: 10, windowId: 1, groupId: 1, index: 1 }], saved: [{ folderId: "closed" }] });
   const view = buildView(ordered, options({ synced: geometrySettings, contentWidth: 1232, folders: { 1: "a", 2: "b", 3: "c" } }));
   assert.deepEqual(view.newTiles, [
-    { id: "clock", x: 0, y: 0, w: 5, h: 2 }, { id: "pinned", x: 5, y: 0, w: 3, h: 4 },
-    { id: "group:a", x: 0, y: 2, w: 3, h: 4 }, { id: "group:b", x: 3, y: 4, w: 3, h: 4 },
-    { id: "group:c", x: 6, y: 4, w: 3, h: 4 }, { id: "saved", x: 0, y: 6, w: 3, h: 4 },
+    { id: "clock", x: 0, y: 0, w: 5, h: 2 }, { id: "pinned", x: 0, y: 2, w: 6, h: 2 },
+    { id: "group:a", x: 6, y: 0, w: 3, h: 4 }, { id: "group:b", x: 0, y: 4, w: 3, h: 4 },
+    { id: "group:c", x: 3, y: 4, w: 3, h: 4 }, { id: "saved", x: 6, y: 4, w: 3, h: 4 },
   ]);
 });
 
@@ -91,15 +91,15 @@ test("new defaults use the cell setting and save their full size before display 
   const view = buildView(board, options({ contentWidth: 252, synced: geometrySettings }));
   assert.equal(view.cell, 118);
   assert.deepEqual(view.newTiles.map(({ id, x, y, w, h }) => [id, x, y, w, h]), [
-    ["clock", 0, 0, 5, 2], ["pinned", 0, 2, 3, 4], ["group:a", 0, 6, 3, 4], ["group:b", 0, 10, 3, 4],
+    ["clock", 0, 0, 5, 2], ["pinned", 0, 2, 6, 2], ["group:a", 0, 4, 3, 4], ["group:b", 0, 8, 3, 4],
   ]);
   assert.ok(view.tiles.every(t => t.w === 1));
 });
 
 // Stretching cells must affect display geometry, not a new tile's stored size.
 for (const [device, expected] of [
-  [{ ...DEFAULT_DEVICE, cellSize: "custom", customCell: 144 }, [["clock", 3, 2], ["pinned", 2, 3], ["group:a", 2, 3], ["saved", 2, 3]]],
-  [{ ...DEFAULT_DEVICE, cellSize: "custom", customCell: 90 }, [["clock", 5, 2], ["pinned", 3, 4], ["group:a", 3, 4], ["saved", 3, 4]]],
+  [{ ...DEFAULT_DEVICE, cellSize: "custom", customCell: 144 }, [["clock", 3, 2], ["pinned", 6, 2], ["group:a", 2, 3], ["saved", 2, 3]]],
+  [{ ...DEFAULT_DEVICE, cellSize: "custom", customCell: 90 }, [["clock", 5, 2], ["pinned", 6, 2], ["group:a", 3, 4], ["saved", 3, 4]]],
 ]) {
   for (const contentWidth of [1600, 1000]) {
     test(`${device.customCell}px custom defaults at width ${contentWidth} use the setting for every kind`, () => {
@@ -118,12 +118,12 @@ for (const [contentWidth, cols] of [[272, 1], [400, 2]]) {
     assert.equal(view.cols, cols);
     assert.deepEqual(view.newTiles, [
       { id: "clock", x: 0, y: 0, w: 5, h: 2 },
-      { id: "pinned", x: 0, y: 2, w: 3, h: 4 },
-      { id: "group:a", x: 0, y: 6, w: 3, h: 4 },
-      { id: "saved", x: 0, y: 10, w: 3, h: 4 },
+      { id: "pinned", x: 0, y: 2, w: 6, h: 2 },
+      { id: "group:a", x: 0, y: 4, w: 3, h: 4 },
+      { id: "saved", x: 0, y: 8, w: 3, h: 4 },
     ]);
     assert.deepEqual(view.tiles.map(({ x, y, w, h }) => [x, y, w, h]),
-      [[0, 0, cols, 2], [0, 2, cols, 4], [0, 6, cols, 4], [0, 10, cols, 4]]);
+      [[0, 0, cols, 2], [0, 2, cols, 2], [0, 4, cols, 4], [0, 8, cols, 4]]);
     const widened = buildView(model, options({ layout: view.newTiles, synced: geometrySettings, contentWidth: 1600 }));
     assert.deepEqual(widened.tiles.map(({ id, x, y, w, h }) => ({ id, x, y, w, h })), view.newTiles);
     assert.deepEqual(widened.newTiles, []);

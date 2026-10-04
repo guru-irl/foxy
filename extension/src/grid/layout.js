@@ -20,7 +20,7 @@ export function railLimits(total) {
 
 export function minSize(kind) {
   if (kind === "memory") return { w: 4, h: 5 };
-  return { w: kind === "clock" ? 3 : 2, h: 2 };
+  return kind === "pinned" ? { w: 1, h: 1 } : { w: kind === "clock" ? 3 : 2, h: 2 };
 }
 
 // A column count that is not a positive integer counts as one column, so
@@ -37,6 +37,7 @@ export function defaultSize(kind, cell, cols) {
   cols = columns(cols);
   const min = minSize(kind);
   if (kind === "memory") return { w: Math.min(cols, 5), h: 6 };
+  if (kind === "pinned") return { w: Math.min(cols, 6), h: 2 };
   const width = kind === "clock" ? 480 : 288;
   const height = kind === "clock" ? 208 : 384;
   return {
