@@ -103,15 +103,30 @@ class MemoryTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.host.measure_memory(platform='win32')
 
     def test_linux_portal_parent_is_an_error_not_a_firefox_measurement(self):
-        with tempfile.TemporaryDirectory(prefix='memory-', dir=SCRATCH) as directory:
-            proc = Path(directory)
-            (proc / '10').mkdir()
-            (proc / '10' / 'status').write_text('Name: xdg-dbus-proxy\nPPid: 1\nVmRSS: 100 kB\n')
-            (proc / '20').mkdir()
-            (proc / '20' / 'status').write_text('Name: python3\nPPid: 10\nVmRSS: 100 kB\n')
-            (proc / 'meminfo').write_text('MemTotal: 1000 kB\nMemAvailable: 350 kB\n')
-            with self.assertRaisesRegex(ValueError, 'Firefox process tree not found'):
-                self.host.measure_memory(root_pid=10, host_pid=20, platform='linux', proc=proc)
+        for name in ('xdg-dbus-proxy', 'xdg-desktop-por', 'flatpak-portal', 'bwrap', 'systemd', 'snapd', 'init'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory(prefix='memory-', dir=SCRATCH) as directory:
+                proc = Path(directory)
+                (proc / '10').mkdir()
+                (proc / '10' / 'status').write_text(f'Name: {name}\nPPid: 1\nVmRSS: 100 kB\n')
+                (proc / '20').mkdir()
+                (proc / '20' / 'status').write_text('Name: python3\nPPid: 10\nVmRSS: 100 kB\n')
+                (proc / 'meminfo').write_text('MemTotal: 1000 kB\nMemAvailable: 350 kB\n')
+                with self.assertRaisesRegex(ValueError, 'Firefox process tree not found'):
+                    self.host.measure_memory(root_pid=10, host_pid=20, platform='linux', proc=proc)
+
+    def test_linux_other_firefox_builds_and_forks_are_measured(self):
+        for name in ('firefox', 'firefox-bin', 'firefox-esr', 'firefox-nightly', 'firefox-devedit', 'librewolf', 'floorp'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory(prefix='memory-', dir=SCRATCH) as directory:
+                proc = Path(directory)
+                (proc / '10').mkdir()
+                (proc / '10' / 'status').write_text(f'Name: {name}\nPPid: 1\nVmRSS: 100 kB\n')
+                (proc / '11').mkdir()
+                (proc / '11' / 'status').write_text('Name: Isolated Web Co\nPPid: 10\nVmRSS: 50 kB\n')
+                (proc / '20').mkdir()
+                (proc / '20' / 'status').write_text('Name: python3\nPPid: 10\nVmRSS: 100 kB\n')
+                (proc / 'meminfo').write_text('MemTotal: 1000 kB\nMemAvailable: 350 kB\n')
+                reply = self.host.measure_memory(root_pid=10, host_pid=20, platform='linux', proc=proc)
+                self.assertEqual(reply['firefox'], 150 * 1024)
 
     def test_empty_firefox_tree_is_an_error_not_a_zero_measurement(self):
         with patch.object(self.host, 'mac_process_table', return_value={10: (1, 100)}), \

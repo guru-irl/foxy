@@ -96,7 +96,8 @@ function paint(tile, reply, sites, samples, unload, lastGood) {
   tile.querySelector('.memory-system').textContent = measured
     ? `of ${Number((measured.system.total / 1024 ** 3).toFixed(1))} GB · system ${Math.round(measured.system.used / measured.system.total * 100)} % used` : '';
   const status = tile.querySelector('.memory-unavailable');
-  status.hidden = available;
+  // Nothing to report until the first reply arrives (avoids a flash on every new tab).
+  status.hidden = available || reply === undefined;
   status.textContent = reply?.unavailable
     ? reply.platform === 'win' ? 'Memory needs the Foxy helper on macOS or Linux' : 'Install the Foxy helper to see memory'
     : 'Memory unavailable';
@@ -165,7 +166,7 @@ export function createMemoryController(root, api, { document: doc = root.ownerDo
         readSites().catch(() => []),
       ]);
       if (!visible()) return;
-      reply = next; sites = loaded;
+      reply = next ?? { error: 'No memory reply' }; sites = loaded;
       if (validMemory(reply)) {
         lastGood = reply;
         samples = addSample(samples, { time: now(), bytes: reply.firefox });

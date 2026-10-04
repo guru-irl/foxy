@@ -98,9 +98,10 @@ def measure_memory(*, root_pid=None, host_pid=None, platform=None, proc=Path('/p
     if root_pid not in table:
         raise ValueError('Firefox process tree not found')
     if platform.startswith('linux'):
-        # Portals may launch the host outside Firefox's process tree.
+        # Portals may launch the host outside Firefox's process tree. Reject
+        # known launchers rather than allow-listing Firefox builds and forks.
         status = (proc / str(root_pid) / 'status').read_text()
-        if not re.search(r'^Name:\s+firefox(?:-bin|-esr)?\s*$', status, re.M | re.I):
+        if re.search(r'^Name:\s+(?:xdg-|flatpak|bwrap|systemd|snap|init\s*$)', status, re.M | re.I):
             raise ValueError('Firefox process tree not found')
     children = {}
     for pid, (parent, _) in table.items():

@@ -31,6 +31,20 @@ function setup() {
     async tick(){const [id,timer]=[...timers][0];timers.delete(id);time+=timer.ms;timer.fn();await settle();}};
 }
 
+test('before the first reply the tile shows no status text, then the measured header', async () => {
+  await styles();const f=setup();
+  try {
+    let answer;f.api.runtime.sendMessage=()=>new Promise(resolve=>{answer=resolve;});
+    f.render();await f.settle();
+    const status=f.root.querySelector('.memory-unavailable');
+    assert.equal(status.hidden,true,'no unavailable flash while the first reply is pending');
+    assert.equal(f.root.querySelector('.memory-total').textContent,'');
+    answer({firefox:3650722202,system:{total:51539607552,used:36593121362}});await f.settle();
+    assert.equal(status.hidden,true);
+    assert.equal(f.root.querySelector('.memory-total').textContent,'3.4 GB');
+  } finally {f.controller.stop();f.root.remove();}
+});
+
 test('memory header renders measured bytes, system use, neutral sparkline and sites; hover unload is safe', async () => {
   await styles();const f=setup();
   try {
