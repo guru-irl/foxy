@@ -91,7 +91,7 @@ test("medium tier shows condition, place and high / low; tall adds the hourly st
   const weather = await tile(5, 5);
   assert.equal(weather.querySelector(".weather-condition").textContent, "Partly cloudy");
   assert.equal(weather.querySelector(".weather-place").textContent, "Dublin");
-  assert.equal(weather.querySelector(".weather-range").textContent.replace(/\s+/g, " ").trim(), "17° 8°");
+  assert.equal(weather.querySelector(".weather-range").textContent.replace(/\s+/g, " ").trim(), "17° / 8°");
   const hours = [...weather.querySelectorAll(".weather-hour-time")].map(n => n.textContent);
   assert.equal(hours[0], "Now"); assert.equal(hours[1], "14"); assert.equal(hours[11], "00");
   const strip = weather.querySelector(".weather-hours");
