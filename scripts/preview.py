@@ -11,6 +11,8 @@ import pathlib
 import subprocess
 import sys
 
+from firefox_env import firefox_environment
+
 from browser_test import PROFILE_PREFS
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -76,15 +78,16 @@ def shoot(name, query, width, height):
     out.unlink(missing_ok=True)
     temp = PROFILE / "tmp"
     temp.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(
-        [
-            FIREFOX, "--headless", "--no-remote", "-profile", str(PROFILE),
-            f"--window-size={width},{height}", "--screenshot", str(out),
-            f"{PAGE.as_uri()}?{query}",
-        ],
-        env={**os.environ, "TMPDIR": str(temp), "TMP": str(temp), "TEMP": str(temp)},
-        capture_output=True, text=True, timeout=180,
-    )
+    with firefox_environment(PROFILE) as env:
+        result = subprocess.run(
+            [
+                FIREFOX, "--headless", "--no-remote", "-profile", str(PROFILE),
+                f"--window-size={width},{height}", "--screenshot", str(out),
+                f"{PAGE.as_uri()}?{query}",
+            ],
+            env=env,
+            capture_output=True, text=True, timeout=180,
+        )
     if result.returncode != 0 or not out.exists():
         sys.exit(f"Screenshot failed for {name} (exit {result.returncode}):\n{result.stderr[-2000:]}")
     print(out)

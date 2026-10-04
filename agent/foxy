@@ -9,6 +9,14 @@ import socket
 import sys
 
 MAX_MESSAGE = 1024 * 1024
+COLORS = ('blue', 'purple', 'cyan', 'orange', 'yellow', 'pink', 'green', 'grey', 'red')
+EXIT_CODES = 'Exit codes: 0 done, 1 refused, 2 Foxy not reachable.'
+COMMANDS = {
+    'groups': ('List open and saved closed groups', 'foxy groups --json'),
+    'tabs': ('List a group\'s titles and URLs', 'foxy tabs "To be reviewed" --json'),
+    'add': ('Add URLs to an existing group', 'foxy add "Dev server" http://localhost:3000'),
+    'new': ('Create a named group from inactive tabs', 'foxy new "Release notes" https://example.com/release'),
+}
 
 
 class Parser(argparse.ArgumentParser):
@@ -18,21 +26,25 @@ class Parser(argparse.ArgumentParser):
 
 
 def parser():
-    result = Parser(description=__doc__)
-    result.add_argument('--json', action='store_true')
+    result = Parser(description=__doc__, epilog=EXIT_CODES,
+                    formatter_class=argparse.RawTextHelpFormatter)
+    result.add_argument('--json', action='store_true', help='print the full JSON reply')
     commands = result.add_subparsers(dest='command', required=True)
-    for name in ('groups', 'tabs', 'add', 'new'):
-        command = commands.add_parser(name)
-        command.add_argument('--json', action='store_true', default=argparse.SUPPRESS)
+    for name, (description, example) in COMMANDS.items():
+        command = commands.add_parser(name, help=f'{description}; example: {example}',
+            description=description, epilog=f'Example: {example}\n{EXIT_CODES}',
+            formatter_class=argparse.RawTextHelpFormatter)
+        command.add_argument('--json', action='store_true', default=argparse.SUPPRESS,
+                             help='print the full JSON reply (closed=true means bookmarks only)')
         if name in ('tabs', 'add'):
-            command.add_argument('group')
+            command.add_argument('group', help='group name (trimmed, case-insensitive)')
         if name == 'new':
-            command.add_argument('title')
+            command.add_argument('title', help='new group name, up to 200 characters; use add if already open')
         if name in ('add', 'new'):
-            command.add_argument('urls', nargs='+')
-            command.add_argument('--color')
+            command.add_argument('urls', nargs='+', help='1 to 50 http/https URLs')
+            command.add_argument('--color', choices=COLORS, help='new group colour (omitted: Firefox default)')
         if name == 'add':
-            command.add_argument('--create', action='store_true')
+            command.add_argument('--create', action='store_true', help='create a missing group only if the user named it')
     return result
 
 
@@ -71,6 +83,9 @@ def render(reply, command):
         return '\n'.join(lines) or 'No groups'
     if command == 'tabs':
         return '\n'.join(f"{tab['title']}\n  {tab['url']}" for tab in reply.get('tabs', [])) or 'No tabs'
+    if reply.get('closed'):
+        return (f"Added {reply.get('added', 0)} bookmarks to saved group "
+                f"{reply['group']['title']} (closed); skipped {reply.get('skipped', 0)}")
     return f"Added {reply.get('added', 0)}; skipped {reply.get('skipped', 0)}"
 
 

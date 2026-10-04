@@ -739,6 +739,7 @@ export function createFirefox(setup = {}) {
     return [{ frameId: 0, result: undefined }];
   });
 
+  api("runtime", "getPlatformInfo", () => ({ os: setup.os ?? "mac", arch: "aarch64" }));
   browser.runtime.id = setup.extensionId ?? "foxy-test";
   api("runtime", "getURL", path => `moz-extension://${browser.runtime.id}/${path}`, true);
   api("runtime", "sendMessage", msg => {

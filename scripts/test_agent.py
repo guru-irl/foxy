@@ -116,6 +116,40 @@ class HostTests(unittest.TestCase):
         self.assertEqual(process.wait(timeout=3),0)
         self.assertFalse(self.sock_path.exists())
 
+    def test_secures_a_preexisting_world_readable_socket_directory(self):
+        self.sock_path.parent.chmod(0o755)
+        process = self.start()
+        wait_for(self.sock_path.exists)
+        self.assertEqual(stat.S_IMODE(self.sock_path.parent.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(self.sock_path.stat().st_mode), 0o600)
+        self.assertIsNone(process.poll())
+
+    def test_oversized_native_reply_is_drained_and_host_serves_the_next_request(self):
+        process = self.start()
+        wait_for(self.sock_path.exists)
+        env = {**os.environ, 'FOXY_AGENT_SOCK': str(self.sock_path), 'TMPDIR': self.directory.name}
+        client = subprocess.Popen([str(CLI), 'groups', '--json'], env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: client.communicate(timeout=3))
+        request = read_frame(process.stdout)
+        broken = False
+        try:
+            process.stdin.write(frame({'id': request['id'], 'ok': True, 'data': 'x' * (1024 * 1024)}))
+            process.stdin.write(frame({'id': request['id'], 'ok': False, 'error': 'Reply too large (maximum 1 MB)'}))
+            process.stdin.flush()
+        except BrokenPipeError:
+            broken = True
+        self.assertFalse(broken, 'oversized native reply must not kill the host')
+        output, error = client.communicate(timeout=3)
+        self.assertEqual(client.returncode, 1, error)
+        self.assertIn('Reply too large', json.loads(output)['error'])
+        self.assertIsNone(process.poll())
+        next_client = self.client({'command': 'groups'})
+        request = read_frame(process.stdout)
+        process.stdin.write(frame({'id': request['id'], 'ok': True, 'open': []}))
+        process.stdin.flush()
+        self.assertEqual(json.loads(next_client.makefile('rb').readline()), {'ok': True, 'open': []})
+
     def test_replaces_stale_socket_but_not_a_live_host(self):
         with socket.socket(socket.AF_UNIX) as stale:
             stale.bind(str(self.sock_path))
@@ -157,6 +191,23 @@ class HostTests(unittest.TestCase):
         self.assertTrue(reply['unreachable'])
         self.assertEqual(process.wait(timeout=3),0)
         self.assertFalse(self.sock_path.exists())
+
+    def test_oversized_socket_line_refused_once_then_connection_closed(self):
+        process = self.start()
+        wait_for(self.sock_path.exists)
+        with socket.socket(socket.AF_UNIX) as sock:
+            sock.settimeout(3)
+            sock.connect(str(self.sock_path))
+            sock.sendall(b'x' * (1024 * 1024 + 1) + b'\n')
+            with sock.makefile('rb') as stream:
+                reply = json.loads(stream.readline())
+                self.assertEqual(reply, {'ok': False, 'error': 'Invalid request length'})
+                try:
+                    rest = stream.readline()
+                except ConnectionResetError:
+                    rest = b''
+                self.assertEqual(rest, b'', 'one refusal, not a second junk request')
+        self.assertIsNone(process.poll())
 
     def test_malformed_socket_request_refused_without_native_write(self):
         process=self.start()
@@ -231,6 +282,39 @@ class CliTests(unittest.TestCase):
         result,_=self.invoke(['tabs','Work'],{'ok':True,'tabs':[{'title':'Page','url':'https://example.com/'}]})
         self.assertIn('Page',result.stdout)
         self.assertIn('https://example.com/',result.stdout)
+
+    def test_closed_group_add_reports_bookmarks_in_text_and_json(self):
+        reply = {'ok': True, 'closed': True, 'group': {'title': 'Later', 'folderId': 'saved'}, 'added': 2, 'skipped': 1}
+        result, _ = self.invoke(['add', 'Later', 'https://example.com/'], reply)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('2 bookmarks', result.stdout)
+        self.assertIn('Later', result.stdout)
+        self.assertIn('closed', result.stdout)
+        self.assertIn('skipped 1', result.stdout)
+        result, _ = self.invoke(['add', 'Later', 'https://example.com/', '--json'], reply)
+        self.assertTrue(json.loads(result.stdout)['closed'])
+
+    def test_help_describes_every_command_with_an_example_and_exit_codes(self):
+        result, _ = self.invoke(['--help'])
+        self.assertEqual(result.returncode, 0)
+        for command in ('groups', 'tabs', 'add', 'new'):
+            self.assertRegex(result.stdout, rf'{command} +[^\n]*example:')
+            specific, _ = self.invoke([command, '--help'])
+            self.assertEqual(specific.returncode, 0)
+            self.assertIn(f'foxy {command}', specific.stdout)
+            self.assertIn('Example:', specific.stdout)
+            self.assertIn('0 done, 1 refused, 2', specific.stdout)
+        self.assertIn('0 done, 1 refused, 2', result.stdout)
+        specific, _ = self.invoke(['add', '--help'])
+        self.assertIn('missing', specific.stdout)
+        for color in ('blue', 'purple', 'cyan', 'orange', 'yellow', 'pink', 'green', 'grey', 'red'):
+            self.assertIn(color, specific.stdout)
+
+    def test_invalid_color_is_refused_locally_with_valid_choices(self):
+        result, _ = self.invoke(['new', 'Wrong', 'https://example.com/', '--color', 'black'])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('blue', result.stderr)
+        self.assertIn('grey', result.stderr)
 
     def test_usage_errors_are_refused_not_unreachable(self):
         result,_=self.invoke(['add','Work'])

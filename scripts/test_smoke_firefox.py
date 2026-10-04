@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import smoke_firefox as smoke
+import smoke_agent
 
 
 SCRATCH = Path(__file__).resolve().parent.parent / ".spider" / "scratch"
@@ -54,6 +55,26 @@ class ProfileTests(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory(prefix="smoke-unit-", dir=SCRATCH)
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
+
+    def test_every_smoke_launcher_overrides_the_agent_socket(self):
+        for launcher in (smoke, smoke_agent):
+            with self.subTest(launcher=launcher.__name__):
+                launches = []
+                def launch(args, **options):
+                    profile = Path(args[args.index('-profile') + 1])
+                    env = options['env']
+                    sock = env.get('FOXY_AGENT_SOCK', '')
+                    launches.append((profile, sock, Path(sock).resolve()))
+                    raise OSError('controlled launch failure')
+                with patch.dict('os.environ', {'FOXY_AGENT_SOCK': '/not-a-test/agent.sock'}), \
+                        patch.object(launcher.subprocess, 'Popen', side_effect=launch), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(launcher.run(root=self.root), 1)
+                self.assertEqual(len(launches), 1)
+                profile, sock, resolved = launches[0]
+                self.assertNotEqual(sock, '/not-a-test/agent.sock')
+                self.assertTrue(resolved.is_relative_to(profile.parent))
+                self.assertLess(len(sock.encode()), 104)
 
     def test_writes_parseable_prefs_to_throwaway_profile(self):
         profile = self.root / "profile"

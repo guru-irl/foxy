@@ -77,7 +77,10 @@ export function createAgentHandler({ api, saved, mark = markOwn }) {
         group = state.saved.find(g => nameKey(g.title) === nameKey(wanted));
         closed = !!group;
       }
-      if (request.command === 'new') { group = null; closed = false; }
+      if (request.command === 'new') {
+        if (candidates.length) return refused(`Group ${wanted.trim()} exists; use add`);
+        group = null; closed = false;
+      }
       if (!group && request.command !== 'new' && !(request.command === 'add' && request.create)) {
         const names = [...new Set([...state.open,...state.saved].map(g => g.title))];
         return refused(`No group named ${wanted.trim()}. Groups: ${names.join(', ') || '(none)'}`);
@@ -114,26 +117,32 @@ export function createAgentHandler({ api, saved, mark = markOwn }) {
           }
         }
       }
-      return { ok: true, group, added: urls.length, skipped: request.urls.length - urls.length };
+      return { ok: true, group, closed, added: urls.length, skipped: request.urls.length - urls.length };
     } catch (error) { return refused(String(error.message ?? error)); }
   };
 }
 
 /** The factory and scheduler let tests exercise the real request dispatch. */
-export function connectAgent({ api, handle, portFactory = name => api.runtime.connectNative(name), schedule = setTimeout }) {
+export async function connectAgent({ api, handle, portFactory = name => api.runtime.connectNative(name), schedule = setTimeout }) {
+  if ((await api.runtime.getPlatformInfo()).os === 'win') return;
   // Firefox timers are numbers; Node timers must not retain a test process.
-  const retry = () => schedule(connect, 60000)?.unref?.();
-  function connect() {
+  const retry = delay => schedule(() => connect(false), delay)?.unref?.();
+  function connect(first = true) {
     let port;
     try { port = portFactory('foxy_agent'); }
-    catch { retry(); return; }
+    catch { retry(first ? 5000 : 60000); return; }
     let connected = true;
     let queue = Promise.resolve();
     port.onMessage.addListener(request => {
+      first = true;
       queue = queue.then(async () => {
         const reply = await handle(request);
         if (connected) {
-          try { port.postMessage({ ...reply, id: request?.id }); }
+          let message = { ...reply, id: request?.id };
+          if (new TextEncoder().encode(JSON.stringify(message)).length > 1024 * 1024) {
+            message = { ...refused('Reply too large (maximum 1 MB)'), id: request?.id };
+          }
+          try { port.postMessage(message); }
           catch { /* The pipe can close while handling a request. */ }
         }
       }).catch(() => {});
@@ -142,7 +151,7 @@ export function connectAgent({ api, handle, portFactory = name => api.runtime.co
     port.onDisconnect.addListener(() => {
       if (!connected) return;
       connected = false;
-      retry();
+      retry(first ? 5000 : 60000);
     });
   }
   connect();

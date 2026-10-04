@@ -31,11 +31,22 @@ def read_exact(stream, size):
     return bytes(result)
 
 
-def read_message(stream):
+class ReplyTooLarge(ValueError):
+    pass
+
+
+def read_message(stream, *, drain_oversized=False):
     first = stream.read(1)
     if not first:
         return None
     size = struct.unpack('<I', first + read_exact(stream, 3))[0]
+    if size > MAX_MESSAGE and drain_oversized:
+        remaining = size
+        while remaining:
+            chunk = min(remaining, 65536)
+            read_exact(stream, chunk)
+            remaining -= chunk
+        raise ReplyTooLarge('Reply too large')
     if not 0 < size <= MAX_MESSAGE:
         raise ValueError('Invalid native message length')
     return json.loads(read_exact(stream, size))
@@ -65,7 +76,12 @@ class Relay:
     def read_replies(self):
         try:
             while True:
-                reply = read_message(self.reader)
+                try:
+                    reply = read_message(self.reader, drain_oversized=True)
+                except ReplyTooLarge:
+                    # No trustworthy id in a discarded frame. Other clients stay live;
+                    # the extension sends the correlated small refusal instead.
+                    continue
                 if reply is None:
                     break
                 if not isinstance(reply, dict) or not isinstance(reply.get('id'), str):
@@ -113,13 +129,16 @@ class Relay:
                         line = stream.readline(MAX_MESSAGE + 1)
                         if not line:
                             break
+                        invalid_length = len(line) > MAX_MESSAGE or not line.endswith(b'\n')
                         try:
-                            if len(line) > MAX_MESSAGE or not line.endswith(b'\n'):
+                            if invalid_length:
                                 raise ValueError('Invalid request length')
                             reply = self.request(json.loads(line))
                         except (ValueError, UnicodeError) as error:
                             reply = {'ok': False, 'error': str(error)}
                         connection.sendall(json.dumps(reply, ensure_ascii=False).encode() + b'\n')
+                        if invalid_length:
+                            break
             except OSError:
                 pass  # A timed-out or disconnected CLI cannot hold the host open.
 

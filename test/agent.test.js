@@ -58,6 +58,7 @@ test('add skips fragment duplicates including repeats in the request and preserv
   assert.equal(reply.ok,true);
   assert.equal(reply.added,1);
   assert.equal(reply.skipped,2);
+  assert.equal(reply.closed,false);
   const tabs = await ff.browser.tabs.query({groupId:22});
   assert.deepEqual(tabs.map(t => t.url), ['https://example.com/two#old','https://example.com/next']);
   assert.equal(tabs.at(-1).active,false);
@@ -72,6 +73,7 @@ test('adding to a closed saved group writes bookmarks and inbound keeps it close
   const reply = await handle({command:'add',group:' LATER ',urls:['https://example.com/later#two','https://example.com/saved-new']});
   assert.equal(reply.added,1);
   assert.equal(reply.skipped,1);
+  assert.equal(reply.closed,true);
   const state = {...emptyState(),rootId:'root'};
   const inbound = createInbound({api:ff.browser,getState:()=>state,save:async()=>{}});
   await inbound.reconcileFolder('saved');
@@ -97,6 +99,10 @@ test('missing groups refuse with names; create and new make inactive groups with
     const group = await ff.browser.tabGroups.get(reply.group.id);
     assert.equal(group.title, request.group ?? request.title);
     if (request.color) assert.equal(group.color,'cyan');
+    else {
+      const update = ff.calls.filter(c => c.api === 'tabGroups.update').at(-1);
+      assert.equal(Object.hasOwn(update.args[1], 'color'), false, 'leave Firefox default colour untouched');
+    }
     assert.equal(group.windowId,2);
     const [tab] = await ff.browser.tabs.query({groupId:group.id});
     assert.equal(tab.active,false);
@@ -145,7 +151,7 @@ test('no normal non-private window refuses creation', async () => {
   assert.equal((await ff.browser.tabs.query({})).length,1);
 });
 
-test('native port relays correlated replies and silently reconnects after 60 seconds', async () => {
+test('native port connects on startup and retries after 5 seconds then every 60 seconds', async () => {
   assert.equal(typeof agent.connectAgent,'function','native connection exists');
   const {ff,handle}=await fixture();
   const messages=[], scheduled=[], ports=[];
@@ -154,13 +160,71 @@ test('native port relays correlated replies and silently reconnects after 60 sec
     const port={onMessage:{addListener:fn=>port.receive=fn},onDisconnect:{addListener:fn=>port.disconnect=fn},postMessage:msg=>messages.push(msg)};
     ports.push(port); return port;
   };
-  agent.connectAgent({api:ff.browser,handle,portFactory,schedule:(fn,ms)=>scheduled.push({fn,ms})});
+  await agent.connectAgent({api:ff.browser,handle,portFactory,schedule:(fn,ms)=>scheduled.push({fn,ms})});
   await ports[0].receive({id:'request-1',command:'groups'});
   assert.equal(messages[0].id,'request-1'); assert.equal(messages[0].ok,true);
   ports[0].disconnect();
-  assert.equal(scheduled[0].ms,60000);
+  assert.equal(scheduled[0].ms,5000);
   scheduled[0].fn(); assert.equal(ports.length,2);
   const failed=[];
-  agent.connectAgent({api:ff.browser,handle,portFactory:()=>{throw Error('not installed');},schedule:(fn,ms)=>failed.push(ms)});
-  assert.deepEqual(failed,[60000]);
+  let attempts = 0;
+  await agent.connectAgent({api:ff.browser,handle,portFactory:()=>{attempts++; throw Error('not installed');},schedule:(fn,ms)=>failed.push({fn,ms})});
+  assert.equal(attempts,1);
+  assert.equal(failed[0].ms,5000);
+  failed[0].fn();
+  assert.equal(attempts,2);
+  assert.equal(failed[1].ms,60000);
+  failed[1].fn();
+  assert.equal(attempts,3);
+  assert.equal(failed[2].ms,60000);
+});
+
+
+test('new refuses an existing open name after trimming and case folding, suggesting add', async () => {
+  const {ff,handle} = await fixture();
+  const before = ff.calls.length;
+  const reply = await handle({command:'new',title:' WORK ',urls:['https://example.com/new']});
+  assert.equal(reply.ok,false);
+  assert.match(reply.error,/exists.*add/i);
+  assert.equal(ff.calls.slice(before).filter(c => /^(tabs.create|bookmarks.create|tabGroups.update)$/.test(c.api)).length,0);
+});
+
+test('Windows never connects to a native host or schedules retries', async () => {
+  const {ff,handle} = await fixture();
+  ff.browser.runtime.getPlatformInfo = async () => ({os:'win',arch:'x86-64'});
+  let attempts=0, retries=0;
+  await agent.connectAgent({api:ff.browser,handle,portFactory:()=>{attempts++; throw Error('unsupported');},schedule:()=>{retries++;}});
+  assert.equal(attempts,0);
+  assert.equal(retries,0);
+});
+
+test('oversized UTF-8 replies are refused with the request id and the port remains usable', async () => {
+  const {ff} = await fixture();
+  const messages=[];
+  let receive;
+  const handle = async request => request.command === 'big'
+    ? {ok:true,tabs:[{title:'Big',url:'https://example.com/?q='+'é'.repeat(530000)}]}
+    : {ok:true,open:[]};
+  await agent.connectAgent({api:ff.browser,handle,portFactory:()=>({
+    onMessage:{addListener:fn=>receive=fn},onDisconnect:{addListener:()=>{}},postMessage:msg=>messages.push(msg),
+  })});
+  await receive({id:'big',command:'big'});
+  assert.equal(messages[0].id,'big');
+  assert.equal(messages[0].ok,false);
+  assert.match(messages[0].error,/reply too large/i);
+  assert.equal(messages[0].unreachable,undefined);
+  assert.ok(new TextEncoder().encode(JSON.stringify(messages[0])).length < 1024*1024);
+  await receive({id:'next',command:'groups'});
+  assert.deepEqual(messages[1],{ok:true,open:[],id:'next'});
+});
+
+test('replies below 1 MB including multibyte text are delivered unchanged', async () => {
+  const {ff} = await fixture();
+  let receive, sent;
+  const reply = {ok:true,tabs:[{title:'Big',url:'https://example.com/?q='+'é'.repeat(500000)}]};
+  await agent.connectAgent({api:ff.browser,handle:async()=>reply,portFactory:()=>({
+    onMessage:{addListener:fn=>receive=fn},onDisconnect:{addListener:()=>{}},postMessage:msg=>sent=msg,
+  })});
+  await receive({id:'small',command:'tabs'});
+  assert.deepEqual(sent,{...reply,id:'small'});
 });
