@@ -17,7 +17,7 @@ Version 3.2.0. Distributed as an unlisted add-on. Design: `docs/superpowers/spec
 - **Tiles:** groups, PINNED, SAVED and a clock on a scrolling grid that fills the page edge to edge, with scrolling tab lists.
 - **TABS rail:** ungrouped tabs stay on the right, with their own scroll. The Settings gear has its own cell below it.
 - **Move and resize:** drag a tile's header, or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
-- **Window widths:** each width keeps its own layout (up to 4). A width without one shows the closest: tiles narrow slightly, or columns of tiles pack together in order. Resizing saves nothing; moving a tile saves a layout for that width.
+- **Window widths:** each width keeps its own layout (up to 4). A width without one shows the closest: tiles narrow slightly, or columns of tiles pack together in order. Resizing saves nothing. Moving a tile updates the layout shown if the result still fits it; otherwise it saves a new layout for this width.
 - **Windows:** this window comes first; others are labelled. Tile places do not change tab order.
 - **Open a tab:** click it. A pin from another window moves here unless that setting is off.
 - **Move tabs:** drag to a group, TABS or PINNED. Drop on empty grid space to create and name a group.
@@ -45,7 +45,7 @@ The same settings are in about:addons, Foxy, Options.
 | Move other-window pins here on click | On; off focuses their window instead | Synced |
 | Switch to an open tab instead of opening a duplicate | On or off | Synced |
 
-Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their places until a reset.
+Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their places in each layout until a reset.
 
 ## Pinned tab names
 
@@ -60,6 +60,7 @@ Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their pl
 - **Matches:** same address ignoring `#…`, same container and private state; tabs in any window, pinned tabs and tabs in collapsed groups (the group expands).
 - **Left alone:** background tabs, bursts such as session restore or open all in tabs, the first 15 seconds after start, popups, and tabs Foxy opens.
 - **Closed duplicates** skip Recently Closed, so Ctrl+Shift+T still reaches your own closed tabs.
+- **Trade-off:** a tab you reopen with Ctrl+Shift+T while its page is open elsewhere is switched too, and its back and forward history is lost.
 
 ## Saved groups and Sync
 

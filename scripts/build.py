@@ -9,7 +9,7 @@ import pathlib
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-INCLUDE = ["manifest.json", "newtab.html", "newtab.css", "background.js", "src/**/*.js", "fonts/*", "icons/*"]
+INCLUDE = ["manifest.json", "newtab.html", "options.html", "newtab.css", "background.js", "src/**/*.js", "fonts/*", "icons/*"]
 FIXED_TIME = (1980, 1, 1, 0, 0, 0)
 
 

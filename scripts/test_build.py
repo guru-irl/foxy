@@ -41,6 +41,33 @@ class BuildTest(unittest.TestCase):
             )
             self.assertNotIn("/.", name)
 
+    def test_package_holds_everything_the_manifest_reaches(self):
+        import re
+        addon = ROOT / "extension"
+        manifest = json.loads((addon / "manifest.json").read_text())
+        pending = [*manifest["background"]["scripts"], manifest["options_ui"]["page"],
+                   *manifest["chrome_url_overrides"].values(), *manifest["chrome_settings_overrides"].values()]
+        reached = set()
+        while pending:
+            name = pending.pop()
+            if name in reached:
+                continue
+            reached.add(name)
+            text = (addon / name).read_text(errors="ignore")
+            base = pathlib.PurePosixPath(name).parent
+            if name.endswith(".html"):
+                refs = re.findall(r'(?:src|href)="([^":#?]+)"', text)
+            elif name.endswith(".js"):
+                refs = re.findall(r'(?:from|import)\s*\(?\s*["\'](\.{1,2}/[^"\']+)["\']', text)
+            else:
+                refs = []
+            for ref in refs:
+                path = (addon / base / ref).resolve().relative_to(addon.resolve()).as_posix()
+                pending.append(path)
+        self.assertIn("options.html", reached)
+        missing = sorted(reached - set(build.package_files()))
+        self.assertEqual(missing, [], "files the add-on loads but the package leaves out")
+
     def test_zip_is_named_after_the_version_and_holds_the_package_files(self):
         out = build.build(out_dir=OUT_DIR)
         version = json.loads((ROOT / "extension" / "manifest.json").read_text())["version"]
