@@ -233,7 +233,7 @@ test("resize corner snaps its bottom right, pushes live and respects minima and 
   assert.equal(rect(tile(root, "clock")).w, 3); assert.equal(rect(tile(root, "clock")).h, 2); escape();
 });
 
-test("every tile has a subtle 16px hover and focus resize corner, clock has a move header", async () => {
+test("every tile has an invisible 16px resize corner, clock has a move header", async () => {
   const { root } = await setup();
   for (const node of root.querySelectorAll(".tile")) {
     const handle = node.querySelector(".tile-resize"); assert.ok(handle);
@@ -241,10 +241,10 @@ test("every tile has a subtle 16px hover and focus resize corner, clock has a mo
     assert.equal(bounds.width, 16); assert.equal(bounds.height, 16);
     assert.equal(style.cursor, "nwse-resize"); assert.equal(style.opacity, "0");
     assert.ok(bounds.right <= card.right && bounds.bottom <= card.bottom);
-    withPseudoState([node], "hover", () => assert.equal(getComputedStyle(handle).opacity, "1"));
+    withPseudoState([node], "hover", () => assert.equal(getComputedStyle(handle).opacity, "0"));
     assert.equal(handle.tabIndex, -1, "pointer-only handles must not be tab stops");
     assert.equal(handle.getAttribute("aria-hidden"), "true");
-    withPseudoState([node], "focus-within", () => assert.equal(getComputedStyle(handle).opacity, "1"));
+    withPseudoState([node], "focus-within", () => assert.equal(getComputedStyle(handle).opacity, "0"));
     assert.equal(style.boxShadow, "none"); assert.equal(style.borderTopWidth, "0px"); assert.equal(style.outlineStyle, "none");
   }
   const clock = tile(root, "clock"), source = clock.querySelector(".tile-header"); assert.ok(source);
