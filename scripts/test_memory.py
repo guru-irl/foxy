@@ -98,7 +98,8 @@ class MemoryTests(unittest.TestCase):
 
     def test_missing_firefox_root_or_unsupported_platform_fails(self):
         self.assertTrue(hasattr(self.host, 'measure_memory'), 'memory measurement exists')
-        with patch.object(self.host, 'mac_process_table', return_value={11: (10, 100)}):
+        with patch.object(self.host, 'mac_process_table', return_value={11: (10, 100)}), \
+                patch.object(self.host, 'mac_system_memory', return_value={'total': 4000, 'used': 2500}):
             with self.assertRaises(ValueError): self.host.measure_memory(root_pid=10, host_pid=20, platform='darwin')
         with self.assertRaises(ValueError): self.host.measure_memory(platform='win32')
 
