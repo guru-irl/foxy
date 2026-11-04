@@ -268,7 +268,10 @@ class CliTests(unittest.TestCase):
           (['tabs','Work','--json'],{'command':'tabs','group':'Work'}),
           (['add','Work','https://example.com/','--create','--color','red','--json'],
            {'command':'add','group':'Work','urls':['https://example.com/'],'create':True,'color':'red'}),
-          (['new','New','https://example.com/','--json'],{'command':'new','title':'New','urls':['https://example.com/']})]
+          (['new','New','https://example.com/','--json'],{'command':'new','title':'New','urls':['https://example.com/']}),
+          (['remove','Work','https://example.com/a','https://example.com/b','--close','--json'],
+           {'command':'remove','group':'Work','urls':['https://example.com/a','https://example.com/b'],'close':True}),
+          (['delete','Work','--close-tabs','--json'],{'command':'delete','group':'Work','closeTabs':True})]
         for args,want in examples:
             result,requests=self.invoke(args,{'ok':True,'added':1})
             self.assertEqual(result.returncode,0,result.stderr)
@@ -314,10 +317,35 @@ class CliTests(unittest.TestCase):
         result, _ = self.invoke(['add', 'Later', 'https://example.com/', '--json'], reply)
         self.assertTrue(json.loads(result.stdout)['closed'])
 
+    def test_remove_and_delete_text_and_default_flags(self):
+        reply = {'ok':True, 'group':{'title':'Work'}, 'closed':False, 'removed':2,
+                 'missing':['https://example.com/missing']}
+        result, requests = self.invoke(['remove','Work','https://example.com/a'], reply)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.strip(),'Removed 2 from Work; not found: 1')
+        self.assertEqual(requests,[{'command':'remove','group':'Work','urls':['https://example.com/a']}])
+        reply = {'ok':True, 'group':{'title':'Work','color':'red'}, 'closedTabs':3,
+                 'deleted':{'title':'Work','color':'red','tabs':[]}}
+        result, requests = self.invoke(['delete','Work'], reply)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.strip(),'Deleted Work (3 tabs)')
+        self.assertEqual(requests,[{'command':'delete','group':'Work'}])
+
+    def test_old_foxy_unknown_command_gets_update_message_in_text_and_json(self):
+        for command, args in [('remove',['Work','https://example.com/a']),('delete',['Work'])]:
+            for json_flag in [[],['--json']]:
+                result,_ = self.invoke([command,*args,*json_flag], {'ok':False,'error':'Unknown command'})
+                self.assertEqual(result.returncode,1)
+                self.assertIn(f'This Foxy does not support {command}; update to 3.4.0', result.stdout+result.stderr)
+                if json_flag:
+                    self.assertFalse(json.loads(result.stdout)['ok'])
+        result,_ = self.invoke(['groups'], {'ok':False,'error':'Unknown command'})
+        self.assertIn('Unknown command',result.stderr)
+
     def test_help_describes_every_command_with_an_example_and_exit_codes(self):
         result, _ = self.invoke(['--help'])
         self.assertEqual(result.returncode, 0)
-        for command in ('groups', 'tabs', 'add', 'new'):
+        for command in ('groups', 'tabs', 'add', 'new', 'remove', 'delete'):
             self.assertRegex(result.stdout, rf'{command} +[^\n]*example:')
             specific, _ = self.invoke([command, '--help'])
             self.assertEqual(specific.returncode, 0)

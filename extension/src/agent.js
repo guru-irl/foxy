@@ -10,7 +10,7 @@ const refused = error => ({ ok: false, error });
 const eligible = win => win.type === 'normal' && !win.incognito;
 
 /** Uses the sync controller's saved snapshot, not a separate bookmark root. */
-export function createAgentHandler({ api, saved, mark = markOwn }) {
+export function createAgentHandler({ api, saved, idle, deleteSaved, mark = markOwn }) {
   let lastNormal;
   let focusRead = Promise.resolve();
   api.windows.onFocusChanged.addListener(id => {
@@ -39,17 +39,23 @@ export function createAgentHandler({ api, saved, mark = markOwn }) {
     }
     const closed = await saved();
     if (!Array.isArray(closed?.saved)) throw new Error('Saved groups are unavailable');
-    return { windowId, open, saved: closed.saved };
+    return { windowId, open, saved: closed.saved, folders: closed.folders };
   }
 
   function validate(request) {
-    if (!request || !['groups','tabs','add','new'].includes(request.command)) return 'Unknown command';
+    if (!request || !['groups','tabs','add','new','remove','delete'].includes(request.command)) return 'Unknown command';
     if (request.command === 'groups') return null;
     const title = request.command === 'new' ? request.title : request.group;
     if (typeof title !== 'string' || !title.trim() || [...title].length > 200) return 'Group title must be 1 to 200 characters';
     if (request.command === 'tabs') return null;
+    if (request.command === 'delete') {
+      return request.closeTabs !== undefined && typeof request.closeTabs !== 'boolean' ? 'closeTabs must be a boolean' : null;
+    }
     if (!Array.isArray(request.urls) || request.urls.length < 1 || request.urls.length > 50) return 'Provide 1 to 50 URLs';
     if (!request.urls.every(url => typeof url === 'string' && isOpenableUrl(url))) return 'Only http: and https: URLs are allowed';
+    if (request.command === 'remove') {
+      return request.close !== undefined && typeof request.close !== 'boolean' ? 'close must be a boolean' : null;
+    }
     if (request.color !== undefined && (typeof request.color !== 'string' || !Object.hasOwn(COLOR_EMOJI, request.color))) return 'Unknown tab group colour';
     if (request.create !== undefined && typeof request.create !== 'boolean') return 'create must be a boolean';
     return null;
@@ -66,7 +72,7 @@ export function createAgentHandler({ api, saved, mark = markOwn }) {
     if (error) return refused(error);
     try {
       const state = await snapshot();
-      if (request.command === 'groups') return { ok: true, ...state };
+      if (request.command === 'groups') return { ok: true, windowId: state.windowId, open: state.open, saved: state.saved };
       const wanted = request.command === 'new' ? request.title : request.group;
       const candidates = state.open.filter(g => nameKey(g.title) === nameKey(wanted))
         .sort((a,b) => Number(b.windowId === state.windowId) - Number(a.windowId === state.windowId)
@@ -88,6 +94,40 @@ export function createAgentHandler({ api, saved, mark = markOwn }) {
       const existing = group ? await tabsOf(group, closed) : [];
       if (request.command === 'tabs') {
         return { ok: true, group, tabs: existing.map(({ title, url }) => ({ title, url })) };
+      }
+      const title = group?.title.trim();
+      const activeRefusal = tab => refused(`${tab.url} is the active tab in a window; remove without --close or ask the user`);
+      if (request.command === 'remove') {
+        const keys = new Set(request.urls.map(urlKey));
+        const matches = existing.filter(tab => keys.has(urlKey(tab.url)));
+        const found = new Set(matches.map(tab => urlKey(tab.url)));
+        const missing = request.urls.filter(url => !found.has(urlKey(url)));
+        if (!matches.length) return refused(`No matching tabs in ${title}`);
+        if (matches.length === existing.length) return refused(`This would empty ${title}; use delete`);
+        const active = !closed && request.close && matches.find(tab => tab.active);
+        if (active) return activeRefusal(active);
+        if (closed) {
+          for (const bookmark of matches) await api.bookmarks.remove(bookmark.id);
+        } else if (request.close) await api.tabs.remove(matches.map(tab => tab.id));
+        else await api.tabs.ungroup(matches.map(tab => tab.id));
+        return { ok: true, group, closed, removed: matches.length, missing };
+      }
+      if (request.command === 'delete') {
+        if (!closed && !request.closeTabs) {
+          return refused(`${title} is open in a window; pass --close-tabs to close its ${existing.length} tabs and delete it`);
+        }
+        const active = !closed && existing.find(tab => tab.active);
+        if (active) return activeRefusal(active);
+        const folderId = closed ? group.folderId : state.folders?.[group.id];
+        if (!folderId) return refused(`The saved folder for ${title} is not available; try again`);
+        const summary = { title: group.title, color: group.color };
+        const deleted = { ...summary, tabs: existing.map(({ title, url }) => ({ title, url })) };
+        if (!closed) {
+          await api.tabs.remove(existing.map(tab => tab.id));
+          await idle();
+        }
+        if (!(await deleteSaved(folderId)).ok) return refused(`Could not delete ${title}`);
+        return { ok: true, group: summary, closedTabs: closed ? 0 : existing.length, deleted };
       }
       const seen = new Set(existing.map(t => urlKey(t.url)));
       const urls = request.urls.filter(url => {

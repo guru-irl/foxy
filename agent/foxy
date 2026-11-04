@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect Foxy tab groups and add URLs without changing the active tab."""
+"""Inspect and manage Foxy tab groups without closing the active tab."""
 
 import argparse
 import json
@@ -16,6 +16,8 @@ COMMANDS = {
     'tabs': ('List a group\'s titles and URLs', 'foxy tabs "To be reviewed" --json'),
     'add': ('Add URLs to an existing group', 'foxy add "Dev server" http://localhost:3000'),
     'new': ('Create a named group from inactive tabs', 'foxy new "Release notes" https://example.com/release'),
+    'remove': ('Remove URLs from a group (Foxy 3.4.0+)', 'foxy remove "Work" https://example.com/review'),
+    'delete': ('Delete a group (Foxy 3.4.0+)', 'foxy delete "Old work" --close-tabs'),
 }
 
 
@@ -36,15 +38,20 @@ def parser():
             formatter_class=argparse.RawTextHelpFormatter)
         command.add_argument('--json', action='store_true', default=argparse.SUPPRESS,
                              help='print the full JSON reply (closed=true means bookmarks only)')
-        if name in ('tabs', 'add'):
+        if name in ('tabs', 'add', 'remove', 'delete'):
             command.add_argument('group', help='group name (trimmed, case-insensitive)')
         if name == 'new':
             command.add_argument('title', help='new group name, up to 200 characters; use add if already open')
-        if name in ('add', 'new'):
+        if name in ('add', 'new', 'remove'):
             command.add_argument('urls', nargs='+', help='1 to 50 http/https URLs')
+        if name in ('add', 'new'):
             command.add_argument('--color', choices=COLORS, help='new group colour (omitted: Firefox default)')
         if name == 'add':
             command.add_argument('--create', action='store_true', help='create a missing group only if the user named it')
+        if name == 'remove':
+            command.add_argument('--close', action='store_true', help='close matching inactive tabs instead of ungrouping them')
+        if name == 'delete':
+            command.add_argument('--close-tabs', dest='closeTabs', action='store_true', help='close inactive tabs before deleting an open group')
     return result
 
 
@@ -83,6 +90,10 @@ def render(reply, command):
         return '\n'.join(lines) or 'No groups'
     if command == 'tabs':
         return '\n'.join(f"{tab['title']}\n  {tab['url']}" for tab in reply.get('tabs', [])) or 'No tabs'
+    if command == 'remove':
+        return f"Removed {reply['removed']} from {reply['group']['title']}; not found: {len(reply['missing'])}"
+    if command == 'delete':
+        return f"Deleted {reply['group']['title']} ({reply['closedTabs']} tabs)"
     if reply.get('closed'):
         added = reply.get('added', 0)
         return (f"Added {added} bookmark{'' if added == 1 else 's'} to saved group "
@@ -93,8 +104,10 @@ def render(reply, command):
 def main(argv=None):
     args = parser().parse_args(argv)
     request = {key: value for key, value in vars(args).items()
-        if key != 'json' and value is not None and not (key == 'create' and value is False)}
+        if key != 'json' and value is not None and not (key in ('create', 'close', 'closeTabs') and value is False)}
     reply = exchange(request)
+    if args.command in ('remove', 'delete') and reply.get('error') == 'Unknown command':
+        reply['error'] = f'This Foxy does not support {args.command}; update to 3.4.0'
     if args.json:
         print(json.dumps(reply, ensure_ascii=False))
     elif reply['ok']:
