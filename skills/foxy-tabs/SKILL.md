@@ -5,7 +5,7 @@ description: Use when an agent needs to list Firefox tab groups, inspect their U
 
 # Foxy tabs
 
-The CLI `/Users/guru/src/foxy/agent/foxy` talks to running Firefox with Foxy
+Run the commands below from the Foxy repository root. The CLI `agent/foxy` talks to running Firefox with Foxy
 3.2.0 or newer through the installed native host. It lists open and saved
 closed groups and adds URLs without changing the active tab or focusing a
 window. Adding to a saved group writes bookmarks and leaves it closed. Remove
@@ -14,16 +14,16 @@ and delete require Foxy 3.4.0 or newer.
 ## Commands
 
 ```sh
-/Users/guru/src/foxy/agent/foxy groups --json
-/Users/guru/src/foxy/agent/foxy tabs "To be reviewed" --json
-/Users/guru/src/foxy/agent/foxy add "To be reviewed" https://example.com/review
-/Users/guru/src/foxy/agent/foxy add "Dev server" http://localhost:3000
+agent/foxy groups --json
+agent/foxy tabs "To be reviewed" --json
+agent/foxy add "To be reviewed" https://example.com/review
+agent/foxy add "Dev server" http://localhost:3000
 # Both creation forms below require a group name explicitly given by the user:
-/Users/guru/src/foxy/agent/foxy new "Release notes" https://example.com/release --color blue
-/Users/guru/src/foxy/agent/foxy add "Research" https://example.com/article --create --color green
-/Users/guru/src/foxy/agent/foxy remove "To be reviewed" https://example.com/review --json
-/Users/guru/src/foxy/agent/foxy remove "To be reviewed" https://example.com/review --close --json
-/Users/guru/src/foxy/agent/foxy delete "Old work" --close-tabs --json
+agent/foxy new "Release notes" https://example.com/release --color blue
+agent/foxy add "Research" https://example.com/article --create --color green
+agent/foxy remove "To be reviewed" https://example.com/review --json
+agent/foxy remove "To be reviewed" https://example.com/review --close --json
+agent/foxy delete "Old work" --close-tabs --json
 ```
 
 Every command accepts `--json` and `--help`. Names are trimmed and

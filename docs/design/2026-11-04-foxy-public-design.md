@@ -9,7 +9,7 @@ Making the repository public, and anything else visible to the public, happens o
 - **History:** all 275 commits were scanned, and every file version, with the private pattern list in `~/.config/foxy/scan-patterns.txt`. There are no hits.
 - **Vendor words:** the only ones are public product names (Teams, Outlook, Azure, Microsoft 365 Copilot), used by the theme's pinned-tab labels, plus the Cascadia Mono OFL copyright line. That is acceptable.
 - **Personal data in the history:**
-  - the home path `/Users/<user>` in old plans and the skill;
+  - an absolute home path in old plans and the skill;
   - the profile folder ID in two plans;
   - the author email, which is the user's chosen public identity.
 - **History decision:** keep the history and scrub the tree in new commits. The leftover paths are low risk.
@@ -52,8 +52,8 @@ The logo is a rounded square filled with a diagonal gradient. It comes from the 
 ## 4. Repository cleanup
 
 - **Design docs:**
-  - delete `docs/superpowers/plans/`, which holds process logs with absolute paths;
-  - move `docs/superpowers/specs/` to `docs/design/`;
+  - delete the old plans directory, which holds process logs with absolute paths;
+  - move the specifications to `docs/design/`;
   - fix every link to them.
 - **Scrubbing:**
   - Replace absolute home paths and profile IDs in tracked files with `~/...` or `<profile>`.
@@ -61,7 +61,7 @@ The logo is a rounded square filled with a diagonal gradient. It comes from the 
 - **Fixtures and renders:**
   - Use generic group names: Reading, Work, Travel, Recipes, Research, Side project, Music, Photos.
   - Use a generic weather place: Lisbon.
-  - Don't use the user's real group titles (TBR, DEV, COV, OCE, HARNESS, TELEMETRY) or city.
+  - Don't use the user's real group titles or city.
   - Tests may keep internal names only where a test asserts them, and should rename where cheap.
 - **Manifest:** the description becomes "A board of your tabs, tab groups and pinned tabs, saved as bookmarks and synced across devices." The old "grid" wording is out of date.
 - **README:**
