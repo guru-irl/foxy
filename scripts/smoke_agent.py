@@ -122,6 +122,9 @@ def run(*, root=ROOT, firefox=FIREFOX):
                          lambda urls: urls == ['https://example.com/agent-c'])
                     results.record('remove closes and syncs', closed['removed'] == 1 and all(t['id'] != first_id for t in remaining), json.dumps(closed))
 
+                    cli(root, env, 'add', 'Agent smoke', 'https://example.com/agent-d')
+                    poll('two bookmarks before delete', lambda: client.script("return (await browser.bookmarks.getChildren(arguments[0])).map(b=>b.url);", [folder]),
+                         lambda urls: sorted(urls) == ['https://example.com/agent-c', 'https://example.com/agent-d'])
                     other = json.loads(cli(root, env, 'new', 'Other smoke', 'https://example.net/other', '--json').stdout)
                     other_id = other['group']['id']
                     other_folder = poll('other group saved', lambda: client.script("return await browser.runtime.sendMessage({type:'foxy:saved'});"),
@@ -134,8 +137,8 @@ def run(*, root=ROOT, firefox=FIREFOX):
                     """), lambda value: not value['folders'] and all(g['title'] != 'Agent smoke' for g in value['saved'])
                         and all(g['id'] != group_id for g in value['open']), minimum=3)
                     other_urls = client.script("return (await browser.bookmarks.getChildren(arguments[0])).map(b=>b.url);", [other_folder])
-                    results.record('delete open group and keep other group', deleted['closedTabs'] == 1
-                        and deleted['deleted']['tabs'][0]['url'] == 'https://example.com/agent-c'
+                    results.record('delete open group and keep other group', deleted['closedTabs'] == 2
+                        and [t['url'] for t in deleted['deleted']['tabs']] == ['https://example.com/agent-c', 'https://example.com/agent-d']
                         and other_urls == ['https://example.net/other'], json.dumps(deleted))
 
                     saved_group = json.loads(cli(root, env, 'new', 'Saved smoke', 'https://example.com/saved', '--json').stdout)

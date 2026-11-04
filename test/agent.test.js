@@ -143,6 +143,41 @@ test('validation refuses invalid input before creating any tabs or bookmarks', a
   assert.equal((await handle({command:'new',title:'x'.repeat(200),color:'grey',urls:Array.from({length:50},(_,i)=>`https://example.com/${i}`)})).added,50);
 });
 
+test('mutation deadlines are validated and expired requests leave tabs and bookmarks untouched', async () => {
+  const requests = [
+    {command:'add',group:'Work',urls:['https://example.com/new']},
+    {command:'new',title:'New',urls:['https://example.com/new']},
+    {command:'remove',group:'Work',urls:['https://example.com/a']},
+    {command:'delete',group:'Work',closeTabs:true},
+    {command:'add',group:'Later',urls:['https://example.com/new']},
+    {command:'remove',group:'Later',urls:['https://example.com/saved']},
+    {command:'delete',group:'Later'},
+  ];
+  for (const request of requests) {
+    const {ff,handle} = await removalFixture();
+    const tabs = await ff.browser.tabs.query({}), tree = await ff.browser.bookmarks.getTree();
+    assert.deepEqual(await handle({...request,deadline:0}),
+      {ok:false,error:'Request expired before Foxy could start it; nothing changed'});
+    assert.equal((await handle({...request,deadline:'0'})).ok,false);
+    assert.deepEqual(await ff.browser.tabs.query({}),tabs);
+    assert.deepEqual(await ff.browser.bookmarks.getTree(),tree);
+    assert.equal((await handle(request)).ok,true, 'older clients need no deadline');
+  }
+});
+
+test('a request expiring while waiting for the snapshot does not start', async () => {
+  const {ff} = await fixture();
+  const deadline = Date.now() + 250;
+  const handle = agent.createAgentHandler({api:ff.browser, saved:async()=>{
+    await new Promise(resolve=>setTimeout(resolve,300));
+    return {saved:[],folders:{}};
+  }});
+  const before = await ff.browser.tabs.query({});
+  assert.deepEqual(await handle({command:'new',title:'Late',urls:['https://example.com/late'],deadline}),
+    {ok:false,error:'Request expired before Foxy could start it; nothing changed'});
+  assert.deepEqual(await ff.browser.tabs.query({}),before);
+});
+
 test('no normal non-private window refuses creation', async () => {
   assert.equal(typeof agent.createAgentHandler,'function');
   const ff = createFirefox({windows:[{id:1,type:'popup',focused:true}],tabs:[{id:1,windowId:1,url:'about:blank'}]});
@@ -153,7 +188,7 @@ test('no normal non-private window refuses creation', async () => {
 
 // Breaking the agent's mutation or its sync ordering must change these public
 // replies, tab membership, or the real bookmark tree.
-async function removalFixture() {
+async function removalFixture({wrapApi = api => api, productionIdle = false, failIdle = false} = {}) {
   const ff = createFirefox({
     groups: [{id:11, windowId:1, title:'Work', color:'red'},
       {id:22, windowId:1, title:'Other', color:'blue'}],
@@ -180,7 +215,8 @@ async function removalFixture() {
     await new Promise(resolve => setTimeout(resolve, 0));
     await sync.idle(); await ff.settle(); await sync.idle();
   };
-  const handle = agent.createAgentHandler({api:ff.browser, saved, idle,
+  const handle = agent.createAgentHandler({api:wrapApi(ff.browser), saved,
+    idle: failIdle ? async () => { throw new Error('sync failed'); } : productionIdle ? () => sync.idle() : idle,
     deleteSaved: folderId => sync.onMessage({type:'foxy:delete-saved', folderId})});
   return {ff, sync, saved, idle, handle};
 }
@@ -275,7 +311,7 @@ test('delete an open group requires --close-tabs and refuses active tabs without
     {ok:false,error:'Work is open in a window; pass --close-tabs to close its 3 tabs and delete it'});
   await ff.browser.tabs.update(3,{active:true}); await ff.settle();
   assert.deepEqual(await handle({command:'delete',group:'Work',closeTabs:true}),
-    {ok:false,error:'https://example.com/a#two is the active tab in a window; remove without --close or ask the user'});
+    {ok:false,error:'https://example.com/a#two is the active tab in a window; ask the user to switch away or close it'});
   assert.deepEqual((await ff.browser.tabs.query({})).map(t=>t.id),before.map(t=>t.id));
   assert.deepEqual(await ff.browser.bookmarks.getTree(),tree);
 });
@@ -296,6 +332,110 @@ test('delete closes an open group before deleting its saved folder without recre
   assert.deepEqual(await ff.browser.bookmarks.search({title:'🔴 Work'}),[]);
   assert.deepEqual(await folderUrls(ff,folders[22]),['https://example.net/other']);
   assert.deepEqual(await folderUrls(ff,'archive'),['https://example.net/archive']);
+});
+
+test('delete failures after closing tabs report the closed count and original URLs', async () => {
+  const expected = {title:'Work',color:'red',tabs:[
+    {title:'A one',url:'https://example.com/a#one'},
+    {title:'A two',url:'https://example.com/a#two'},
+    {title:'Keep',url:'https://example.com/keep'}]};
+  for (const options of [{productionIdle:true}, {failIdle:true}, {
+    wrapApi: api => {
+      let added = false;
+      return {...api,tabs:{...api.tabs,remove:async ids => {
+        if (!added) {
+          added = true;
+          const tab = await api.tabs.create({windowId:1,url:'https://example.com/user',active:false});
+          await api.tabs.group({groupId:11,tabIds:[tab.id]});
+        }
+        await api.tabs.remove(ids);
+      }}};
+    },
+  }]) {
+    const {ff,handle,idle} = await removalFixture(options);
+    const reply = await handle({command:'delete',group:'Work',closeTabs:true});
+    assert.equal(reply.ok,false);
+    assert.equal(reply.closedTabs,3);
+    assert.deepEqual(reply.deleted,expected);
+    assert.equal((await ff.browser.tabs.query({})).some(t=>[2,3,4].includes(t.id)),false);
+    await idle();
+  }
+});
+
+test('close operations recheck activity after the snapshot and before closing', async () => {
+  for (const [request,error] of [
+    [{command:'remove',group:'Work',urls:['https://example.com/a'],close:true},
+      'https://example.com/a#two is the active tab in a window; remove without --close or ask the user'],
+    [{command:'delete',group:'Work',closeTabs:true},
+      'https://example.com/a#two is the active tab in a window; ask the user to switch away or close it'],
+  ]) {
+    let queries = 0;
+    const {ff,handle} = await removalFixture({wrapApi:api=>({...api,tabs:{...api.tabs,
+      query:async query => {
+        const result = await api.tabs.query(query);
+        if (query.groupId === 11 && ++queries === 2) await api.tabs.update(3,{active:true});
+        return result;
+      },
+    }})});
+    assert.deepEqual(await handle(request),{ok:false,error});
+    assert.deepEqual((await ff.browser.tabs.query({groupId:11})).map(t=>t.id),[2,3,4]);
+  }
+});
+
+test('a tab becoming active after one close refuses and reports the closed tab', async () => {
+  for (const request of [
+    {command:'remove',group:'Work',urls:['https://example.com/a'],close:true},
+    {command:'delete',group:'Work',closeTabs:true},
+  ]) {
+    let calls = 0;
+    const {ff,handle,idle} = await removalFixture({wrapApi:api=>({...api,tabs:{...api.tabs,
+      remove:async ids => {
+        await api.tabs.remove(ids);
+        if (++calls === 1) await api.tabs.update(3,{active:true});
+      },
+    }})});
+    const reply = await handle(request);
+    assert.equal(reply.ok,false);
+    assert.match(reply.error,/https:\/\/example\.com\/a#two is the active tab in a window/);
+    assert.equal(reply.closedTabs,1);
+    assert.equal(reply.deleted.title,'Work');
+    assert.ok(reply.deleted.tabs.some(tab=>tab.url === 'https://example.com/a#one'));
+    assert.deepEqual((await ff.browser.tabs.query({groupId:11})).map(t=>t.id),[3,4]);
+    await idle();
+  }
+});
+
+test('a close error after the first tab reports the partial deletion', async () => {
+  let calls = 0;
+  const {ff,handle,idle} = await removalFixture({wrapApi:api=>({...api,tabs:{...api.tabs,
+    remove:async ids => {
+      if (++calls === 2) throw new Error('close failed');
+      await api.tabs.remove(ids);
+    },
+  }})});
+  const reply = await handle({command:'delete',group:'Work',closeTabs:true});
+  assert.equal(reply.ok,false);
+  assert.equal(reply.closedTabs,1);
+  assert.equal(reply.deleted.tabs[0].url,'https://example.com/a#one');
+  assert.deepEqual((await ff.browser.tabs.query({groupId:11})).map(t=>t.id),[3,4]);
+  await idle();
+});
+
+test('a close rejection after the browser removed a tab still reports that tab', async () => {
+  for (const request of [
+    {command:'remove',group:'Work',urls:['https://example.com/a'],close:true},
+    {command:'delete',group:'Work',closeTabs:true},
+  ]) {
+    const {ff,handle,idle} = await removalFixture({wrapApi:api=>({...api,tabs:{...api.tabs,
+      remove:async ids => { await api.tabs.remove(ids); throw new Error('close failed after removal'); },
+    }})});
+    const reply = await handle(request);
+    assert.equal(reply.ok,false);
+    assert.equal(reply.closedTabs,1);
+    assert.ok(reply.deleted.tabs.some(tab=>tab.url === 'https://example.com/a#one'));
+    assert.deepEqual((await ff.browser.tabs.query({groupId:11})).map(t=>t.id),[3,4]);
+    await idle();
+  }
 });
 
 test('remove prefers the last focused open group over namesakes and saved groups', async () => {

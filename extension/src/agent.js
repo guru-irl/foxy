@@ -44,6 +44,7 @@ export function createAgentHandler({ api, saved, idle, deleteSaved, mark = markO
 
   function validate(request) {
     if (!request || !['groups','tabs','add','new','remove','delete'].includes(request.command)) return 'Unknown command';
+    if (request.deadline !== undefined && (typeof request.deadline !== 'number' || !Number.isFinite(request.deadline))) return 'deadline must be a number';
     if (request.command === 'groups') return null;
     const title = request.command === 'new' ? request.title : request.group;
     if (typeof title !== 'string' || !title.trim() || [...title].length > 200) return 'Group title must be 1 to 200 characters';
@@ -95,8 +96,36 @@ export function createAgentHandler({ api, saved, idle, deleteSaved, mark = markO
       if (request.command === 'tabs') {
         return { ok: true, group, tabs: existing.map(({ title, url }) => ({ title, url })) };
       }
+      if (request.deadline !== undefined && Date.now() > request.deadline) {
+        return refused('Request expired before Foxy could start it; nothing changed');
+      }
       const title = group?.title.trim();
-      const activeRefusal = tab => refused(`${tab.url} is the active tab in a window; remove without --close or ask the user`);
+      const expired = () => request.deadline !== undefined && Date.now() > request.deadline;
+      const summary = group && { title: group.title, color: group.color };
+      const closeTargets = async (tabs, action) => {
+        const remaining = new Set(tabs.map(tab => tab.id));
+        const closed = [];
+        try {
+          for (const tab of tabs) {
+            const active = (await api.tabs.query({active:true})).find(t => remaining.has(t.id));
+            if (active) {
+              const advice = action === 'delete' ? 'ask the user to switch away or close it' : 'remove without --close or ask the user';
+              return {closed, error:`${active.url} is the active tab in a window; ${advice}`};
+            }
+            if (!closed.length && expired()) return {closed, error:'Request expired before Foxy could start it; nothing changed'};
+            try { await api.tabs.remove(tab.id); }
+            catch (error) {
+              try {
+                if (!(await api.tabs.query({})).some(t => t.id === tab.id)) closed.push(tab);
+              } catch { /* The browser could not confirm whether the tab closed. */ }
+              throw error;
+            }
+            closed.push(tab);
+            remaining.delete(tab.id);
+          }
+          return {closed};
+        } catch (error) { return {closed, error:String(error.message ?? error)}; }
+      };
       if (request.command === 'remove') {
         const keys = new Set(request.urls.map(urlKey));
         const matches = existing.filter(tab => keys.has(urlKey(tab.url)));
@@ -104,30 +133,42 @@ export function createAgentHandler({ api, saved, idle, deleteSaved, mark = markO
         const missing = request.urls.filter(url => !found.has(urlKey(url)));
         if (!matches.length) return refused(`No matching tabs in ${title}`);
         if (matches.length === existing.length) return refused(`This would empty ${title}; use delete`);
-        const active = !closed && request.close && matches.find(tab => tab.active);
-        if (active) return activeRefusal(active);
         if (closed) {
           for (const bookmark of matches) await api.bookmarks.remove(bookmark.id);
-        } else if (request.close) await api.tabs.remove(matches.map(tab => tab.id));
-        else await api.tabs.ungroup(matches.map(tab => tab.id));
+        } else if (request.close) {
+          const result = await closeTargets(matches, 'remove');
+          if (result.error) {
+            if (!result.closed.length) return refused(result.error);
+            return {ok:false, error:result.error, closedTabs:result.closed.length,
+              deleted:{...summary, tabs:result.closed.map(({title,url}) => ({title,url}))}};
+          }
+        } else await api.tabs.ungroup(matches.map(tab => tab.id));
         return { ok: true, group, closed, removed: matches.length, missing };
       }
       if (request.command === 'delete') {
         if (!closed && !request.closeTabs) {
           return refused(`${title} is open in a window; pass --close-tabs to close its ${existing.length} tabs and delete it`);
         }
-        const active = !closed && existing.find(tab => tab.active);
-        if (active) return activeRefusal(active);
         const folderId = closed ? group.folderId : state.folders?.[group.id];
         if (!folderId) return refused(`The saved folder for ${title} is not available; try again`);
-        const summary = { title: group.title, color: group.color };
         const deleted = { ...summary, tabs: existing.map(({ title, url }) => ({ title, url })) };
-        if (!closed) {
-          await api.tabs.remove(existing.map(tab => tab.id));
-          await idle();
+        let closedTabs = 0;
+        try {
+          if (!closed) {
+            const result = await closeTargets(existing, 'delete');
+            closedTabs = result.closed.length;
+            if (result.error) {
+              if (!closedTabs) return refused(result.error);
+              return {ok:false, error:result.error, closedTabs, deleted};
+            }
+            await idle();
+          }
+          if (!(await deleteSaved(folderId)).ok) throw new Error(`Could not delete ${title}`);
+        } catch (error) {
+          if (!closedTabs) return refused(String(error.message ?? error));
+          return {ok:false, error:`Closed ${closedTabs} tabs but could not delete ${title}; run delete again`, closedTabs, deleted};
         }
-        if (!(await deleteSaved(folderId)).ok) return refused(`Could not delete ${title}`);
-        return { ok: true, group: summary, closedTabs: closed ? 0 : existing.length, deleted };
+        return { ok: true, group: summary, closedTabs, deleted };
       }
       const seen = new Set(existing.map(t => urlKey(t.url)));
       const urls = request.urls.filter(url => {

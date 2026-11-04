@@ -34,8 +34,9 @@ that matches an open group. Duplicates ignore URL fragments. Requests allow
 blue, purple, cyan, orange, yellow, pink, green, grey, red. Omitting colour uses
 Firefox's default. `remove` ungroups matching tabs by default; `--close` closes
 inactive matches. Removing the last tab is refused. `delete` removes a saved
-folder everywhere; for an open group, `--close-tabs` closes its inactive tabs
-first. Both refuse to close an active tab. Firefox may move an ungrouped tab
+folder everywhere; for an open group, `--close-tabs` closes its tabs first and
+refuses if any of its tabs is the active tab in a window. `remove --close` also
+refuses to close an active tab. Firefox may move an ungrouped tab
 to the edge of its group to keep the remaining group contiguous. A group open
 on another synced device may reappear there.
 
@@ -48,7 +49,8 @@ on another synced device may reappear there.
   named. Ask before creating an unnamed group; do not silently retry with
   `--create` or invent a group.
 - **2:** Foxy is not reachable. Explain that Firefox must be running with
-  Foxy 3.2.0 or newer and the native host installed. Do not attempt a restart.
+  Foxy 3.2.0 or newer and the native host installed. Exit 2 can also mean Foxy
+  was busy; retry once after a few seconds, then report. Do not attempt a restart.
 
 Remove or delete only when the user asked for that group or those URLs. Never
 tidy up on your own. Prefer remove (ungroup) over --close. Report deleted URLs
