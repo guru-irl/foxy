@@ -1,7 +1,5 @@
 import { renderSettings, settingActions, resetLayout } from "./settings/pane.js";
-import { loadSettings, cellPx } from "./settings/store.js";
-import { totalColumns, railLimits } from "./grid/layout.js";
-import { watchStorage } from "./grid/store.js";
+import { loadSettings } from "./settings/store.js";
 
 export async function createOptions(container, api) {
   let version = 0;
@@ -9,10 +7,13 @@ export async function createOptions(container, api) {
   async function refresh() {
     const mine = ++version, settings = await loadSettings(api);
     if (mine !== version) return;
-    renderSettings(container, { ...settings,
-      railMax: railLimits(totalColumns(screen.availWidth - 96, cellPx(settings.device))).max }, handlers);
+    renderSettings(container, settings, handlers);
   }
-  const unwatch = watchStorage(api, refresh);
+  const listener = (changes, area) => {
+    if ((area === "sync" && ("settings" in changes || "board" in changes)) || (area === "local" && "deviceSettings" in changes)) refresh();
+  };
+  api.storage.onChanged.addListener(listener);
+  const unwatch = () => api.storage.onChanged.removeListener(listener);
   window.addEventListener("pagehide", unwatch, { once: true });
   await refresh();
 }

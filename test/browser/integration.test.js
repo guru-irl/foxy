@@ -286,10 +286,12 @@ test("integration: slow saved and reconcile replies hold first paint only until 
     if (["foxy:saved", "foxy:reconcile"].includes(message.type)) await held.promise;
     return reply;
   };
+  await ff.browser.storage.sync.set({board:{order:[],heights:{},widgets:[],t:1}});
+  ff.calls.length=0;
   const { root, control } = mount(ff);
   try {
     await control.refresh();
-    assert.equal(root.querySelector(".grid"), null, "first paint waits for saved, but not indefinitely");
+    assert.equal(root.querySelector(".kanban"), null, "first paint waits for saved, but not indefinitely");
     await new Promise(resolve => setTimeout(resolve, 550)); await drain(ff, sync);
     assert.ok(root.querySelector('[data-tab-id="10"]'), "tabs render after 500ms while both messages are pending");
     assert.equal(ff.calls.filter(call => call.api === "storage.sync.set").length, 0, "no tile writes before any saved reply");
@@ -335,6 +337,8 @@ for (const answer of ["reject", "undefined", "malformed"]) {
       return message.type === "foxy:reconcile" ? { ok: true } : reply;
     };
     await warningsDuring(async warnings => {
+      await ff.browser.storage.sync.set({board:{order:[],heights:{},widgets:[],t:1}});
+      ff.calls.length=0;
       const { root, control, page } = mount(ff);
       await control.refresh(); await drain(ff);
       if (answer === "reject") { await new Promise(resolve => setTimeout(resolve, 550)); await drain(ff); }
@@ -684,10 +688,12 @@ test("fix r2: first saved read timeout renders tabs without a saved column", asy
     }
   };
   await warningsDuring(async warnings => {
+    await ff.browser.storage.sync.set({board:{order:[],heights:{},widgets:[],t:1}});
+    ff.calls.length=0;
     const { root, page, control } = mount(ff, { maxWait: 150 });
     try {
       await control.refresh();
-      assert.equal(root.querySelector(".grid"), null, "first paint still waits for the 500ms bound after a request timeout");
+      assert.equal(root.querySelector(".kanban"), null, "first paint still waits for the 500ms bound after a request timeout");
       await new Promise(resolve => setTimeout(resolve, 550)); await drain(ff);
       assert.ok(root.querySelector('[data-tab-id="10"]'), "the 500ms fallback renders tabs after the saved request times out");
       assert.equal(ff.calls.filter(call => call.api === "storage.sync.set").length, 0, "timeouts are not saved replies");

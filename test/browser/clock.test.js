@@ -9,7 +9,7 @@ async function clock(w = 3, h = 2, cell = 80) {
   fixture().append(node);
   const { updateClock, renderTime } = await import("../../extension/src/main.js");
   renderBoard(node, { columns: [], pinned: [], tabs: [], saved: [] }, {}, {}, {
-    layout: [{ id: "clock", x: 0, y: 0, w, h }], device: { ...DEFAULT_DEVICE, cellSize: cell === "S" ? "S" : "custom", customCell: cell === "S" ? 80 : cell },
+    boxes: [{ id: "clock", width: w * ((cell === "S" ? 48 : cell) + 16) - 16, height: h * ((cell === "S" ? 48 : cell) + 16) - 16 }], device: { ...DEFAULT_DEVICE, cellSize: cell === "S" ? "S" : "custom", customCell: cell === "S" ? 80 : cell },
   });
   await document.fonts.ready; await nextFrame();
   return { node, time: node.querySelector(".clock-time"), date: node.querySelector(".clock-date"), updateClock, renderTime };

@@ -35,7 +35,7 @@ test("SAVED is absent with empty lists and a grid tile with entries", async () =
   assert.equal(empty.page.querySelector(".saved"), null);
   assert.equal(empty.page.querySelector(".banner"), null);
   const { root } = await draw();
-  assert.deepEqual([...root.querySelectorAll(".tile")].map(el => el.dataset.kind), ["clock", "pinned", "group", "saved"]);
+  assert.deepEqual([...root.querySelectorAll(".tile")].map(el => el.dataset.kind), ["clock", "pinned", "saved", "group"]);
   assert.equal(root.querySelector('.tile[data-kind="saved"] h2').textContent, "SAVED");
   assert.equal(root.querySelector(".rail").dataset.zone, "tabs");
   assert.ok(root.querySelector(".rail > .settings-gear"));
@@ -220,7 +220,7 @@ for (const scheme of ["light", "dark"]) {
       assert.equal(style.borderTopWidth, "0px"); assert.equal(style.outlineStyle, "none"); assert.equal(style.boxShadow, "none");
       assert.ok(style.fontFamily.includes("Foxy Sans"));
     }
-    assert.equal(column.offsetWidth, 272);
+    assert.equal(column.offsetWidth, 304);
     for (const el of root.querySelectorAll(".saved-row")) assert.equal(el.offsetHeight, 32);
     assert.equal(getComputedStyle(column.querySelector("h2")).fontStyle, "normal");
     assert.equal(getComputedStyle(root.querySelector(".group-name")).fontStyle, "oblique 10deg");
@@ -302,7 +302,7 @@ for (const selector of [".row-open", ".saved-delete"]) {
     renderBoard(root, { ...board, saved: remaining }, ui, handlers);
     assert.equal(document.activeElement, row(root, "f3").querySelector(".row-open"));
     renderBoard(root, { ...board, saved: [] }, ui, handlers);
-    assert.equal(document.activeElement, root.querySelector(".grid"));
+    assert.equal(document.activeElement, root.querySelector(".kanban"));
   });
 }
 
@@ -314,7 +314,7 @@ for (const selector of [".banner-restore", ".banner-dismiss"]) {
     assert.equal(document.activeElement, page.querySelector(selector));
     assert.ok(document.activeElement !== original);
     renderBoard(root, { ...board, missing: [] }, {}, {});
-    assert.equal(document.activeElement, root.querySelector(".grid"));
+    assert.equal(document.activeElement, root.querySelector(".kanban"));
   });
 }
 

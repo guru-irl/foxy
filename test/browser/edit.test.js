@@ -110,7 +110,7 @@ test("empty commit remains faint UNNAMED and long editor never widens a column",
   name(node, 102).click();
   const field = input(node), column = field.closest(".column");
   field.value = "Long name ".repeat(100);
-  assert.equal(column.offsetWidth, 272);
+  assert.equal(column.offsetWidth, 432);
   assert.ok(field.getBoundingClientRect().right <= column.getBoundingClientRect().right);
   const style = getComputedStyle(field);
   assert.ok(style.fontFamily.includes("Foxy Sans"));
@@ -206,7 +206,7 @@ for (const area of ["padding", "gap"]) {
       picker.dispatchEvent(down);
       // Synthetic events have no default focus action. Reproduce Firefox's
       // focus of the enclosing scroll container only if it was not prevented.
-      if (!down.defaultPrevented) node.querySelector(".grid").focus();
+      if (!down.defaultPrevented) node.querySelector(".kanban").focus();
       picker.dispatchEvent(new MouseEvent("click", options));
       await flush(ff);
       assert.equal(node.querySelector(".color-picker"), picker, "picker background must not dismiss it");
@@ -276,7 +276,7 @@ test("picker offers nine distinct dots in API order and picks green once", async
   const dots = [...picker.querySelectorAll("button.dot")];
   assert.deepEqual(dots.map(dot => dot.dataset.color), ["blue", "cyan", "green", "grey", "orange", "pink", "purple", "red", "yellow"]);
   assert.equal(new Set(dots.map(dot => getComputedStyle(dot).backgroundImage)).size, 9);
-  assert.equal(picker.closest(".column").offsetWidth, 272);
+  assert.equal(picker.closest(".column").offsetWidth, 432);
   assert.ok(picker.getBoundingClientRect().top >= picker.closest(".column").querySelector("header").getBoundingClientRect().bottom);
   assert.equal(dots.filter(dot => dot.getAttribute("aria-pressed") === "true").length, 1);
   assert.equal(dots.find(dot => dot.getAttribute("aria-pressed") === "true").dataset.color, "red");

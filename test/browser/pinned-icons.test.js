@@ -1,10 +1,9 @@
 import { test, assert, fixture, nextFrame, dispatchDrag, withPseudoState } from './harness.js';
 import { buildBoard } from '../../extension/src/board/model.js';
 import { renderBoard } from './view.js';
-import { attachGridDrag } from '../../extension/src/grid/drag.js';
 
 let css;
-async function draw({ width = 1280, height = 600, target = 48, count = 9, w = 3, h = 2, x = 1, y = 1, scheme = 'dark', names } = {}, handlers = {}) {
+async function draw({ width = 1280, height = 600, count = 9, w = 3, h = 2, scheme = 'dark', names } = {}, handlers = {}) {
   css ??= new Promise(resolve => {
     const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = '/extension/newtab.css';
     link.onload = resolve; document.head.append(link);
@@ -16,13 +15,13 @@ async function draw({ width = 1280, height = 600, target = 48, count = 9, w = 3,
     tabs: Array.from({ length: count }, (_, i) => ({ id: i + 1, index: i, windowId: i < count - 1 ? 1 : 2,
       title: `Page ${i + 1}`, url: `https://example.invalid/${i}`, pinned: true, active: i === 0 })),
     groups: [], currentWindowId: 1, pins: names ?? { [count]: { name: 'Named pin', origin: null, allowed: false } } });
-  const view = renderBoard(root, board, {}, handlers, { layout: [{ id: 'pinned', x, y, w, h }],
-    synced: { showClock: false, showPinned: true, showSaved: false, railCells: 3 },
-    device: { cellSize: target === 48 ? 'S' : 'custom', customCell: target, density: 'normal' } });
+  const view = renderBoard(root, board, {}, handlers, { boxes: [{ id: 'pinned', width: w * 64, height: 32 + h * 64 }],
+    synced: { showClock: false, showPinned: true, showSaved: false },
+    device: { density: 'normal' } });
   await nextFrame();
-  return { root, view, board, options: { layout: [{ id: 'pinned', x, y, w, h }],
-    synced: { showClock: false, showPinned: true, showSaved: false, railCells: 3 },
-    device: { cellSize: target === 48 ? 'S' : 'custom', customCell: target, density: 'normal' } }, tile: root.querySelector('[data-kind="pinned"]'), list: root.querySelector('.rows[data-zone="pinned"]') };
+  return { root, view, board, options: { boxes: [{ id: 'pinned', width: w * 64, height: 32 + h * 64 }],
+    synced: { showClock: false, showPinned: true, showSaved: false },
+    device: { density: 'normal' } }, tile: root.querySelector('[data-kind="pinned"]'), list: root.querySelector('.rows[data-zone="pinned"]') };
 }
 function near(got, want, label) { assert.ok(Math.abs(got - want) < 0.03, `${label}: ${got} != ${want}`); }
 function key(node, value) { node.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true })); }
@@ -31,33 +30,16 @@ function pointer(target, type, x, y) {
     pointerType: 'mouse', button: 0, buttons: type === 'pointerup' ? 0 : 1, bubbles: true, cancelable: true }));
 }
 
-for (const [target, width] of [[48, 1280], [73, 1297]]) for (const scheme of ['dark', 'light']) {
-  test(`${scheme} pinned icons align with cells at ${target} target and ${width}px width`, async () => {
-    const { tile, list, view } = await draw({ target, width, scheme });
-    const bounds = tile.getBoundingClientRect(), pins = [...list.querySelectorAll('.row')], pitch = view.cell + 16;
-    assert.equal(tile.querySelector('.column-title, .column-header, .subheading, .window-gap'), null);
-    assert.equal(pins.length, 9);
-    for (let i = 0; i < pins.length; i++) {
-      const box = pins[i].getBoundingClientRect(), button = pins[i].querySelector('.row-open'), icon = button.querySelector('.icon');
-      near(box.left, bounds.left + (i % 3) * pitch, `pin ${i} left`);
-      near(box.top, bounds.top + Math.floor(i / 3) * pitch, `pin ${i} top`);
-      near(box.width, view.cell, 'cell width'); near(box.height, view.cell, 'cell height');
-      const inset = button.getBoundingClientRect(), favicon = icon.getBoundingClientRect();
-      near(inset.left - box.left, 4, 'left inset'); near(inset.top - box.top, 4, 'top inset');
-      near(inset.width, view.cell - 8, 'square width'); near(inset.height, view.cell - 8, 'square height');
-      near(favicon.left + favicon.width / 2, inset.left + inset.width / 2, 'favicon horizontal centre');
-      near(favicon.top + favicon.height / 2, inset.top + inset.height / 2, 'favicon vertical centre');
-      assert.equal(button.tabIndex, 0); assert.equal(button.draggable, true);
-      const style = getComputedStyle(button);
-      assert.equal(style.boxShadow, 'none'); assert.equal(style.borderTopWidth, '0px'); assert.equal(style.outlineStyle, 'none');
-    }
-    assert.ok(pins[0].querySelector('.pin-active')); assert.equal(pins[1].querySelector('.pin-active'), null);
-    assert.ok(list.scrollHeight > list.clientHeight); assert.ok(list.hasAttribute('data-scroll-end'));
-    list.scrollTop = list.scrollHeight; await nextFrame(); await nextFrame();
-    assert.ok(list.hasAttribute('data-scroll-start')); assert.equal(list.hasAttribute('data-scroll-end'), false);
-    assert.ok(getComputedStyle(list).maskImage.includes('linear-gradient'));
-  });
-}
+for (const scheme of ['dark','light']) test(`${scheme} pinned icons flow with 48px boxes and 16px gaps`, async()=>{
+  const {tile,list}=await draw({scheme});const pins=[...list.querySelectorAll('.row')],bounds=list.getBoundingClientRect();
+  assert.equal(tile.querySelector('.column-title').textContent,'PINNED');
+  for(let i=0;i<pins.length;i++){
+    const r=pins[i].getBoundingClientRect();near(r.left,bounds.left+i%3*64,'left');near(r.top,bounds.top+Math.floor(i/3)*64,'top');
+    near(r.width,48,'width');near(r.height,48,'height');assert.equal(pins[i].querySelector('.row-open').draggable,true);
+  }
+  assert.ok(list.scrollHeight>list.clientHeight);list.scrollTop=list.scrollHeight;await nextFrame();await nextFrame();
+  assert.ok(list.hasAttribute('data-scroll-start'));assert.equal(list.hasAttribute('data-scroll-end'),false);
+});
 
 for (const scheme of ['dark', 'light']) test(`${scheme} pin hover exposes renamed tooltip and remote label, with close only on hover or focus`, async () => {
   const opened = [], closed = [], { root, list } = await draw({ scheme, count: 3 }, {
@@ -100,15 +82,6 @@ test('pin arrows move through the row-major grid and context rename cancels with
   assert.equal(buttons[8].draggable, true);
 });
 
-for (const w of [1, 3]) test(`the last pin close centre is clickable beside the resize corner at width ${w}`, async () => {
-  const { tile, list } = await draw({ count: w, w, h: 1 });
-  const close = list.lastElementChild.querySelector('.row-close'), r = close.getBoundingClientRect();
-  assert.equal(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2), close,
-    'the close centre must not be covered by the corner handle');
-  const corner = tile.getBoundingClientRect();
-  assert.equal(document.elementFromPoint(corner.right - 2, corner.top + 2).dataset.corner, 'ne', 'corners still win');
-});
-
 test('pin tooltip overlays do not add a flex gap or widen the board', async () => {
   const { root } = await draw();
   const rail = root.querySelector('.rail').getBoundingClientRect(), bounds = root.getBoundingClientRect();
@@ -116,81 +89,45 @@ test('pin tooltip overlays do not add a flex gap or widen the board', async () =
   assert.equal(root.scrollWidth, root.clientWidth, 'tooltips do not change the board scroll extent');
 });
 
-test('pinned empty space moves the tile, icons remain tab drags, and all corners resize to one cell', async () => {
-  const { root, tile, list, view } = await draw({ count: 1 }); const commits = [], states = [];
-  let settled;
-  async function cancelGesture() {
-    const done = new Promise(resolve => { settled = resolve; });
-    key(document, 'Escape'); await done;
-  }
-  const detach = attachGridDrag(root, { view: () => view, canCommit: () => true, onPreview() {},
-    onCommit: value => commits.push(value), onCancel() {}, onRail() {}, onState: value => { states.push(value); if (!value) settled?.(); } });
-  try {
-    const bounds = tile.getBoundingClientRect(), pitch = view.cell + 16;
-    pointer(list, 'pointerdown', bounds.left + pitch + 24, bounds.top + 24);
-    pointer(document, 'pointermove', bounds.left + 2 * pitch + 24, bounds.top + 24);
-    assert.ok(tile.classList.contains('dragging')); await cancelGesture();
-    const open = list.querySelector('.row-open');
-    pointer(open, 'pointerdown', bounds.left + 24, bounds.top + 24);
-    pointer(document, 'pointermove', bounds.left + pitch + 24, bounds.top + 24);
-    assert.equal(tile.classList.contains('dragging'), false);
-    dispatchDrag('dragstart', open); assert.ok(root.hasAttribute('data-dragging')); dispatchDrag('dragend', open);
-    for (const corner of ['nw', 'ne', 'sw', 'se']) {
-      const handle = tile.querySelector(`[data-corner="${corner}"]`), r = handle.getBoundingClientRect();
-      pointer(handle, 'pointerdown', r.left + 8, r.top + 8);
-      const west = corner.endsWith('w'), north = corner.startsWith('n');
-      pointer(document, 'pointermove', west ? bounds.right + 100 : bounds.left - 100, north ? bounds.bottom + 100 : bounds.top - 100);
-      const outline = root.querySelector('.drop-outline'); assert.ok(outline);
-      assert.equal(outline.style.getPropertyValue('--w'), '1'); assert.equal(outline.style.getPropertyValue('--h'), '1');
-      near(tile.getBoundingClientRect().width, view.cell, 'free width minimum');
-      near(tile.getBoundingClientRect().height, view.cell, 'free height minimum');
-      await cancelGesture();
-    }
-    assert.deepEqual(commits, []); assert.ok(states.includes(true));
-  } finally { detach(); }
-});
-
-for (const h of [1, 2]) test(`6 x ${h} pin drag stays at icon centres and scrolls only in the thin edge band`, async () => {
-  const { root, list, view } = await draw({ count: 40, w: 6, h });
-  list.scrollTop = view.cell + 16; await nextFrame();
+for (const h of [1, 2]) test(`${h} pin rows keep icon centres stable and scroll only in the 12px edge band`, async () => {
+  const {root, list} = await draw({count: 40, w: 6, h});
+  list.scrollTop = 64; await nextFrame();
   const source = list.querySelector('.row-open'), dataTransfer = new DataTransfer();
-  dispatchDrag('dragstart', source, { dataTransfer });
-  const r = list.getBoundingClientRect(), x = r.left + view.cell / 2, initial = list.scrollTop;
-  const over = y => dispatchDrag('dragover', list, { dataTransfer, clientX: x, clientY: y });
+  dispatchDrag('dragstart', source, {dataTransfer});
+  const r = list.getBoundingClientRect(), x = r.left + 24, initial = list.scrollTop;
+  const over = y => dispatchDrag('dragover', list, {dataTransfer, clientX: x, clientY: y});
   try {
-    for (const y of [r.top + view.cell / 2, r.bottom - view.cell / 2]) {
+    for (const y of [r.top + 24, r.bottom - 24]) {
       over(y); await nextFrame(); await nextFrame();
-      assert.equal(list.scrollTop, initial, 'icon centres must remain stable drop slots');
+      assert.equal(list.scrollTop, initial, 'icon centres remain stable drop slots');
     }
     over(r.bottom - 13); await nextFrame();
-    assert.equal(list.scrollTop, initial, '13px from the edge is outside the thin band');
+    assert.equal(list.scrollTop, initial, '13px is outside the edge band');
     over(r.bottom - 1); await nextFrame();
     assert.equal(list.scrollTop, initial + 12, 'bottom band scrolls down');
     over(r.top + 1); await nextFrame();
     assert.equal(list.scrollTop, initial, 'top band scrolls up');
-  } finally { dispatchDrag('dragend', source, { dataTransfer }); }
+  } finally { dispatchDrag('dragend', source, {dataTransfer}); }
 });
 
-for (const [count, direction] of [[1, 'down'], [40, 'down'], [40, 'up']]) {
-  test(`pin drag falls through to board ${direction} scroll when ${count === 1 ? 'pins fit' : 'pins are at their edge'}`, async () => {
-    const { root, tile, list } = await draw({ height: 180, count, w: 6, h: 1, x: 0, y: 2 });
-    const grid = root.querySelector('.grid');
-    // Leave additional board rows to scroll into, even when the pins fit.
-    grid.style.setProperty('--rows', '12');
-    const extent = document.createElement('div'); extent.style.cssText = 'height:800px;pointer-events:none'; grid.append(extent);
-    if (direction === 'up') grid.scrollTop = tile.offsetTop;
-    else grid.scrollTop = tile.offsetTop + tile.offsetHeight - grid.clientHeight;
+for (const width of [1280, 640]) for (const [count, direction] of [[1, 'down'], [40, 'down'], [40, 'up']]) {
+  test(`${width}px pin drag scrolls the widget scroller ${direction} when ${count === 1 ? 'pins fit' : 'pins reach their edge'}`, async () => {
+    const {root, tile, list} = await draw({width, height: 180, count, w: 6, h: 1});
+    const widgets = root.querySelector('.widgets'), scroller = widgets.closest('.kanban') ?? widgets;
+    const spacer = document.createElement('div'); spacer.style.cssText = 'height:128px;flex:none'; widgets.prepend(spacer);
+    const extent = document.createElement('div'); extent.style.cssText = 'height:800px;flex:none;pointer-events:none'; widgets.append(extent);
+    scroller.scrollTop = tile.offsetTop + list.offsetTop + (direction === 'up' ? 0 : list.clientHeight - scroller.clientHeight);
     list.scrollTop = direction === 'up' ? 0 : list.scrollHeight;
     await nextFrame(); await nextFrame();
-    const r = grid.getBoundingClientRect(), x = r.left + 24, y = direction === 'up' ? r.top + 2 : r.bottom - 2;
-    const initial = grid.scrollTop, pinsTop = list.scrollTop;
+    const r = scroller.getBoundingClientRect(), x = r.left + 24, y = direction === 'up' ? r.top + 2 : r.bottom - 2;
+    const initial = scroller.scrollTop, pinsTop = list.scrollTop;
     const source = list.querySelector('.row-open'), dataTransfer = new DataTransfer();
-    dispatchDrag('dragstart', source, { dataTransfer });
+    dispatchDrag('dragstart', source, {dataTransfer});
     try {
-      dispatchDrag('dragover', list, { dataTransfer, clientX: x, clientY: y }); await nextFrame();
-      assert.equal(grid.scrollTop, initial + (direction === 'up' ? -12 : 12), 'board keeps its existing edge scroll');
+      dispatchDrag('dragover', list, {dataTransfer, clientX: x, clientY: y}); await nextFrame();
+      assert.equal(scroller.scrollTop, initial + (direction === 'up' ? -12 : 12), 'the bar takes over edge scrolling');
       assert.equal(list.scrollTop, pinsTop, 'exhausted pins do not move');
-    } finally { dispatchDrag('dragend', source, { dataTransfer }); }
+    } finally { dispatchDrag('dragend', source, {dataTransfer}); }
   });
 }
 
@@ -245,7 +182,7 @@ for (const scheme of ['dark', 'light']) test(`${scheme} pending pin access has a
 for (const above of [false, true]) test(`pin tooltip ${above ? 'above' : 'below'} stays reachable across the mouse gap and cancels its 150ms hide`, async () => {
   const allowed = [], { root, list, view } = await draw({ count: 1, w: 1, h: 1, x: 1, y: 0,
     names: { 1: { name: 'Named', origin: 'https://example.invalid/*', allowed: false } } }, { onAllowPin: origin => allowed.push(origin) });
-  root.style.position = 'fixed'; root.style.left = '0'; root.style.top = above ? `${innerHeight - view.cell - 4}px` : '0';
+  root.style.position = 'fixed'; root.style.left = '0'; root.style.top = above ? `${innerHeight - 100}px` : '0';
   await nextFrame();
   const pin = list.firstElementChild, open = pin.querySelector('.row-open'); pin.dispatchEvent(new MouseEvent('mouseenter'));
   const tip = root.querySelector('[data-pin-tooltip="1"]'), allow = tip.querySelector('.pin-allow');
@@ -271,22 +208,6 @@ for (const above of [false, true]) test(`pin tooltip ${above ? 'above' : 'below'
   assert.deepEqual(allowed, ['https://example.invalid/*']);
   tip.dispatchEvent(new MouseEvent('mouseleave', { relatedTarget: document.body }));
   assert.equal(tip.hidden, false); await new Promise(resolve => setTimeout(resolve, 180)); assert.equal(tip.hidden, true);
-});
-
-test('a 1 x 1 pinned tile with one pin moves by its 4px margin without taking the icon drag', async () => {
-  const { root, tile, view } = await draw({ count: 1, w: 1, h: 1 });
-  let settle;
-  const detach = attachGridDrag(root, { view: () => view, canCommit: () => true, onPreview() {}, onCommit() {}, onCancel() {}, onRail() {},
-    onState: active => { if (!active) settle?.(); } });
-  try {
-    const r = tile.getBoundingClientRect(), x = r.left + 2, y = r.top + r.height / 2;
-    const hit = document.elementFromPoint(x, y);
-    assert.ok(tile.contains(hit)); assert.equal(hit.closest('.row-open, .tile-resize'), null, 'margin is free of tab and resize controls');
-    pointer(hit, 'pointerdown', x, y); pointer(document, 'pointermove', x + view.cell + 16, y);
-    assert.ok(tile.classList.contains('dragging'), 'the single-cell tile remains movable');
-    assert.equal(root.hasAttribute('data-dragging'), false, 'margin drag is not a tab drag');
-    const done = new Promise(resolve => { settle = resolve; }); key(document, 'Escape'); await done;
-  } finally { detach(); }
 });
 
 test('vertical arrows do nothing at the first and last grid rows, but land in a partial last row', async () => {

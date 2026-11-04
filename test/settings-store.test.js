@@ -1,19 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createFirefox } from "./fakes/firefox.js";
-import { DEFAULT_SETTINGS, DEFAULT_DEVICE, loadSettings, saveSetting, cellPx, cardAlpha } from "../extension/src/settings/store.js";
+import { DEFAULT_SETTINGS, DEFAULT_DEVICE, loadSettings, saveSetting, cardAlpha } from "../extension/src/settings/store.js";
 
-const syncedDefaults = { railCells: 5, showClock: true, showPinned: true, showSaved: true, showMemory: true,
+const syncedDefaults = { widgetsWidth: 304, railWidth: 304, showClock: true, showPinned: true, showSaved: true, showMemory: true,
   timeFormat: "24", showDate: true, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true,
   showWeather: true, tempUnit: "C" };
-const deviceDefaults = { cellSize: "S", customCell: 80, density: "normal", weatherPlace: "auto" };
+const deviceDefaults = { density: "normal", weatherPlace: "auto" };
 
 test("loadSettings returns detached defaults when storage is empty", async () => {
   const ff = createFirefox();
   const loaded = await loadSettings(ff.browser);
   assert.deepEqual(loaded, { synced: syncedDefaults, device: deviceDefaults });
   loaded.synced.showClock = false;
-  loaded.device.cellSize = "custom";
+  loaded.device.density = "compact";
   assert.deepEqual(await loadSettings(ff.browser), { synced: syncedDefaults, device: deviceDefaults });
   assert.deepEqual(DEFAULT_SETTINGS, syncedDefaults);
   assert.deepEqual(DEFAULT_DEVICE, deviceDefaults);
@@ -21,15 +21,15 @@ test("loadSettings returns detached defaults when storage is empty", async () =>
 
 test("loadSettings falls back per key, keeps valid values and ignores unknown keys", async () => {
   const ff = createFirefox();
-  await ff.browser.storage.sync.set({ settings: { railCells: "x", showClock: 1, transparency: "max",
+  await ff.browser.storage.sync.set({ settings: { widgetsWidth: "x", railWidth: 239, showClock: 1, transparency: "max",
     showPinned: false, timeFormat: "12", showDate: false, extra: true } });
-  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 500,
+  await ff.browser.storage.local.set({ deviceSettings: { weatherPlace: { name: "Invalid", lat: 100, lon: 0 },
     density: "compact", extra: true } });
   assert.deepEqual(await loadSettings(ff.browser), {
-    synced: { railCells: 5, showClock: true, showPinned: false, showSaved: true, showMemory: true,
+    synced: { widgetsWidth: 304, railWidth: 304, showClock: true, showPinned: false, showSaved: true, showMemory: true,
       timeFormat: "12", showDate: false, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true,
       showWeather: true, tempUnit: "C" },
-    device: { cellSize: "custom", customCell: 80, density: "compact", weatherPlace: "auto" },
+    device: { density: "compact", weatherPlace: "auto" },
   });
 });
 
@@ -43,14 +43,12 @@ for (const value of [null, "bad", 42, [], [false]]) {
 }
 
 const invalid = [
-  ["synced", "railCells", 1], ["synced", "railCells", -1], ["synced", "railCells", 2.5],
-  ["synced", "railCells", 1e9], ["synced", "railCells", "3"],
-  ...["showClock", "showPinned", "showSaved", "showDate", "otherWindows", "pinsMoveHere", "switchToOpenTab"]
+  ...["widgetsWidth", "railWidth"].flatMap(key => [239, -1, 240.5, 1e9, "304", Infinity].map(value => ["synced", key, value])),
+  ...["showClock", "showPinned", "showSaved", "showMemory", "showDate", "otherWindows", "pinsMoveHere", "switchToOpenTab"]
     .map(key => ["synced", key, 1]),
   ["synced", "timeFormat", "24-hour"], ["synced", "timeFormat", 12],
   ["synced", "transparency", "max"],
-  ...["M", "L", "XL", "XXL"].map(value => ["device", "cellSize", value]), ["device", "customCell", 500], ["device", "customCell", 39],
-  ["device", "customCell", 40.5], ["device", "customCell", "80"], ["device", "density", "dense"],
+  ["device", "density", "dense"],
   ["synced", "showWeather", 1], ["synced", "tempUnit", "K"], ["synced", "tempUnit", "c"],
   ["device", "weatherPlace", "home"], ["device", "weatherPlace", { name: "X", lat: 95, lon: 0 }],
   ["device", "weatherPlace", { lat: 1, lon: 1 }],
@@ -60,11 +58,12 @@ for (const [scope, key, value] of invalid) {
     const ff = createFirefox();
     const area = scope === "synced" ? "sync" : "local", storageKey = scope === "synced" ? "settings" : "deviceSettings";
     await ff.browser.storage[area].set({ [storageKey]: { [key]: value } });
+    const stored = await ff.browser.storage[area].get(storageKey);
     assert.deepEqual(await loadSettings(ff.browser), { synced: syncedDefaults, device: deviceDefaults });
     ff.calls.length = 0;
     await assert.rejects(saveSetting(ff.browser, scope, key, value));
     assert.equal(ff.calls.some(c => c.api.endsWith(".set")), false);
-    assert.deepEqual(await ff.browser.storage[area].get(storageKey), { [storageKey]: { [key]: value } });
+    assert.deepEqual(await ff.browser.storage[area].get(storageKey), stored);
   });
 }
 
@@ -78,13 +77,11 @@ for (const [scope, key] of [["synced", "unknown"], ["device", "showClock"], ["sy
 }
 
 const valid = [
-  ["synced", "railCells", 2], ["synced", "railCells", 10000],
-  ...["showClock", "showPinned", "showSaved", "showDate", "otherWindows", "pinsMoveHere", "switchToOpenTab"]
+  ...["widgetsWidth", "railWidth"].flatMap(key => [240, 304, 10000].map(value => ["synced", key, value])),
+  ...["showClock", "showPinned", "showSaved", "showMemory", "showDate", "otherWindows", "pinsMoveHere", "switchToOpenTab"]
     .map(key => ["synced", key, false]),
   ["synced", "timeFormat", "12"], ["synced", "timeFormat", "24"],
   ...["low", "medium", "high"].map(value => ["synced", "transparency", value]),
-  ...["S", "custom"].map(value => ["device", "cellSize", value]),
-  ["device", "customCell", 40], ["device", "customCell", 240],
   ["device", "density", "normal"], ["device", "density", "compact"],
   ["synced", "showWeather", false], ["synced", "tempUnit", "F"], ["synced", "tempUnit", "C"],
   ["device", "weatherPlace", { name: "Dublin", lat: 53.33, lon: -6.25 }], ["device", "weatherPlace", "auto"],
@@ -105,77 +102,27 @@ for (const [scope, key, value] of valid) {
 
 test("saveSetting preserves other valid settings and writes only the selected scope", async () => {
   const ff = createFirefox();
-  await ff.browser.storage.sync.set({ settings: { showClock: false, railCells: 4, transparency: "high", extra: 1 },
+  await ff.browser.storage.sync.set({ settings: { showClock: false, widgetsWidth: 400, railWidth: 240, transparency: "high", extra: 1 },
     "tile:17:clock": { x: 0, y: 0, w: 5, h: 2 } });
-  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "S", customCell: 120, density: "compact" }, unrelated: 1 });
+  await ff.browser.storage.local.set({ deviceSettings: { density: "compact" }, unrelated: 1 });
   ff.calls.length = 0;
   const loaded = await saveSetting(ff.browser, "synced", "showPinned", false);
   assert.deepEqual(loaded, {
-    synced: { railCells: 4, showClock: false, showPinned: false, showSaved: true, showMemory: true, timeFormat: "24",
+    synced: { widgetsWidth: 400, railWidth: 240, showClock: false, showPinned: false, showSaved: true, showMemory: true, timeFormat: "24",
       showDate: true, transparency: "high", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true,
       showWeather: true, tempUnit: "C" },
-    device: { cellSize: "S", customCell: 120, density: "compact", weatherPlace: "auto" },
+    device: { density: "compact", weatherPlace: "auto" },
   });
   assert.deepEqual(ff.calls.filter(c => c.api.endsWith(".set")), [
-    { api: "storage.sync.set", args: [{ settings: { showClock: false, railCells: 4, transparency: "high", extra: 1,
+    { api: "storage.sync.set", args: [{ settings: { showClock: false, widgetsWidth: 400, railWidth: 240, transparency: "high", extra: 1,
       showPinned: false } }] },
   ]);
   assert.deepEqual(await ff.browser.storage.sync.get("tile:17:clock"), { "tile:17:clock": { x: 0, y: 0, w: 5, h: 2 } });
   assert.deepEqual(await ff.browser.storage.local.get(), {
-    deviceSettings: { cellSize: "S", customCell: 120, density: "compact" }, unrelated: 1,
+    deviceSettings: { density: "compact" }, unrelated: 1,
   });
 });
 
-for (const legacy of ["M", "L", "XL"]) {
-  test(`${legacy} reads as S without writes and normalizes only on a device write`, async () => {
-    const ff = createFirefox();
-    const stored = { cellSize: legacy, customCell: 144, density: "normal", future: 7 };
-    await ff.browser.storage.local.set({ deviceSettings: stored, unrelated: 1 });
-    ff.calls.length = 0;
-    const loaded = await loadSettings(ff.browser);
-    assert.deepEqual(loaded.device, { cellSize: "S", customCell: 144, density: "normal", weatherPlace: "auto" });
-    assert.equal(cellPx(loaded.device), 48);
-    assert.deepEqual(ff.calls.filter(c => c.api.endsWith(".set")), []);
-    await saveSetting(ff.browser, "synced", "showDate", false);
-    assert.deepEqual(await ff.browser.storage.local.get(null), { deviceSettings: stored, unrelated: 1 });
-    ff.calls.length = 0;
-    const changed = await saveSetting(ff.browser, "device", "density", "compact");
-    assert.deepEqual(changed.device, { cellSize: "S", customCell: 144, density: "compact", weatherPlace: "auto" });
-    assert.deepEqual(ff.calls.filter(c => c.api.endsWith(".set")), [
-      { api: "storage.local.set", args: [{ deviceSettings: { ...stored, cellSize: "S", density: "compact" } }] },
-    ]);
-    assert.deepEqual(await ff.browser.storage.local.get(null), {
-      deviceSettings: { ...stored, cellSize: "S", density: "compact" }, unrelated: 1,
-    });
-  });
-  test(`an explicit custom choice replaces ${legacy} during the lazy migration`, async () => {
-    const ff = createFirefox();
-    await ff.browser.storage.local.set({ deviceSettings: { cellSize: legacy, customCell: 112 } });
-    const changed = await saveSetting(ff.browser, "device", "cellSize", "custom");
-    assert.equal(cellPx(changed.device), 112);
-    assert.deepEqual((await ff.browser.storage.local.get("deviceSettings")).deviceSettings,
-      { cellSize: "custom", customCell: 112 });
-  });
-}
-
-test("a failed legacy device write does not eagerly normalize storage", async t => {
-  const ff = createFirefox(), stored = { cellSize: "XL", customCell: 144 };
-  await ff.browser.storage.local.set({ deviceSettings: stored });
-  t.mock.method(ff.browser.storage.local, "set", async () => { throw new Error("quota"); });
-  t.mock.method(console, "warn", () => {});
-  await assert.rejects(saveSetting(ff.browser, "device", "customCell", 80), /quota/);
-  assert.deepEqual((await ff.browser.storage.local.get("deviceSettings")).deviceSettings, stored);
-});
-
-for (const [device, px] of [
-  [{ cellSize: "S" }, 48], [{ cellSize: "M" }, 48], [{ cellSize: "L" }, 48], [{ cellSize: "XL" }, 48],
-  [{ cellSize: "custom", customCell: 39 }, 40], [{ cellSize: "custom", customCell: 40 }, 40],
-  [{ cellSize: "custom", customCell: 120 }, 120], [{ cellSize: "custom", customCell: 240 }, 240],
-  [{ cellSize: "custom", customCell: 241 }, 240], [{ cellSize: "XXL" }, 48],
-  [{ cellSize: "custom", customCell: "80" }, 80], [null, 48],
-]) {
-  test(`cellPx derives ${px} for ${JSON.stringify(device)}`, () => assert.equal(cellPx(device), px));
-}
 for (const [level, scheme, alpha] of [
   ["low", "dark", 0.75], ["low", "light", 0.85], ["medium", "dark", 0.6], ["medium", "light", 0.7],
   ["high", "dark", 0.45], ["high", "light", 0.55], ["invalid", "dark", 0.6],
@@ -187,12 +134,12 @@ for (const area of ["sync", "local"]) {
   test(`failed ${area} settings read logs once and defaults only that scope`, async t => {
     const ff = createFirefox();
     await ff.browser.storage.sync.set({ settings: { showClock: false } });
-    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 120 } });
+    await ff.browser.storage.local.set({ deviceSettings: { density: "compact" } });
     const get = t.mock.method(ff.browser.storage[area], "get", async () => { throw new Error("unavailable"); });
     const warn = t.mock.method(console, "warn", () => {});
     assert.deepEqual(await loadSettings(ff.browser), {
       synced: { ...syncedDefaults, showClock: area === "sync" },
-      device: area === "local" ? deviceDefaults : { ...deviceDefaults, cellSize: "custom", customCell: 120 },
+      device: area === "local" ? deviceDefaults : { ...deviceDefaults, density: "compact" },
     });
     assert.equal(get.mock.calls.length, 1);
     assert.equal(warn.mock.calls.length, 1);
@@ -203,7 +150,7 @@ for (const area of ["sync", "local"]) {
     const write = t.mock.method(ff.browser.storage[area], "set", async () => { throw error; });
     const warn = t.mock.method(console, "warn", () => {});
     await assert.rejects(saveSetting(ff.browser, area === "sync" ? "synced" : "device",
-      area === "sync" ? "showClock" : "cellSize", area === "sync" ? false : "S"), error);
+      area === "sync" ? "showClock" : "density", area === "sync" ? false : "compact"), error);
     assert.equal(write.mock.calls.length, 1);
     assert.equal(warn.mock.calls.length, 1);
     assert.match(warn.mock.calls[0].arguments[0], /^Foxy:/);
@@ -213,7 +160,7 @@ for (const area of ["sync", "local"]) {
 
 test("saveSetting rejects and writes nothing when the stored settings cannot be read", async t => {
   const ff = createFirefox();
-  const stored = { showClock: false, railCells: 5, transparency: "high" };
+  const stored = { showClock: false, widgetsWidth: 304, railWidth: 304, transparency: "high" };
   await ff.browser.storage.sync.set({ settings: stored });
   const realGet = ff.browser.storage.sync.get;
   t.mock.method(ff.browser.storage.sync, "get", async () => { throw new Error("transient"); });
@@ -237,18 +184,48 @@ test("concurrent saveSetting calls in one page both persist", async () => {
   assert.equal(device.density, "compact");
 });
 
-test("saveSetting reports the value it wrote even if reading back fails", async t => {
-  const ff = createFirefox();
-  await ff.browser.storage.sync.set({ settings: { showClock: false } });
-  const realGet = ff.browser.storage.sync.get;
-  let reads = 0;
-  t.mock.method(ff.browser.storage.sync, "get", async (...args) => {
-    if (++reads > 1) throw new Error("transient");
-    return realGet(...args);
+for (const [scope, area, key, value, otherArea] of [
+  ["synced", "sync", "showDate", false, "local"], ["device", "local", "density", "compact", "sync"],
+]) {
+  test(`saveSetting reports the ${scope} value it wrote even if reading back fails`, async t => {
+    const ff = createFirefox();
+    const realGet = ff.browser.storage[area].get;
+    let reads = 0;
+    t.mock.method(ff.browser.storage[area], "get", async (...args) => {
+      if (++reads > 1) throw new Error("saved scope cannot be read back");
+      return realGet(...args);
+    });
+    t.mock.method(ff.browser.storage[otherArea], "get", async () => { throw new Error("other scope offline"); });
+    const warn = t.mock.method(console, "warn", () => {});
+    const result = await saveSetting(ff.browser, scope, key, value);
+    assert.equal(result[scope][key], value);
+    assert.deepEqual(result[scope === "synced" ? "device" : "synced"], scope === "synced" ? deviceDefaults : syncedDefaults);
+    assert.equal(reads, 1);
+    assert.equal(warn.mock.calls.length, 1);
   });
-  t.mock.method(console, "warn", () => {});
-  const result = await saveSetting(ff.browser, "synced", "showDate", false);
-  assert.equal(result.synced.showDate, false);
-  assert.equal(result.synced.showClock, false);
-  assert.deepEqual(result.device, deviceDefaults);
+}
+
+test('settings use pixel widths and no device cell settings',async()=>{
+  const ff=createFirefox(), {synced,device}=await loadSettings(ff.browser);
+  assert.equal(synced.widgetsWidth,304); assert.equal(synced.railWidth,304);
+  assert.equal('railCells' in synced,false); assert.equal('cellSize' in device,false); assert.equal('customCell' in device,false);
+  assert.deepEqual(device,{density:'normal',weatherPlace:'auto'});
+  synced.showClock=false; assert.equal(DEFAULT_SETTINGS.showClock,true); assert.equal(DEFAULT_DEVICE.density,'normal');
 });
+test('legacy settings are ignored without being normalized or rewritten',async()=>{
+  const ff=createFirefox(), old={cellSize:'XL',customCell:144,density:'normal',future:7};
+  await ff.browser.storage.local.set({deviceSettings:old}); await ff.browser.storage.sync.set({settings:{railCells:5}});
+  ff.calls.length=0; const state=await loadSettings(ff.browser);
+  assert.deepEqual(state.device,{density:'normal',weatherPlace:'auto'}); assert.equal(state.synced.railWidth,304);
+  assert.equal(ff.calls.some(c=>c.api.endsWith('.set')),false);
+  await saveSetting(ff.browser,'device','density','compact');
+  assert.deepEqual((await ff.browser.storage.local.get(null)).deviceSettings,{...old,density:'compact'});
+});
+
+for (const [scope, key, value] of [["synced", "railCells", 5], ["device", "cellSize", "S"], ["device", "customCell", 80]]) {
+  test(`removed setting ${scope}.${key} rejects without storage access`, async () => {
+    const ff = createFirefox();
+    await assert.rejects(saveSetting(ff.browser, scope, key, value));
+    assert.deepEqual(ff.calls, []);
+  });
+}

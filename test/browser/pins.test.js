@@ -331,16 +331,17 @@ for (const state of ['still pending', 'access granted', 'pin removed']) test(`AL
 
 test('ALLOW focus stays visible after a rebuild restores both board and pin scroll offsets', async () => {
   const { ff, node, control } = await controller(); node.style.height = '180px';
-  const k = control.view.cols;
-  await ff.browser.storage.sync.set({ [`layout:${k}`]: { t: 1 }, [`tile:${k}:pinned`]: { x: 0, y: 8, w: 1, h: 1 } });
+  for (let i=0;i<8;i++) await ff.browser.tabs.create({windowId:1,pinned:true,url:`https://example.com/pin-${i}`});
+  const stored=(await ff.browser.storage.sync.get('board')).board;
+  await ff.browser.storage.sync.set({board:{...stored,widgets:[{kind:'clock',h:null},{kind:'pinned',h:96}]}});
   await control.refresh(); await flush(ff);
-  const grid = node.querySelector('.grid'), list = row(node, 21).closest('.rows');
+  const grid = node.querySelector('.widgets'), list = row(node, 21).closest('.rows');
   grid.scrollTop = grid.scrollHeight; list.scrollTop = list.scrollHeight; await nextFrame(); await nextFrame();
   const top = grid.scrollTop, pinsTop = list.scrollTop; assert.ok(top > 0 && pinsTop > 0, 'exercise both scroll restorations');
   const open = row(node, 21).querySelector('.row-open'); open.focus({ preventScroll: true }); open.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
   tip(node, 21).querySelector('.pin-allow').focus({ preventScroll: true });
   await ff.browser.tabs.update(11, { url: 'https://example.com/changed-again' }); await control.refresh(); await flush(ff);
-  assert.equal(node.querySelector('.grid').scrollTop, top); assert.equal(row(node, 21).closest('.rows').scrollTop, pinsTop);
+  assert.equal(node.querySelector('.widgets').scrollTop, top); assert.equal(row(node, 21).closest('.rows').scrollTop, pinsTop);
   assert.equal(document.activeElement, tip(node, 21).querySelector('.pin-allow'));
   assert.equal(tip(node, 21).hidden, false, 'restored scroll events must not hide the focused permission action');
 });

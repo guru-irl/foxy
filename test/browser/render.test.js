@@ -142,7 +142,7 @@ for (const scheme of ["light", "dark"]) {
   });
 }
 
-test("unnamed and long groups retain cell-sized glass tiles without masking short lists", async () => {
+test("unnamed and long groups retain fixed-width glass tiles without masking short lists", async () => {
   const node = await draw();
   const unnamed = node.querySelector('[data-group-id="102"] .group-name');
   assert.equal(unnamed.textContent, "UNNAMED");
@@ -152,9 +152,9 @@ test("unnamed and long groups retain cell-sized glass tiles without masking shor
     assert.equal(style.borderTopWidth, "0px");
     assert.equal(style.outlineStyle, "none");
     assert.equal(style.boxShadow, "none");
-    if (el.matches(".pinned")) assert.equal(el.offsetWidth, 560);
-    else if (el.classList.contains("column")) assert.equal(el.offsetWidth, 272);
-    else if (el.matches(".pin-icon")) assert.equal(el.offsetHeight, 80);
+    if (el.matches(".pinned")) assert.equal(el.offsetWidth, 304);
+    else if (el.classList.contains("column")) assert.equal(el.offsetWidth, el.matches(".rail, .saved") ? 304 : 432);
+    else if (el.matches(".pin-icon")) assert.equal(el.offsetHeight, 48);
     else assert.equal(el.offsetHeight, 32);
   }
   const name = node.querySelector('[data-group-id="201"] .group-name');
@@ -352,7 +352,7 @@ test("controller batches remote tab, group, window and activation events per fra
   assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
 });
 
-test("controller retains grid and row scroll and focus through rebuild", async () => {
+test("controller retains kanban and row scroll and focus through rebuild", async () => {
   const set = setup();
   for (let i = 0; i < 30; i++) set.tabs.push({ id: 1000 + i, windowId: 1, groupId: 101, title: `Tab ${i}` });
   const { ff, node, control } = await controller(set);
@@ -361,13 +361,13 @@ test("controller retains grid and row scroll and focus through rebuild", async (
   const row = node.querySelector('[data-tab-id="1000"]');
   row.focus({ preventScroll: true });
   node.querySelector('.rows[data-group-id="101"]').scrollTop = 120;
-  node.querySelector(".grid").scrollTop = 90;
+  node.querySelector(".kanban").scrollTop = 90;
   await ff.browser.tabGroups.update(201, { title: "Rebuild while a row is focused" });
   await control.refresh();
   assert.ok(node.querySelector('[data-tab-id="1000"]') !== row, "exercise a real rebuild");
-  assert.equal(node.querySelector(".grid").scrollTop, 90);
+  assert.equal(node.querySelector(".kanban").scrollTop, 90);
   assert.equal(node.querySelector('.rows[data-group-id="101"]').scrollTop, 120);
-  assert.equal(node.querySelector(".grid").hasAttribute("data-scroll-start"), true, "fade must reflect restored scroll before the next event");
+  assert.equal(node.querySelector(".kanban").hasAttribute("data-scroll-start"), true, "fade must reflect restored scroll before the next event");
   assert.equal(node.querySelector('.rows[data-group-id="101"]').hasAttribute("data-scroll-start"), true);
   assert.equal(document.activeElement.dataset.tabId, "1000");
   const close = node.querySelector('[data-group-id="101"] .column-close');
@@ -445,7 +445,7 @@ for (const [tabId, nextId, child] of [[23, 32, false], [32, 23, false], [11, 21,
   });
 }
 
-for (const selector of [".grid", '.fixed .rows[data-zone="pinned"]', '.fixed .rows[data-zone="tabs"]']) {
+for (const selector of [".kanban", '.fixed .rows[data-zone="pinned"]', '.fixed .rows[data-zone="tabs"]']) {
   test(`review minor 3: focused scroll container ${selector} survives a rebuild`, async () => {
     const { ff, node } = await controller();
     const original = node.querySelector(selector);
@@ -547,7 +547,7 @@ test("controller routes drops through target resolvers and requests a new group'
   const { ff, node, control } = await controller();
   await control.handlers.onTabDrop(14, { zone: "group", groupId: 101, slot: 1 });
   assert.equal(node.querySelector('[data-group-id="101"] [data-tab-id="14"]').dataset.windowId, "1");
-  await control.handlers.onTabDrop(23, { zone: "cell", rect: { x: 9, y: 0, w: 3, h: 4 } });
+  await control.handlers.onTabDrop(23, { zone: "kanban", rect: { x: 9, y: 0, w: 3, h: 4 } });
   assert.ok(control.ui.editGroupId != null);
   assert.ok(node.querySelector(`.column[data-group-id="${control.ui.editGroupId}"] [data-tab-id="23"]`));
   control.handlers.onEditEnd();
@@ -557,7 +557,7 @@ test("controller routes drops through target resolvers and requests a new group'
 
 test("review important 3: new-group edit ID holds refreshes until onEditEnd", async () => {
   const { ff, node, control } = await controller();
-  await control.handlers.onTabDrop(23, { zone: "cell", rect: { x: 9, y: 0, w: 3, h: 4 } });
+  await control.handlers.onTabDrop(23, { zone: "kanban", rect: { x: 9, y: 0, w: 3, h: 4 } });
   await flush(ff);
   assert.ok(control.ui.editGroupId != null);
   assert.ok(node.querySelector(`.column[data-group-id="${control.ui.editGroupId}"]`), "introduce the new column before holding its editor");
@@ -590,7 +590,7 @@ test("review round 2: a group gone before the final drop read never holds an edi
     return vanishedId;
   };
   try {
-    const result = await control.handlers.onTabDrop(23, { zone: "cell", rect: { x: 9, y: 0, w: 3, h: 4 } });
+    const result = await control.handlers.onTabDrop(23, { zone: "kanban", rect: { x: 9, y: 0, w: 3, h: 4 } });
     await flush(ff);
     assert.equal(result.ok, true);
     assert.equal(node.querySelector(`.column[data-group-id="${vanishedId}"]`), null);
@@ -608,7 +608,7 @@ test("review round 2: a group gone before the final drop read never holds an edi
 
 test("review round 2: removing the edited group clears both edit holds and refreshes once", async () => {
   const { ff, node, control } = await controller();
-  await control.handlers.onTabDrop(23, { zone: "cell", rect: { x: 9, y: 0, w: 3, h: 4 } });
+  await control.handlers.onTabDrop(23, { zone: "kanban", rect: { x: 9, y: 0, w: 3, h: 4 } });
   await flush(ff);
   const editId = control.ui.editGroupId;
   assert.ok(node.querySelector(`.column[data-group-id="${editId}"]`));
@@ -645,7 +645,7 @@ for (const dragging of [false, true]) {
     const { createController } = await import("../../extension/src/main.js");
     const control = createController(node, ff.browser);
     await control.refresh();
-    await control.handlers.onTabDrop(23, { zone: "cell", rect: { x: 9, y: 0, w: 3, h: 4 } });
+    await control.handlers.onTabDrop(23, { zone: "kanban", rect: { x: 9, y: 0, w: 3, h: 4 } });
     await flush(ff);
     const editId = control.ui.editGroupId;
     assert.ok(node.querySelector(`.column[data-group-id="${editId}"]`));
@@ -687,7 +687,7 @@ test("review round 2: failed group-removal registration is logged and tab events
     await flush(ff);
     assert.ok(warnings.some(args => args[0].startsWith("Foxy:")));
     assert.ok(node.querySelector('[data-tab-id="23"]'), "subscription failure must still schedule a read");
-    await control.handlers.onTabDrop(23, { zone: "cell", rect: { x: 9, y: 0, w: 3, h: 4 } });
+    await control.handlers.onTabDrop(23, { zone: "kanban", rect: { x: 9, y: 0, w: 3, h: 4 } });
     await flush(ff);
     const editId = control.ui.editGroupId;
     assert.ok(node.querySelector(`.column[data-group-id="${editId}"]`));
@@ -706,7 +706,7 @@ test("review round 2: failed group-removal registration is logged and tab events
 for (const failures of [1, Infinity]) {
   test(`review round 2: ${failures === 1 ? "transient" : "persistent"} editor-existence failures are logged and retried once`, async () => {
     const { ff, node, control } = await controller();
-    await control.handlers.onTabDrop(23, { zone: "cell", rect: { x: 9, y: 0, w: 3, h: 4 } });
+    await control.handlers.onTabDrop(23, { zone: "kanban", rect: { x: 9, y: 0, w: 3, h: 4 } });
     await flush(ff);
     const editId = control.ui.editGroupId;
     control.handlers.onEditState(true);

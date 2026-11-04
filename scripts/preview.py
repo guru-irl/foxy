@@ -39,9 +39,6 @@ SCENARIOS = {
     "remote-header": ("scenario=remote-header", 1600, 1000),
     "many-groups": ("scenario=many-groups", 1600, 1000),
     "light": ("scenario=light&scheme=light", 1600, 1000),
-    "grid-custom-80": ("scenario=grid-custom-80", 1600, 1000),
-    "grid-custom-144": ("scenario=grid-custom-144", 1600, 1000),
-    "grid-narrow": ("scenario=grid-narrow", 700, 1000),
     "settings-open": ("scenario=settings-open&settings=open", 1600, 1000),
     "settings-open-light": ("scenario=settings-open&settings=open&scheme=light", 1600, 1000),
     "narrow": ("scenario=one-window", 900, 900),
@@ -50,6 +47,14 @@ SCENARIOS = {
     "weather-allow": ("scenario=weather&weather=ask&settings=open", 1600, 1000),
     "weather-allow-light": ("scenario=weather&weather=ask&settings=open&scheme=light", 1600, 1000),
 }
+
+# The MacBook viewport accounts for its Firefox sidebar: about 1440 px of page.
+for scheme in ('dark', 'light'):
+    for name, scenario, width, height in (
+        ('2560', 'v40', 2560, 1440), ('mac', 'v40', 1440, 945),
+        ('1024', 'v40', 1024, 768), ('narrow', 'v40-narrow', 640, 1100),
+    ):
+        SCENARIOS[f'v40-{name}-{scheme}'] = (f'scenario={scenario}&scheme={scheme}', width, height)
 
 
 def build_page():

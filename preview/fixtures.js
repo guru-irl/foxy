@@ -1,4 +1,4 @@
-import { realLayout, realGroups } from "../test/browser/fixtures/real-layout.js";
+import { realGroups } from "../test/browser/fixtures/real-groups.js";
 // Preview fixtures use only inline, neutral icons. No network requests.
 const TITLES = ["YouTube", "Inbox (3)", "Pull request #1234: Fix the flaky sidebar test in the vertical tab strip",
   "Docs", "Calendar", "Figma", "Hacker News", "Weather", "Maps", "Music", "Notes", "Photos"];
@@ -44,39 +44,25 @@ const saved = [
   { folderId: "saved-local", title: "LOCAL PAGES", color: "grey", count: 2, cantReopen: ["about:config"] },
   { folderId: "saved-unnamed", title: "", color: "orange", count: 3, cantReopen: [] },
 ];
-// The same wide saved layout is fitted, without writes, by the narrow preview.
-function grid(customCell = 80) {
-  return { ...scenario(one), saved, missing: [],
-    folders: { 101: "preview-101", 102: "preview-102", 103: "preview-103" },
-    deviceSettings: { cellSize: "custom", customCell },
-    layout: {
-      clock: { x: 0, y: 0, w: 5, h: 2 },
-      pinned: { x: 0, y: 2, w: 3, h: 4 },
-      "group:preview-101": { x: 5, y: 0, w: 3, h: 4 },
-      "group:preview-102": { x: 3, y: 4, w: 3, h: 4 },
-      "group:preview-103": { x: 6, y: 4, w: 3, h: 4 },
-      saved: { x: 0, y: 6, w: 3, h: 4 },
-      weather: { x: 3, y: 8, w: 3, h: 3 },
-    },
-  };
+function widgetsBoard() {
+  const data = scenario(one);
+  return { ...data, saved, missing: [], folders: Object.fromEntries(data.groups.map(g => [g.id, `preview-${g.id}`])) };
 }
-function realGrid() {
-  const data = scenario(realGroups.map(g => ({ title: g.title, color: g.color, count: 12 })), { pinned: 5 });
-  return { ...data, folders: Object.fromEntries(data.groups.map(g => [g.id, g.title.toLowerCase()])),
-    layout: realLayout, layoutWidth: 34, syncedSettings: { railCells: 5 }, deviceSettings: { cellSize: "S" } };
+function realBoard() {
+  const data = scenario(realGroups.map(g => ({ title: g.title, color: g.color, count: 12 })), { pinned: 5, other: true });
+  return { ...data, saved, missing: [], folders: Object.fromEntries(data.groups.map(g => [g.id, g.title.toLowerCase()])),
+    syncedSettings: { otherWindows: true }, deviceSettings: { density: 'normal' },
+    board: { order: [], heights: {}, widgets: [], t: 1 } };
 }
-// S cells with a tall weather tile beside the M preview layout.
-function weatherGrid() {
-  const data = grid("S");
-  return { ...data, layout: { ...data.layout, weather: { x: 9, y: 0, w: 5, h: 8 } } };
-}
+const real = realBoard();
+const narrow = { ...real, board: { ...real.board, widgets: [
+  {kind:'clock',h:112},{kind:'pinned',h:96},{kind:'weather',h:112},{kind:'memory',h:304},{kind:'saved',h:80},
+] } };
 export const SCENARIOS = {
-  weather: weatherGrid(),
-  "real-34": realGrid(), "real-33": realGrid(), "real-17": realGrid(),
-  "grid-custom-80": grid(),
-  "grid-custom-144": grid(144),
-  "grid-narrow": grid(),
-  "settings-open": grid(),
+  weather: widgetsBoard(),
+  v40: real, "v40-narrow": narrow,
+  "real-34": realBoard(), "real-33": realBoard(), "real-17": realBoard(),
+  "settings-open": widgetsBoard(),
   empty: scenario([], { pinned: 0 }),
   "one-window": scenario(one),
   saved: { ...scenario(one), saved, missing: [] },

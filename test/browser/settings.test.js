@@ -11,7 +11,7 @@ async function styles() {
   await css; await document.fonts.ready;
 }
 async function flush(ff) { for (let i = 0; i < 5; i++) { await ff.settle(); await nextFrame(); } }
-async function setup({ folders = { 1: "one", 2: "two" }, width = 1232, railCells = 3 } = {}) {
+async function setup({ folders = { 1: "one", 2: "two" }, width = 1232, railWidth = 304 } = {}) {
   await styles();
   const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }, { id: 2 }], selfTabId: 99,
     groups: [{ id: 1, windowId: 1, title: "Here" }, { id: 2, windowId: 2, title: "There" }],
@@ -22,9 +22,7 @@ async function setup({ folders = { 1: "one", 2: "two" }, width = 1232, railCells
   const host = document.createElement("div"), node = document.createElement("div"), pane = document.createElement("aside");
   host.className = "page"; host.style.cssText = `position:fixed;top:0;right:0;width:${width}px`;
   node.className = "board";
-  // These geometry fixtures use Custom 80, independent of the S default.
-  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
-  await ff.browser.storage.sync.set({ settings: { railCells } }); await ff.settle();
+  await ff.browser.storage.sync.set({ settings: { widgetsWidth: 304, railWidth } }); await ff.settle();
   pane.className = "settings-pane"; pane.hidden = true;
   host.append(node, pane); fixture().append(host);
   const control = createController(node, ff.browser); await control.refresh(); await flush(ff);
@@ -46,7 +44,7 @@ test("the gear opens a sibling pane and Escape or gear closes it with focus rest
   const first = pane.querySelector("button"); assert.equal(document.activeElement, first);
   const box = pane.getBoundingClientRect(); assert.equal(box.width, 360); assert.equal(box.height, innerHeight - 56);
   assert.equal(getComputedStyle(pane).boxShadow, "none"); assert.equal(getComputedStyle(pane).borderTopWidth, "0px");
-  assert.equal(pane.querySelectorAll(".setting-caption").length, 3);
+  assert.equal(pane.querySelectorAll(".setting-caption").length, 2);
   const scroll = pane.querySelector(".settings-scroll"); assert.equal(scroll.tabIndex, -1);
   scroll.scrollTop = 100; scroll.dispatchEvent(new Event("scroll"));
   assert.ok(pane.classList.contains("scroll-start"));
@@ -89,7 +87,7 @@ test("Escape handled by SAVED confirmation leaves the settings pane open", async
 
 test("device-only controls describe their captions without describing synced controls", async () => {
   const { node, pane } = await setup(); node.querySelector(".settings-gear").click();
-  for (const key of ["cellSize", "density"]) {
+  for (const key of ["density"]) {
     const group = pane.querySelector(`[data-key="${key}"]`), caption = group.parentElement.querySelector(".setting-caption");
     assert.ok(caption.id); assert.equal(group.getAttribute("aria-describedby"), caption.id);
     assert.equal(document.getElementById(group.getAttribute("aria-describedby")), caption);
@@ -169,7 +167,6 @@ test("settings buttons have distinct neutral focus fills in both schemes without
 
 // Each row catches a wrong storage scope/key/value or missing live board apply.
 for (const [key, value, scope, apply] of [
-  ["cellSize", "S", "device", node => assert.equal(node.querySelector(".grid").style.getPropertyValue("--cell"), `${1248 / 19 - 16}px`)],
   ["density", "compact", "device", node => assert.equal(node.style.getPropertyValue("--row"), "24px")],
   ["timeFormat", "12", "synced", node => assert.ok(/AM|PM/.test(node.querySelector(".clock-time").textContent))],
   ["transparency", "low", "synced", node => assert.equal(node.style.getPropertyValue("--card-alpha-dark"), "0.75")],
@@ -221,91 +218,6 @@ for (const key of ["showClock", "showPinned", "showSaved", "showDate", "otherWin
 }
 // Based on the final reviewer's quick-stepper probe. Steps must use the
 // shown value, not the stored value while serialised saves are in flight.
-test("two quick rail plus clicks show and save 4 then 5", async () => {
-  const { ff, node, pane } = await setup(); node.querySelector(".settings-gear").click();
-  const plus = pane.querySelector('[data-rail="plus"]'), count = pane.querySelector('[data-rail="value"]');
-  const start = ff.calls.length;
-  plus.click(); assert.equal(count.textContent, "4");
-  plus.click(); assert.equal(count.textContent, "5");
-  await flush(ff);
-  const values = ff.calls.slice(start).filter(c => c.api === "storage.sync.set" && c.args[0].settings)
-    .map(c => c.args[0].settings.railCells);
-  assert.deepEqual(values, [4, 5]);
-  assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 5);
-  assert.equal(count.textContent, "5");
-  plus.click(); plus.click(); assert.equal(plus.disabled, true); await flush(ff);
-  assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 6);
-  const minus = pane.querySelector('[data-rail="minus"]');
-  for (let i = 0; i < 6; i++) minus.click();
-  assert.equal(count.textContent, "2"); assert.equal(minus.disabled, true); await flush(ff);
-  assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 2);
-});
-
-test("a completed rail save cannot replace the shown value of a later in-flight step", async () => {
-  const { ff, node, pane } = await setup(); node.querySelector(".settings-gear").click();
-  const set = ff.browser.storage.sync.set, releases = [];
-  ff.browser.storage.sync.set = async values => {
-    await new Promise(resolve => releases.push(resolve)); await set(values);
-  };
-  const plus = pane.querySelector('[data-rail="plus"]'), count = pane.querySelector('[data-rail="value"]');
-  try {
-    plus.click(); plus.click(); await flush(ff);
-    assert.equal(count.textContent, "5"); assert.equal(releases.length, 1);
-    releases[0](); await flush(ff);
-    assert.equal(releases.length, 2);
-    assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 4);
-    assert.equal(count.textContent, "5", "the later step is still the shown value");
-    releases[1](); await flush(ff);
-    assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 5);
-    assert.equal(count.textContent, "5");
-  } finally { ff.browser.storage.sync.set = set; releases.forEach(release => release()); }
-});
-
-test("failed rail steps roll back only after the last in-flight save", async () => {
-  const { ff, node, pane } = await setup();
-  await ff.browser.storage.sync.set({ settings: { railCells: 4 } }); await flush(ff);
-  node.querySelector(".settings-gear").click();
-  const set = ff.browser.storage.sync.set, warn = console.warn, releases = [], warnings = [];
-  ff.browser.storage.sync.set = async () => {
-    await new Promise(resolve => releases.push(resolve)); throw new Error("quota");
-  };
-  console.warn = (...args) => warnings.push(args);
-  const plus = pane.querySelector('[data-rail="plus"]'), count = pane.querySelector('[data-rail="value"]');
-  try {
-    plus.click(); plus.click(); await flush(ff); assert.equal(count.textContent, "6");
-    releases[0](); await flush(ff);
-    assert.equal(count.textContent, "6", "first failure must not erase the later step");
-    releases[1](); await flush(ff);
-    assert.equal(count.textContent, "4"); assert.equal(plus.disabled, false);
-    assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 4);
-    assert.ok(warnings.some(args => String(args[0]).startsWith("Foxy:")));
-  } finally { ff.browser.storage.sync.set = set; console.warn = warn; releases.forEach(release => release()); }
-});
-
-test("custom cell validates integer bounds and rail stepper stays within whole-cell limits", async () => {
-  const { ff, node, pane } = await setup(); node.querySelector(".settings-gear").click();
-  choice(pane, "cellSize", "custom").click(); await flush(ff);
-  const field = pane.querySelector('input[data-key="customCell"]'); assert.equal(field.hidden, false);
-  for (const value of ["39", "241", "80.5", ""]) {
-    const before = writes(ff).length; field.value = value; field.dispatchEvent(new Event("change")); await flush(ff);
-    assert.equal(writes(ff).length, before); assert.equal(field.value, "80");
-  }
-  const before = writes(ff).length; field.value = "40"; field.dispatchEvent(new Event("change")); await flush(ff);
-  assert.equal(writes(ff).length - before, 1);
-  assert.equal(node.querySelector(".grid").style.getPropertyValue("--cell"), `${1248 / 22 - 16}px`);
-  const minus = pane.querySelector('[data-rail="minus"]'), plus = pane.querySelector('[data-rail="plus"]');
-  minus.click(); await flush(ff); assert.equal(minus.disabled, true);
-  assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 2);
-  for (let i = 0; i < 12; i++) { plus.click(); await flush(ff); }
-  assert.equal(plus.disabled, true);
-  assert.equal((await ff.browser.storage.sync.get("settings")).settings.railCells, 11);
-  field.value = "144"; field.dispatchEvent(new Event("change")); await flush(ff);
-  assert.equal(pane.querySelector('[data-rail="value"]').textContent, "3");
-  assert.equal(plus.disabled, true); assert.equal(field.hidden, false);
-  choice(pane, "cellSize", "S").click(); await flush(ff);
-  assert.equal(field.hidden, true); assert.equal(plus.disabled, true);
-  assert.equal(pane.querySelector('[data-rail="value"]').textContent, "9");
-});
 test("a failed save restores the stored control, logs Foxy and never applies to board", async () => {
   const { ff, node, pane } = await setup(); node.querySelector(".settings-gear").click();
   const set = ff.browser.storage.sync.set, warn = console.warn, warnings = [];
@@ -364,42 +276,31 @@ test("two failed toggle clicks end showing the stored value", async () => {
     assert.ok(warnings.some(args => String(args[0]).startsWith("Foxy:")));
   } finally { ff.browser.storage.sync.set = set; console.warn = warn; }
 });
-test("a failed reset logs and keeps tile keys, with the reset button usable again", async () => {
-  const { ff, node, pane } = await setup(); node.querySelector(".settings-gear").click();
-  const before = await ff.browser.storage.sync.get(null), remove = ff.browser.storage.sync.remove, warn = console.warn, warnings = [];
-  ff.browser.storage.sync.remove = async () => { throw new Error("unavailable"); }; console.warn = (...args) => warnings.push(args);
+for (const method of ['set', 'remove']) test(`a failed reset ${method} logs, keeps the board and legacy keys, and leaves Reset usable`, async () => {
+  const {ff, node, pane} = await setup();
+  await ff.browser.storage.sync.set({settings: {widgetsWidth: 400, railWidth: 300, showClock: false},
+    'tile:12:group:one': {}, 'layout:12': {t: 1}, railCells: 2}); await flush(ff);
+  node.querySelector('.settings-gear').click();
+  const before = await ff.browser.storage.sync.get(null), original = ff.browser.storage.sync[method], warn = console.warn, warnings = [];
+  ff.browser.storage.sync[method] = async () => { throw new Error('unavailable'); }; console.warn = (...args) => warnings.push(args);
   try {
-    const reset = pane.querySelector(".settings-reset"); reset.click(); await waitForConfirm(); reset.click(); await flush(ff);
-    assert.deepEqual(await ff.browser.storage.sync.get(null), before); assert.equal(reset.disabled, false);
-    assert.ok(warnings.some(args => String(args[0]).startsWith("Foxy:")));
-  } finally { ff.browser.storage.sync.remove = remove; console.warn = warn; }
+    const reset = pane.querySelector('.settings-reset'); reset.click(); await waitForConfirm(); reset.click(); await flush(ff);
+    // Settings must be durable before removal. If removal fails, only widths
+    // have reset; a failed settings write must leave everything untouched.
+    assert.deepEqual(await ff.browser.storage.sync.get(null), method === 'set' ? before : {...before, settings: {showClock: false}});
+    assert.equal(reset.disabled, false);
+    assert.ok(warnings.some(args => String(args[0]).startsWith('Foxy:')));
+  } finally { ff.browser.storage.sync[method] = original; console.warn = warn; }
 });
-test("reset removes tile keys and layouts once, and an open board places visible tiles in spec order", async () => {
-  const { ff, node, pane } = await setup();
-  await ff.browser.storage.sync.set({ "tile:10:hidden": { x: 0, y: 70, w: 3, h: 4 }, keep: 7,
-    settings: { railCells: 3, showPinned: false }, "tile:10:clock": { x: 0, y: 70, w: 5, h: 2 } }); await flush(ff);
-  node.querySelector(".settings-gear").click(); const reset = pane.querySelector(".settings-reset");
-  const before = ff.calls.length; reset.click(); assert.equal(reset.textContent, "Confirm reset");
-  assert.equal(ff.calls.slice(before).filter(c => c.api === "storage.sync.remove").length, 0);
-  await waitForConfirm(); reset.click(); await flush(ff);
-  const removals = ff.calls.slice(before).filter(c => c.api === "storage.sync.remove"); assert.equal(removals.length, 1);
-  assert.ok(removals[0].args[0].includes("tile:10:hidden")); assert.ok(removals[0].args[0].every(key => key.startsWith("tile:") || key.startsWith("layout:") || key === "layouts"));
-  const stored = await ff.browser.storage.sync.get(null);
-  assert.equal(stored.keep, 7); assert.equal(stored.settings.showPinned, false); assert.equal(stored["tile:10:hidden"], undefined);
-  assert.deepEqual(stored["tile:10:clock"], { x: 0, y: 0, w: 5, h: 2 });
-  assert.deepEqual(stored["tile:10:group:one"], { x: 5, y: 0, w: 3, h: 4 });
-  assert.deepEqual(stored["tile:10:group:two"], { x: 0, y: 2, w: 3, h: 4 });
-  assert.deepEqual(stored["tile:10:saved"], { x: 3, y: 4, w: 3, h: 4 });
-  assert.equal(reset.textContent, "Reset layout");
-});
-test("reset clears this page's unmapped pending placements", async () => {
-  const folders = { 2: "two" }, { ff, pane, node, control } = await setup({ folders });
-  await control.handlers.onTabDrop(11, { zone: "cell", rect: { x: 0, y: 30, w: 3, h: 4 } }); await flush(ff);
-  node.querySelector(".settings-gear").click(); pane.querySelector(".settings-reset").click(); await waitForConfirm(); pane.querySelector(".settings-reset").click(); await flush(ff);
-  const local = control.view.tiles.find(t => t.id.startsWith("local:") && t.group.id !== 1);
-  assert.ok(local);
-  control.handlers.onEditEnd(local.group.id); await flush(ff);
-  assert.ok(control.view.tiles.find(t => t.id === local.id).y < 30, "reset must discard the pending drop rectangle");
+test('reset clears the board and pixel widths while keeping widget toggles',async()=>{
+ const {ff,node,pane}=await setup();
+ await ff.browser.storage.sync.set({board:{order:['group:two','group:one'],heights:{'group:one':10},widgets:[{kind:'clock',h:300}],t:1},settings:{widgetsWidth:350,railWidth:280,showPinned:false},keep:7});await flush(ff);
+ node.querySelector('.settings-gear').click();const reset=pane.querySelector('.settings-reset');reset.click();await waitForConfirm();reset.click();await flush(ff);
+ const stored=await ff.browser.storage.sync.get(null);
+ assert.equal(stored.keep,7);assert.deepEqual(stored.settings,{showPinned:false});
+ assert.ok(!stored.board||stored.board.order.length===0);
+ assert.equal(node.querySelector('.clock').getBoundingClientRect().height,160);
+ assert.equal(node.querySelector('.rail').getBoundingClientRect().width,304);
 });
 // Based on the reviewer's detail-1/detail-2 probe. A later detail-2 click
 // also checks the event guard independently of the 400 ms delay.
@@ -470,22 +371,21 @@ test("options content sets the document height in a 250 px frame without an inne
 });
 test("options.html renders the shared pane, saves and resets tile keys and layouts", async () => {
   const { ff, node } = await setup();
-  await ff.browser.storage.sync.set({ "tile:10:orphan": { x: 0, y: 20, w: 3, h: 4 }, keep: 7, settings: { transparency: "high" } }); await flush(ff);
+  await ff.browser.storage.sync.set({ board: {order:["group:orphan"],widgets:[],heights:{},t:1}, keep: 7, settings: { transparency: "high" } }); await flush(ff);
   const frame = await options(ff), doc = frame.contentDocument, pane = doc.querySelector(".settings-pane");
   assert.ok(pane); assert.equal(pane.hidden, false); assert.equal(doc.querySelector(".settings-gear"), null);
-  assert.equal(pane.querySelector('[data-rail="value"]').textContent, "2");
-  assert.equal(pane.querySelector('[data-rail="plus"]').disabled, true);
+  assert.equal(pane.querySelector('[data-key="cellSize"]'), null);
   assert.equal(pane.style.getPropertyValue("--card-alpha-dark"), "0.45");
   assert.equal(pane.style.getPropertyValue("--card-alpha-light"), "0.55");
-  assert.deepEqual([...pane.querySelectorAll("h2")].map(n => n.textContent), ["Grid", "Tiles", "Clock", "Weather", "Cards", "Windows", "Pins"]);
+  assert.deepEqual([...pane.querySelectorAll("h2")].map(n => n.textContent), ["Widgets", "Clock", "Weather", "Cards", "Windows", "Pins"]);
   const before = writes(ff).length; choice(pane, "density", "compact").click(); await flush(ff);
   assert.equal(writes(ff).length - before, 1); assert.equal(node.style.getPropertyValue("--row"), "24px");
   const reset = pane.querySelector(".settings-reset"), start = ff.calls.length; reset.click(); await waitForConfirm(); reset.click(); await flush(ff);
   const removals = ff.calls.slice(start).filter(c => c.api === "storage.sync.remove"); assert.equal(removals.length, 1);
-  assert.ok(removals[0].args[0].every(key => key.startsWith("tile:") || key.startsWith("layout:") || key === "layouts"));
+  assert.deepEqual(removals[0].args[0], ["board"]);
   const stored = await ff.browser.storage.sync.get(null); assert.equal(stored.keep, 7);
   assert.deepEqual(stored.settings, { transparency: "high" });
-  assert.equal(stored["tile:10:orphan"], undefined); assert.equal((await ff.browser.storage.local.get("deviceSettings")).deviceSettings.density, "compact");
+  assert.ok(!stored.board || stored.board.order.length === 0); assert.equal((await ff.browser.storage.local.get("deviceSettings")).deviceSettings.density, "compact");
   for (const scheme of ["light", "dark"]) {
     doc.documentElement.style.colorScheme = scheme;
     const css = frame.contentWindow.getComputedStyle(pane);
@@ -528,34 +428,6 @@ test("a failed toggle save followed by a successful one shows the saved value", 
   } finally { ff.browser.storage.sync.set = set; console.warn = warn; }
 });
 
-// Catches oversize panes or a gear footer that depends on the cell size.
-for (const width of [401, 301]) {
-  test(`gear and pane fit a ${width}px page with a two-cell rail`, async () => {
-    const { ff, node, pane } = await setup({ width, railCells: 2 });
-    const check = () => {
-      const board = node.getBoundingClientRect(), rail = node.querySelector(".rail").getBoundingClientRect();
-      const gear = node.querySelector(".settings-gear").getBoundingClientRect(), box = pane.getBoundingClientRect();
-      for (const size of [gear.width, gear.height]) assert.ok(Math.abs(size - 32) < 0.5);
-      assert.ok(Math.abs(gear.bottom + 8 - board.bottom) < 0.5);
-      assert.ok(Math.abs(gear.right + 8 - board.right) < 0.5);
-      assert.ok(Math.abs(rail.bottom - board.bottom) < 0.5);
-      assert.ok(Math.abs(box.bottom + 16 - gear.top) < 0.5);
-      assert.ok(Math.abs(box.top - board.top) < 0.5);
-      assert.ok(Math.abs(box.right - board.right) < 0.5);
-      assert.ok(box.left >= board.left - 0.5);
-      assert.ok(Math.abs(box.width - Math.min(360, width)) < 0.5);
-      const grid = node.querySelector(".grid").getBoundingClientRect();
-      assert.ok(Math.abs(grid.right + 16 - rail.left) < 0.5);
-    };
-    node.querySelector(".settings-gear").click(); await nextFrame(); await nextFrame();
-    pane.getAnimations().forEach(animation => animation.finish());
-    assert.equal(pane.hidden, false); check();
-    const stored = await ff.browser.storage.sync.get(null);
-    node.querySelector(".settings-gear").click(); assert.equal(pane.hidden, true);
-    assert.deepEqual(await ff.browser.storage.sync.get(null), stored, "gear never writes layouts");
-  });
-}
-
 async function newtab(ff, width, height = 720) {
   const frame = document.createElement("iframe");
   frame.style.cssText = `position:fixed;top:0;left:0;width:${width}px;height:${height}px;border:0;z-index:10`;
@@ -569,61 +441,6 @@ async function newtab(ff, width, height = 720) {
   return frame;
 }
 
-// The controller must persist target-setting defaults, not viewport-dependent
-// stretched defaults, when the same group is first mapped on a new device.
-test("new groups save the same Custom 144 default size at 1600 and 1000 px", async () => {
-  const sizes = [];
-  for (const width of [1600, 1000]) {
-    const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], selfTabId: 99,
-      groups: [{ id: 1, windowId: 1, title: "New group" }],
-      tabs: [{ id: 10, windowId: 1, groupId: 1 }, { id: 99, windowId: 1 }] },
-      message => message.type === "foxy:reconcile" ? { ok: true } : message.type === "foxy:saved"
-        ? { folders: { 1: "one" }, saved: [], missing: [] } : undefined);
-    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 144 } });
-    await ff.browser.storage.sync.set({ settings: { railCells: 3 } });
-    const frame = await newtab(ff, width);
-    try {
-      const k = Math.floor((width + 16) / 160) - 3;
-      const stored = await ff.browser.storage.sync.get(`tile:${k}:group:one`);
-      const group = stored[`tile:${k}:group:one`];
-      assert.ok(group, "a mapped group has a saved placement");
-      sizes.push([group.w, group.h]);
-    } finally { frame.remove(); }
-  }
-  assert.deepEqual(sizes, [[2, 3], [2, 3]]);
-});
-
-// Keeping the old page minimum while measuring makes a second narrow resize
-// reuse the previous overflow floor instead of the new viewport width.
-test("Custom 144 narrowing from 401 to 300 px matches a fresh 300 px render", async () => {
-  const makeFirefox = async () => {
-    const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], selfTabId: 99,
-      groups: [], tabs: [{ id: 99, windowId: 1 }] },
-      message => message.type === "foxy:reconcile" ? { ok: true } : message.type === "foxy:saved"
-        ? { folders: {}, saved: [], missing: [] } : undefined);
-    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 144 } });
-    return ff;
-  };
-  const ff = await makeFirefox(), frame = await newtab(ff, 401);
-  let fresh;
-  const geometry = frame => {
-    const board = frame.contentDocument.querySelector(".board");
-    return { width: board.getBoundingClientRect().width,
-      cell: parseFloat(frame.contentWindow.getComputedStyle(board).getPropertyValue("--cell")) };
-  };
-  try {
-    assert.equal(geometry(frame).cell, 192.5, "initial Custom 144 stretch at 401 px");
-    const before = await ff.browser.storage.sync.get(null);
-    frame.style.width = "300px"; await flush(ff); await flush(ff);
-    const freshFirefox = await makeFirefox();
-    fresh = await newtab(freshFirefox, 300);
-    assert.deepEqual(geometry(frame), geometry(fresh),
-      `narrowing measures the viewport, not the old floor: resized ${JSON.stringify(geometry(frame))}, fresh ${JSON.stringify(geometry(fresh))}`);
-    assert.deepEqual(geometry(fresh), { width: 932, cell: 300 });
-    assert.deepEqual(await ff.browser.storage.sync.get(null), before, "display fit does not rewrite saved layouts");
-  } finally { frame.remove(); fresh?.remove(); }
-});
-
 async function missingNewtab(width, height) {
   const { ff } = await setup(), send = ff.browser.runtime.sendMessage;
   ff.browser.runtime.sendMessage = async message => {
@@ -633,35 +450,6 @@ async function missingNewtab(width, height) {
   return newtab(ff, width, height);
 }
 
-// Short windows scroll the page rather than hiding the rail's title or first row.
-test("a 700 by 140 newtab fits its rail contents and keeps the gear reachable by scrolling", async () => {
-  const frame = await missingNewtab(700, 140), doc = frame.contentDocument, win = frame.contentWindow;
-  try {
-    assert.ok(doc.querySelector(".banner"));
-    const rail = doc.querySelector(".rail").getBoundingClientRect();
-    const gear = doc.querySelector(".settings-gear"), box = gear.getBoundingClientRect();
-    const board = doc.querySelector(".board").getBoundingClientRect();
-    const title = doc.querySelector(".rail .column-title").getBoundingClientRect();
-    const rows = doc.querySelector(".rail .rows").getBoundingClientRect();
-    assert.ok(rows.height >= 32 - 0.5, "at least one normal-density tab row fits");
-    assert.ok(title.bottom <= rows.top + 0.5, "title ends above the tab list");
-    assert.ok(rows.bottom + 16 <= box.top + 0.5, "list ends one gap above the gear");
-    assert.ok(title.bottom <= box.top, "gear does not cover the title");
-    assert.ok(Math.abs(rail.bottom - board.bottom) < 0.5, "rail reaches the board bottom");
-    assert.ok(Math.abs(box.bottom + 8 - rail.bottom) < 0.5, "gear is inset inside the rail");
-    assert.ok(Math.abs(box.height - 32) < 0.5, "gear stays a 32 px button");
-
-    gear.scrollIntoView({ block: "end", inline: "nearest" });
-    await nextFrame(); await nextFrame();
-    const visible = gear.getBoundingClientRect();
-    assert.ok(visible.top >= -0.5 && visible.bottom <= win.innerHeight + 0.5,
-      `the full gear is visible after scrolling: ${visible.top}..${visible.bottom}, viewport ${win.innerHeight}, scroll ${win.scrollY}/${win.scrollMaxY}`);
-    const hit = doc.elementFromPoint((visible.left + visible.right) / 2, (visible.top + visible.bottom) / 2);
-    assert.ok(hit === gear || gear.contains(hit), "the visible gear is reachable");
-  } finally { frame.remove(); }
-});
-
-// A wide banner must use the board width rather than reserving removed margins.
 test("a long missing-groups banner can fill the edge-to-edge board width", async () => {
   const frame = await missingNewtab(700, 720), doc = frame.contentDocument;
   try {
@@ -697,98 +485,7 @@ for (const width of [1600, 401]) {
   });
 }
 
-// Accepted minimum-column ruling: the board may overflow horizontally, but
-// it must not centre tiles off the left edge or strand its gear/pane controls.
-for (const width of [175, 240]) {
-  test(`below three target columns (${width}px) tiles do not overlap and gear/pane remain reachable`, async () => {
-    const { ff } = await setup();
-    // The weather tile would be a new tile here; this test pins the existing ones.
-    await ff.browser.storage.sync.set({ settings: { railCells: 3, showWeather: false } }); await flush(ff);
-    const before = await ff.browser.storage.sync.get(null);
-    const frame = await newtab(ff, width), doc = frame.contentDocument, win = frame.contentWindow;
-    const root = doc.querySelector(".board"), grid = root.querySelector(".grid"), rail = root.querySelector(".rail"), gear = root.querySelector(".settings-gear"), pane = doc.querySelector(".settings-pane");
-    const box = root.getBoundingClientRect(), page = doc.querySelector(".page").getBoundingClientRect();
-    assert.ok(page.width > win.innerWidth, "minimum columns widen the page without changing the cell target");
-    assert.ok(Math.abs(box.width - page.width) < 0.5, "board fills the widened page");
-    assert.ok(Math.abs(box.left - page.left) < 0.5, "overflow starts at the left edge");
-    assert.ok(Math.abs(grid.getBoundingClientRect().right + 16 - rail.getBoundingClientRect().left) < 0.5);
-    assert.ok(gear.getBoundingClientRect().left >= grid.getBoundingClientRect().right + 16 - 0.5);
-    assert.ok(Math.abs(rail.getBoundingClientRect().bottom - box.bottom) < 0.5);
-    win.scrollTo(doc.scrollingElement.scrollWidth, doc.scrollingElement.scrollHeight);
-    await nextFrame(); await nextFrame();
-    const reachable = element => {
-      element.scrollIntoView({ block: "nearest", inline: "nearest" });
-      const r = element.getBoundingClientRect(), x = (r.left + r.right) / 2, y = (r.top + r.bottom) / 2;
-      const hit = doc.elementFromPoint(x, y);
-      assert.ok(hit === element || element.contains(hit), `${element.getAttribute("aria-label") || element.textContent} is reachable`);
-    };
-    reachable(gear); gear.click(); await nextFrame(); await nextFrame();
-    pane.getAnimations().forEach(animation => animation.finish());
-    assert.equal(pane.hidden, false);
-    assert.ok(Math.abs(pane.getBoundingClientRect().right - root.getBoundingClientRect().right) < 0.5);
-    assert.ok(Math.abs(pane.getBoundingClientRect().bottom + 16 - gear.getBoundingClientRect().top) < 0.5);
-    const controls = [...pane.querySelectorAll("button:not(:disabled)")];
-    assert.ok(controls.length >= 15, "the real settings controls are rendered before testing reachability");
-    for (const button of controls) reachable(button);
-    reachable(gear); gear.click(); assert.equal(pane.hidden, true);
-    await flush(ff);
-    assert.deepEqual(await ff.browser.storage.sync.get(null), before, "overflow remains display-only");
-    frame.style.width = "700px"; await flush(ff); await flush(ff);
-    const widePage = doc.querySelector(".page").getBoundingClientRect(), wideBoard = root.getBoundingClientRect();
-    assert.ok(Math.abs(wideBoard.width - widePage.width) < 0.5, "widening clears the overflow floor");
-    const wideGrid = root.querySelector(".grid").getBoundingClientRect(), wideRail = root.querySelector(".rail").getBoundingClientRect();
-    assert.ok(Math.abs(wideGrid.width + 16 + wideRail.width - widePage.width) < 0.5,
-      `widened cells meet the page edge: ${wideGrid.width} + 16 + ${wideRail.width} vs ${widePage.width}`);
-    assert.deepEqual(await ff.browser.storage.sync.get(null), before);
-  });
-}
-
-// Removed presets must not be selectable in either settings surface. A
-// legacy value is display-only until a device change, not a load-time write.
 for (const page of ["board", "options"]) {
-  test(`${page} offers only S and Custom and applies a legacy cell migration lazily`, async () => {
-    const f = await setup();
-    await f.ff.browser.storage.local.set({ deviceSettings: { cellSize: "XL", customCell: 144 } });
-    await flush(f.ff);
-    const before = writes(f.ff).length;
-    let pane = f.pane;
-    if (page === "board") f.node.querySelector(".settings-gear").click();
-    else pane = (await options(f.ff)).contentDocument.querySelector(".settings-pane");
-    assert.deepEqual([...pane.querySelectorAll('[data-key="cellSize"] button')].map(n => n.textContent), ["S", "Custom"]);
-    assert.equal(choice(pane, "cellSize", "S").getAttribute("aria-pressed"), "true");
-    const field = pane.querySelector('input[data-key="customCell"]');
-    assert.equal(field.hidden, true);
-    assert.equal(f.node.querySelector(".grid").style.getPropertyValue("--cell"), `${1248 / 19 - 16}px`);
-    assert.equal(writes(f.ff).length, before);
-    assert.equal((await f.ff.browser.storage.local.get("deviceSettings")).deviceSettings.cellSize, "XL");
-    choice(pane, "density", "compact").click(); await flush(f.ff);
-    assert.equal((await f.ff.browser.storage.local.get("deviceSettings")).deviceSettings.cellSize, "S");
-    choice(pane, "cellSize", "custom").click(); await flush(f.ff);
-    assert.equal(field.hidden, false); assert.equal(field.value, "144");
-    assert.equal(f.node.querySelector(".grid").style.getPropertyValue("--cell"), `${1248 / 7 - 16}px`);
-    field.value = "80"; field.dispatchEvent(new field.ownerDocument.defaultView.Event("change")); await flush(f.ff);
-    assert.equal(f.node.querySelector(".grid").style.getPropertyValue("--cell"), "80px");
-    choice(pane, "cellSize", "S").click(); await flush(f.ff);
-    assert.equal(field.hidden, true);
-    assert.equal(f.node.querySelector(".grid").style.getPropertyValue("--cell"), `${1248 / 19 - 16}px`);
-    assert.equal((await f.ff.browser.storage.local.get("deviceSettings")).deviceSettings.cellSize, "S");
-  });
-}
-
-// Catches a missing shared control, wrong scope, or stale values after Sync.
-for (const page of ["board", "options"]) {
-  test(`${page} names the rail width control for ungrouped tabs`, async () => {
-    const f = await setup();
-    let pane = f.pane;
-    if (page === "board") f.node.querySelector(".settings-gear").click();
-    else pane = (await options(f.ff)).contentDocument.querySelector(".settings-pane");
-    const minus = pane.querySelector('[data-rail="minus"]'), plus = pane.querySelector('[data-rail="plus"]');
-    const group = plus.closest('[role="group"]');
-    assert.equal(pane.ownerDocument.getElementById(group.getAttribute("aria-labelledby")).textContent,
-      "Ungrouped tabs rail width");
-    assert.equal(minus.getAttribute("aria-label"), "Decrease ungrouped tabs rail width");
-    assert.equal(plus.getAttribute("aria-label"), "Increase ungrouped tabs rail width");
-  });
   test(`${page} WINDOWS pane syncs the duplicate-switch toggle and follows remote changes`, async () => {
     const f = await setup();
     let pane = f.pane;

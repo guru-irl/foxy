@@ -64,7 +64,7 @@ function point(node, x = 0.5, y = 0.5) {
   return { clientX: r.left + r.width * x, clientY: r.top + r.height * y };
 }
 function clean(root) {
-  assert.equal(root.querySelectorAll(".dragging, .drop-target, .drop-line, .cell-preview").length, 0);
+  assert.equal(root.querySelectorAll(".dragging, .drop-target, .drop-line").length, 0);
 }
 function rgba(color) {
   const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
@@ -82,16 +82,35 @@ function luminance(rgb) {
 async function flush(ff) { await ff.settle(); await nextFrame(); await nextFrame(); }
 async function controller(set = setup(), listener, layout = {}, options = {}) {
   const ff = createFirefox(set, listener), root = await makeRoot();
-  // These geometry fixtures use Custom 80, independent of the S default.
-  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
-  await ff.browser.storage.sync.set({ ...layout, settings: { railCells: 3, ...layout.settings } }); await ff.settle();
+  await ff.browser.storage.sync.set({ ...layout, settings: { widgetsWidth: 304, railWidth: 304, ...layout.settings } }); await ff.settle();
   const { createController } = await import("../../extension/src/main.js");
   const control = createController(root, ff.browser, undefined, options);
   await control.refresh();
   await flush(ff); // Drain the one-time reconcile and deferred first paint.
-  await flush(ff); // Deliver fake storage events from the initial tile writes.
+  await flush(ff); // Deliver fake storage events from the one-time upgrade.
   return { root, ff, control };
 }
+
+test('remote pin dropped on empty kanban space creates a group and opens its name editor', async () => {
+  const {root, ff} = await controller();
+  const source = root.querySelector('[data-tab-id="21"] .row-open'), dataTransfer = start(source);
+  const kanban = root.querySelector('.kanban'), dropPoint = point(kanban, 0.8, 0.95);
+  ff.calls.length = 0;
+  try {
+    assert.equal(document.elementFromPoint(dropPoint.clientX, dropPoint.clientY), kanban);
+    assert.ok(dispatchDrag('dragover', kanban, {dataTransfer, ...dropPoint}).defaultPrevented);
+    dispatchDrag('drop', kanban, {dataTransfer, ...dropPoint});
+  } finally { dispatchDrag('dragend', source, {dataTransfer}); }
+  await flush(ff); await flush(ff);
+  const moved = await ff.browser.tabs.get(21);
+  assert.equal(moved.windowId, 1);
+  assert.equal(moved.pinned, false);
+  assert.ok(moved.groupId !== -1 && ![101, 102, 201].includes(moved.groupId), 'a new group is created');
+  assert.equal((await ff.browser.tabGroups.get(moved.groupId)).windowId, 1);
+  assert.ok(root.querySelector(`[data-group-id="${moved.groupId}"] .name-editor`));
+  assert.equal(ff.calls.filter(c => /storage\.sync\.(set|remove)$/.test(c.api)).length, 0);
+  clean(root);
+});
 
 // Without controller board-membership guards, foreign MIME payloads can reach
 // executor reads/mutations, including the Foxy page and another Foxy page.
@@ -104,7 +123,7 @@ for (const [id, label] of [[99, "self"], [55, "other Foxy-page"], [123456, "unkn
     console.debug = (...args) => messages.push(args);
     try {
       for (const selector of ['.rows[data-zone="pinned"]', '.rows[data-zone="tabs"]',
-        '.rows[data-group-id="101"]', '.grid']) {
+        '.rows[data-group-id="101"]', '.kanban']) {
         const target = root.querySelector(selector), dt = new DataTransfer();
         dt.setData(TAB, String(id));
         ff.calls.length = 0;
@@ -200,7 +219,7 @@ async function longRail() {
   for (let i = 0; i < 30; i++) set.tabs.push({ id: 1000 + i, windowId: 1 });
   const result = await draw(set);
   result.renderBoard(result.root, result.board, {}, result.handlers, {
-    device: { cellSize: "S", density: "normal" }, synced: { railCells: 2 },
+    device: { density: "normal" }, synced: { railWidth: 240 },
   });
   await nextFrame(); await nextFrame();
   return result;
@@ -365,560 +384,6 @@ test("tab drops on the clock tile still do nothing", async () => {
 
 // Wrong cell pitch, gap ownership, right-edge clamp or scroll coordinates
 // changes the emitted rectangle; a layout-affecting preview moves real tiles.
-for (const [label, col, row, offset, scrollTop, expected] of [
-  ["empty cell", 11, 0, 20, 0, { x: 10, y: 0, w: 3, h: 4 }],
-  ["gap", 11, 0, 88, 0, { x: 10, y: 0, w: 3, h: 4 }],
-  ["last column", 12, 0, 20, 0, { x: 10, y: 0, w: 3, h: 4 }],
-  ["scrolled cell", 9, 4, 20, 288, { x: 9, y: 4, w: 3, h: 4 }],
-]) {
-  test(`tab over ${label} previews and drops the default clamped group rectangle`, async () => {
-    const { root, calls } = await draw();
-    const grid = root.querySelector(".grid");
-    if (scrollTop) {
-      const spacer = document.createElement("div"); spacer.style.cssText = "height:1136px;pointer-events:none";
-      grid.append(spacer); grid.scrollTop = scrollTop;
-    }
-    const source = tab(root), dataTransfer = start(source);
-    const bounds = grid.getBoundingClientRect(), tile = root.querySelector('.tile[data-kind="clock"]');
-    const before = tile.getBoundingClientRect().toJSON();
-    const coords = { clientX: bounds.left + col * 96 + offset,
-      clientY: bounds.top + row * 96 + offset - grid.scrollTop };
-    try {
-      // Firefox protects payload data during dragover, even for a cell target.
-      const getData = dataTransfer.getData.bind(dataTransfer);
-      dataTransfer.getData = () => { throw new Error("protected payload"); };
-      assert.ok(dispatchDrag("dragover", grid, { dataTransfer, ...coords }).defaultPrevented);
-      dataTransfer.getData = getData;
-      const preview = root.querySelector(".cell-preview"); assert.ok(preview);
-      const r = preview.getBoundingClientRect(), style = getComputedStyle(preview);
-      assert.equal(r.left, bounds.left + expected.x * 96);
-      assert.equal(r.top, bounds.top + expected.y * 96 - grid.scrollTop);
-      assert.equal(r.width, 272); assert.equal(r.height, 368);
-      const [red, green, blue, alpha] = rgba(style.backgroundColor);
-      assert.equal(red, green); assert.equal(green, blue); assert.ok(alpha > 0 && alpha < 255);
-      assert.equal(style.borderRadius, getComputedStyle(tile).borderRadius);
-      assert.equal(style.borderTopWidth, "0px"); assert.equal(style.outlineStyle, "none");
-      assert.equal(style.boxShadow, "none"); assert.equal(style.pointerEvents, "none");
-      assert.deepEqual(tile.getBoundingClientRect().toJSON(), before, "no live push preview for tab drops");
-      dispatchDrag("dragleave", grid, { dataTransfer, relatedTarget: null });
-      assert.equal(root.querySelector(".cell-preview"), null);
-      dispatchDrag("dragover", grid, { dataTransfer, ...coords });
-      dispatchDrag("drop", grid, { dataTransfer, ...coords });
-      assert.deepEqual(calls.tabs, [[15, { zone: "cell", tabId: 15, rect: expected }]]);
-      assert.equal(root.querySelector(".cell-preview"), null);
-      dispatchDrag("dragover", grid, { dataTransfer, ...coords });
-    } finally { dispatchDrag("dragend", source, { dataTransfer }); }
-    clean(root);
-  });
-}
-
-test("a group tile covering cells keeps row insertion, never a cell preview", async () => {
-  const { root, calls } = await draw();
-  const source = tab(root), dataTransfer = start(source), target = root.querySelector('.tile[data-group-id="101"]');
-  try {
-    dispatchDrag("dragover", root.querySelector(".grid"), { dataTransfer, ...point(root.querySelector(".grid"), 0.95, 0.05) });
-    assert.ok(root.querySelector(".cell-preview"));
-    dispatchDrag("dragover", target, { dataTransfer, ...point(target) });
-    assert.equal(root.querySelector(".cell-preview"), null); assert.ok(root.querySelector(".drop-line"));
-    dispatchDrag("drop", target, { dataTransfer, ...point(target) });
-    assert.deepEqual(calls.tabs, [[15, { zone: "group", groupId: 101, slot: 0, tabId: 15 }]]);
-  } finally { dispatchDrag("dragend", source, { dataTransfer }); }
-});
-
-// Falling back to the grid for a tile's trailing gap must not create a group.
-for (const [kind, side, slot] of [["group", "right", 1], ["group", "below", 2], ["pinned", "below", 2]]) {
-  test(`the gap ${side} of a ${kind} tile keeps its row insertion target`, async () => {
-    const { root, calls } = await draw();
-    const tile = root.querySelector(kind === "group" ? '.tile[data-group-id="101"]' : '.tile[data-kind="pinned"]');
-    // Keep the target and its trailing gap in view, clear of the new pin defaults.
-    for (const other of root.querySelectorAll(".tile")) other.style.setProperty("--y", "10");
-    tile.style.setProperty("--x", "0"); tile.style.setProperty("--y", "0");
-    const rows = tile.querySelector(".rows"), bounds = tile.getBoundingClientRect();
-    const coords = side === "right"
-      ? { clientX: bounds.right + 8, clientY: rows.querySelector(".row").getBoundingClientRect().bottom }
-      : { clientX: bounds.left + 20, clientY: bounds.bottom + 8 };
-    const hit = document.elementFromPoint(coords.clientX, coords.clientY);
-    assert.equal(hit, root.querySelector(".grid"), "the pointer hits the gap, not the tile");
-    const source = tab(root), dataTransfer = start(source);
-    try {
-      assert.ok(dispatchDrag("dragover", hit, { dataTransfer, ...coords }).defaultPrevented);
-      assert.equal(dataTransfer.dropEffect, "move");
-      assert.equal(root.querySelector(".cell-preview"), null);
-      assert.ok(rows.querySelector(".drop-line"), "gap feedback belongs to the tile's rows");
-      dispatchDrag("drop", hit, { dataTransfer, ...coords });
-      assert.deepEqual(calls.tabs, [[15, { zone: kind, ...(kind === "group" ? { groupId: 101 } : {}), slot, tabId: 15 }]]);
-    } finally { dispatchDrag("dragend", source, { dataTransfer }); }
-    clean(root);
-  });
-}
-
-test("the gap below the clock rejects tab drops without moving tiles or writing storage", async () => {
-  const reply = { saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote" } };
-  const { root, ff } = await controller(setup(), message => message.type === "foxy:reconcile" ? { ok: true }
-    : message.type === "foxy:saved" ? reply : undefined, dropLayout);
-  const beforeTiles = [...root.querySelectorAll(".tile")].map(tile => [tile.dataset.tileId, rectOf(tile)]);
-  const beforeStorage = await ff.browser.storage.sync.get(null);
-  const clock = root.querySelector('[data-kind="clock"]').getBoundingClientRect();
-  const coords = { clientX: clock.left + 20, clientY: clock.bottom + 8 };
-  const hit = document.elementFromPoint(coords.clientX, coords.clientY);
-  assert.equal(hit, root.querySelector(".grid"));
-  const source = tab(root), dataTransfer = start(source);
-  ff.calls.length = 0;
-  try {
-    const over = dispatchDrag("dragover", hit, { dataTransfer, ...coords });
-    assert.equal(over.defaultPrevented, false);
-    assert.equal(dataTransfer.dropEffect, "none");
-    assert.equal(root.querySelector(".cell-preview, .drop-line, .drop-target"), null);
-    assert.equal(dispatchDrag("drop", hit, { dataTransfer, ...coords }).defaultPrevented, false);
-  } finally { dispatchDrag("dragend", source, { dataTransfer }); }
-  await flush(ff); await flush(ff);
-  assert.deepEqual(ff.calls, [], "a rejected gap drop reaches no API");
-  assert.deepEqual([...root.querySelectorAll(".tile")].map(tile => [tile.dataset.tileId, rectOf(tile)]), beforeTiles);
-  assert.deepEqual(await ff.browser.storage.sync.get(null), beforeStorage);
-});
-
-test("scrolled grid drop lands the group tile in the content cell under the pointer", async () => {
-  const { root, ff } = await controller();
-  const source = tab(root), dataTransfer = start(source), grid = root.querySelector(".grid");
-  grid.style.padding = "8px 12px";
-  const spacer = document.createElement("div"); spacer.style.cssText = "height:1520px;pointer-events:none"; grid.append(spacer);
-  grid.scrollTop = 384;
-  const bounds = grid.getBoundingClientRect();
-  const coords = { clientX: bounds.left + 12 + 9 * 96 + 20,
-    clientY: bounds.top + 8 + 6 * 96 + 20 - grid.scrollTop };
-  try {
-    assert.equal(document.elementFromPoint(coords.clientX, coords.clientY), grid, "pointer is over empty grid content");
-    dispatchDrag("dragover", grid, { dataTransfer, ...coords });
-    dispatchDrag("drop", grid, { dataTransfer, ...coords });
-    dispatchDrag("dragend", source, { dataTransfer });
-    await flush(ff); await flush(ff);
-    const groupId = (await ff.browser.tabs.get(15)).groupId;
-    assert.ok(groupId !== -1);
-    assert.deepEqual(rectOf(root.querySelector(`[data-tile-id="local:${groupId}"]`)), { x: 9, y: 6, w: 3, h: 4 });
-  } finally { dispatchDrag("dragend", source, { dataTransfer }); endName(root); }
-});
-
-const tileEntries = entries => Object.fromEntries(Object.entries(entries).filter(([key]) => !key.startsWith("layout:")));
-const dropLayout = {
-  "tile:13:clock": { x: 0, y: 0, w: 5, h: 2 },
-  "tile:13:pinned": { x: 5, y: 0, w: 3, h: 4 },
-  "tile:13:group:one": { x: 8, y: 0, w: 3, h: 4 },
-  "tile:13:group:two": { x: 0, y: 4, w: 3, h: 4 },
-  "tile:13:group:remote": { x: 3, y: 4, w: 3, h: 4 },
-  "tile:13:group:closed": { x: 4, y: 2, w: 3, h: 4 },
-};
-async function pendingDrop(initial = { saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote" } }) {
-  let reply = initial;
-  const { root, ff, control } = await controller(setup(), message => message.type === "foxy:reconcile" ? { ok: true }
-    : message.type === "foxy:saved" ? reply : undefined, dropLayout);
-  const source = tab(root), dataTransfer = start(source), grid = root.querySelector(".grid"), bounds = grid.getBoundingClientRect();
-  const coords = { clientX: bounds.left + 4 * 96 + 20, clientY: bounds.top + 2 * 96 + 20 };
-  ff.calls.length = 0;
-  dispatchDrag("dragover", grid, { dataTransfer, ...coords });
-  dispatchDrag("drop", grid, { dataTransfer, ...coords });
-  dispatchDrag("dragend", source, { dataTransfer });
-  await flush(ff); await flush(ff);
-  const groupId = (await ff.browser.tabs.get(15)).groupId;
-  return { root, ff, control, groupId, setReply: value => { reply = value; } };
-}
-function rectOf(tile) {
-  return { x: Number(tile.style.getPropertyValue("--x")), y: Number(tile.style.getPropertyValue("--y")),
-    w: Number(tile.style.getPropertyValue("--w")), h: Number(tile.style.getPropertyValue("--h")) };
-}
-function endName(root) {
-  root.querySelector(".name-editor")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-}
-
-test("empty-cell drop shows the unmapped tile at its rect, opens its editor and saves changed tiles only after mapping", async () => {
-  const { root, ff, control, groupId, setReply } = await pendingDrop();
-  try {
-    assert.ok(groupId !== -1, "the tab must join a new group");
-    assert.equal((await ff.browser.tabGroups.get(groupId)).windowId, 1);
-    const tile = root.querySelector(`[data-tile-id="local:${groupId}"]`); assert.ok(tile);
-    assert.deepEqual(rectOf(tile), { x: 4, y: 2, w: 3, h: 4 });
-    assert.ok(tile.querySelector(".name-editor"), "new group opens its name editor");
-    assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set"), [], "unmapped placement is display-only");
-    assert.deepEqual(tileEntries(await ff.browser.storage.sync.get(null)), { ...dropLayout, settings: { railCells: 3 } });
-    setReply({ saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote", [groupId]: "new" } });
-    ff.fire("bookmarks.onCreated", "new", { id: "new", type: "folder" }); await flush(ff);
-    assert.ok(root.querySelector(`[data-tile-id="local:${groupId}"]`), "mapping update is held by the editor");
-    endName(root); await flush(ff); await flush(ff);
-    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
-    const writes = ff.calls.filter(c => c.api === "storage.sync.set");
-    assert.equal(writes.length, 1);
-    assert.deepEqual(tileEntries(writes[0].args[0]), {
-      "tile:13:group:new": { x: 4, y: 2, w: 3, h: 4 },
-      "tile:13:pinned": { x: 5, y: 6, w: 3, h: 4 },
-      "tile:13:group:remote": { x: 3, y: 10, w: 3, h: 4 },
-    });
-    assert.deepEqual(await ff.browser.storage.sync.get(null), { ...dropLayout, settings: { railCells: 3 }, ...writes[0].args[0] });
-    await control.refresh(); await flush(ff); await flush(ff);
-    assert.equal(ff.calls.filter(c => c.api === "storage.sync.set").length, 1, "mapped pending entry is consumed once");
-    assert.deepEqual(ff.errors, []);
-    assert.equal(ff.calls.some(c => c.api === "tabs.remove" || c.args[0]?.type === "blank-and-close"), false);
-  } finally { endName(root); }
-});
-
-// Only the injected new-group delay is held; clock and saved-read timers run normally.
-function groupTimers() {
-  const delay = 123456, timers = new Map();
-  const set = window.setTimeout, clear = window.clearTimeout;
-  window.setTimeout = (callback, ms, ...args) => {
-    const timer = set(callback, ms, ...args);
-    if (ms === delay) timers.set(timer, () => callback(...args));
-    return timer;
-  };
-  window.clearTimeout = timer => { timers.delete(timer); clear(timer); };
-  return { options: { newGroupDelay: delay }, timers,
-    fire() {
-      for (const [timer, callback] of [...timers]) {
-        window.clearTimeout(timer); callback();
-      }
-    },
-    restore() {
-      for (const timer of timers.keys()) clear(timer);
-      window.setTimeout = set; window.clearTimeout = clear;
-    },
-  };
-}
-
-for (const order of ["dropper-first", "dropper-second"]) {
-  test(`two Foxy pages (${order}) keep the dropped group's rectangle without another first-free write`, async () => {
-    const timer = groupTimers();
-    let folders = { 101: "one", 102: "two", 201: "remote" };
-    const ff = createFirefox(setup(), message => message.type === "foxy:reconcile" ? { ok: true }
-      : message.type === "foxy:saved" ? { saved: [], missing: [], folders } : undefined);
-    const { createController } = await import("../../extension/src/main.js");
-    const pages = [];
-    try {
-      await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
-      await ff.browser.storage.sync.set({ ...dropLayout, settings: { railCells: 3 } }); await ff.settle();
-      for (let i = 0; i < 2; i++) {
-        const root = await makeRoot();
-        const control = createController(root, ff.browser, undefined, timer.options);
-        await control.refresh(); await flush(ff); await flush(ff);
-        pages.push({ root, control });
-      }
-      const A = pages[order === "dropper-first" ? 0 : 1], B = pages[order === "dropper-first" ? 1 : 0];
-      await A.control.handlers.onTabDrop(15, { zone: "cell", rect: { x: 4, y: 2, w: 3, h: 4 } });
-      await flush(ff); endName(A.root); await flush(ff); await flush(ff);
-      const groupId = (await ff.browser.tabs.get(15)).groupId;
-      assert.deepEqual(rectOf(B.root.querySelector(`[data-tile-id="local:${groupId}"]`)), { x: 6, y: 4, w: 3, h: 4 });
-      ff.calls.length = 0;
-      folders = { ...folders, [groupId]: "new" };
-      ff.fire("bookmarks.onCreated", "new", { id: "new", type: "folder" });
-      await flush(ff); await flush(ff);
-      assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:13:group:new"], { x: 4, y: 2, w: 3, h: 4 });
-      timer.fire(); await flush(ff); await flush(ff);
-      const writes = ff.calls.filter(c => c.api === "storage.sync.set" && c.args[0]["tile:13:group:new"]);
-      assert.equal(writes.length, 1, "only the dropping page writes the new tile");
-      for (const { root } of pages) {
-        assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
-      }
-      assert.deepEqual(ff.errors, []);
-    } finally {
-      for (const { root } of pages) { endName(root); root.remove(); }
-      timer.restore();
-    }
-  });
-}
-
-async function externalGroup(options) {
-  let folders = { 101: "one", 102: "two", 201: "remote" };
-  const result = await controller(setup(), message => message.type === "foxy:reconcile" ? { ok: true }
-    : message.type === "foxy:saved" ? { saved: [], missing: [], folders } : undefined, dropLayout, options);
-  const { ff } = result;
-  const groupId = await ff.browser.tabs.group({ tabIds: [15], createProperties: { windowId: 1 } });
-  folders = { ...folders, [groupId]: "external" };
-  ff.fire("bookmarks.onCreated", "external", { id: "external", type: "folder" });
-  await flush(ff); await flush(ff);
-  return { ...result, groupId };
-}
-
-test("a post-paint group stays display-only until the delay and key check, then saves its default rectangle once", async () => {
-  const timer = groupTimers(); let root;
-  try {
-    const result = await externalGroup(timer.options); root = result.root;
-    const { ff, control } = result;
-    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:external"]')), { x: 6, y: 4, w: 3, h: 4 });
-    assert.equal((await ff.browser.storage.sync.get(null))["tile:13:group:external"], undefined);
-    assert.equal(timer.timers.size, 1);
-    await control.refresh(); await flush(ff);
-    assert.equal(timer.timers.size, 1, "refresh does not restart the delay");
-    ff.calls.length = 0;
-    timer.fire(); await flush(ff); await flush(ff);
-    assert.ok(ff.calls.some(c => c.api === "storage.sync.get" && c.args[0] === "tile:13:group:external"));
-    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:13:group:external"], { x: 6, y: 4, w: 3, h: 4 });
-    assert.equal(ff.calls.filter(c => c.api === "storage.sync.set" && c.args[0]["tile:13:group:external"]).length, 1);
-    await control.refresh(); await flush(ff);
-    assert.equal(timer.timers.size, 0);
-  } finally { root?.remove(); timer.restore(); }
-});
-
-test("the delayed key check adopts an existing drop rectangle even before storage.onChanged is delivered", async () => {
-  const timer = groupTimers(); let root;
-  try {
-    const result = await externalGroup(timer.options); root = result.root;
-    const { ff } = result;
-    await ff.browser.storage.sync.set({
-      "tile:13:group:external": { x: 4, y: 2, w: 3, h: 4 },
-      "tile:13:pinned": { x: 5, y: 6, w: 3, h: 4 },
-      "tile:13:group:remote": { x: 3, y: 10, w: 3, h: 4 },
-    });
-    // Keep the fake's event queue held until the delayed key read has resolved.
-    ff.calls.length = 0;
-    timer.fire(); await nextFrame(); await nextFrame(); await nextFrame();
-    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:13:group:external"], { x: 4, y: 2, w: 3, h: 4 });
-    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:external"]')), { x: 4, y: 2, w: 3, h: 4 });
-    assert.equal(ff.calls.filter(c => c.api === "storage.sync.set").length, 0);
-    await flush(ff);
-  } finally { root?.remove(); timer.restore(); }
-});
-
-for (const ending of ["group removal", "page unload"]) {
-  test(`a deferred group tile cancels its timer on ${ending}`, async () => {
-    const timer = groupTimers(); let root;
-    try {
-      const result = await externalGroup(timer.options); root = result.root;
-      const { ff } = result;
-      assert.equal(timer.timers.size, 1);
-      ff.calls.length = 0;
-      if (ending === "group removal") { await ff.browser.tabs.remove(15); await flush(ff); }
-      else window.dispatchEvent(new Event("pagehide"));
-      assert.equal(timer.timers.size, 0);
-      timer.fire(); await flush(ff); await flush(ff);
-      assert.equal((await ff.browser.storage.sync.get(null))["tile:13:group:external"], undefined);
-      assert.equal(ff.calls.filter(c => c.api === "storage.sync.set").length, 0);
-    } finally { root?.remove(); timer.restore(); }
-  });
-}
-
-async function twoPendingDrops(layout, rects) {
-  let reply = { saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote" } };
-  const { root, ff, control } = await controller(setup(), message => message.type === "foxy:reconcile" ? { ok: true }
-    : message.type === "foxy:saved" ? reply : undefined, layout);
-  const ids = [];
-  for (const [i, tabId] of [15, 23].entries()) {
-    await control.handlers.onTabDrop(tabId, { zone: "cell", rect: rects[i] });
-    await flush(ff); endName(root); await flush(ff);
-    ids.push((await ff.browser.tabs.get(tabId)).groupId);
-  }
-  return { root, ff, control, ids, map: folders => {
-    reply = { ...reply, folders: { ...reply.folders, ...folders } };
-    ff.fire("bookmarks.onCreated", "new", { id: "new", type: "folder" });
-  } };
-}
-
-test("mapping one pending tile ignores another pending tile's first-free position when saving pushes", async () => {
-  const layout = { ...dropLayout, "tile:13:group:remote": { x: 6, y: 8, w: 3, h: 4 } };
-  const { root, ff, ids, map } = await twoPendingDrops(layout,
-    [{ x: 6, y: 4, w: 3, h: 4 }, { x: 0, y: 14, w: 3, h: 4 }]);
-  try {
-    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:remote"]')), { x: 6, y: 8, w: 3, h: 4 });
-    assert.deepEqual(rectOf(root.querySelector(`[data-tile-id="local:${ids[1]}"]`)), { x: 0, y: 14, w: 3, h: 4 });
-    ff.calls.length = 0;
-    map({ [ids[0]]: "first" }); await flush(ff); await flush(ff);
-    assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set").map(c => tileEntries(c.args[0])),
-      [{ "tile:13:group:first": { x: 6, y: 4, w: 3, h: 4 } }], "only the mapped tile moves, not a real tile below a phantom local tile");
-    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:remote"]')), { x: 6, y: 8, w: 3, h: 4 });
-    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:13:group:remote"], { x: 6, y: 8, w: 3, h: 4 });
-  } finally { endName(root); }
-});
-
-test("pending groups mapped together are saved in drop order rather than tab-strip order", async () => {
-  const { root, ff, control, ids, map } = await twoPendingDrops(dropLayout,
-    [{ x: 4, y: 6, w: 3, h: 4 }, { x: 5, y: 7, w: 3, h: 4 }]);
-  try {
-    await ff.browser.tabGroups.move(ids[1], { index: 1 }); await flush(ff); await control.refresh(); await flush(ff);
-    const groupOrder = [...root.querySelectorAll('.tile[data-kind="group"]')].map(tile => Number(tile.dataset.groupId));
-    assert.ok(groupOrder.indexOf(ids[1]) < groupOrder.indexOf(ids[0]), "tab-strip order is opposite to drop order");
-    ff.calls.length = 0;
-    map({ [ids[0]]: "first", [ids[1]]: "second" }); await flush(ff); await flush(ff);
-    const writes = ff.calls.filter(c => c.api === "storage.sync.set");
-    assert.equal(writes.length, 1);
-    assert.deepEqual(writes[0].args[0]["tile:13:group:first"], { x: 4, y: 11, w: 3, h: 4 });
-    assert.deepEqual(writes[0].args[0]["tile:13:group:second"], { x: 5, y: 7, w: 3, h: 4 });
-    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:first"]')), { x: 4, y: 11, w: 3, h: 4 });
-    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:second"]')), { x: 5, y: 7, w: 3, h: 4 });
-  } finally { endName(root); }
-});
-
-for (const readEnds of ["before", "after"]) {
-  test(`a storage re-read ending ${readEnds} the pending tile write cannot restore the stale layout`, async () => {
-    const { root, ff, groupId, setReply } = await pendingDrop();
-    endName(root); await flush(ff); await flush(ff);
-    const sync = ff.browser.storage.sync, get = sync.get, set = sync.set, send = ff.browser.runtime.sendMessage;
-    let releaseSaved, releaseRead, releaseWrite, savedBegan, readBegan, writeBegan, writeEnded;
-    const savedGate = new Promise(resolve => { releaseSaved = resolve; });
-    const readGate = new Promise(resolve => { releaseRead = resolve; });
-    const writeGate = new Promise(resolve => { releaseWrite = resolve; });
-    const savedStarted = new Promise(resolve => { savedBegan = resolve; });
-    const readStarted = new Promise(resolve => { readBegan = resolve; });
-    const writeStarted = new Promise(resolve => { writeBegan = resolve; });
-    const writeFinished = new Promise(resolve => { writeEnded = resolve; });
-    let reads = 0, writes = 0;
-    ff.browser.runtime.sendMessage = async message => {
-      const reply = await send(message);
-      if (message.type === "foxy:saved") { savedBegan(); await savedGate; }
-      return reply;
-    };
-    sync.get = async keys => {
-      const value = await get(keys);
-      if (keys === null && ++reads === 1) { readBegan(); await readGate; }
-      return value;
-    };
-    sync.set = async entries => {
-      if (entries["tile:13:group:new"] && ++writes === 1) {
-        writeBegan(); await writeGate; await set(entries); writeEnded();
-      } else await set(entries);
-    };
-    try {
-      ff.calls.length = 0;
-      setReply({ saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote", [groupId]: "new" } });
-      ff.fire("bookmarks.onCreated", "new", { id: "new", type: "folder" });
-      await ff.settle(); await nextFrame(); await savedStarted;
-      ff.fire("storage.onChanged", { settings: { newValue: { showDate: false } } }, "sync");
-      await ff.settle(); await nextFrame(); await readStarted;
-      releaseSaved(); await writeStarted;
-      if (readEnds === "before") { releaseRead(); await nextFrame(); }
-      releaseWrite(); await writeFinished;
-      // Do not settle the fake yet: the write's onChanged has not been delivered.
-      // Only the page's write guard can invalidate this stale storage snapshot.
-      releaseRead(); await nextFrame(); await nextFrame(); await nextFrame();
-      assert.deepEqual((await get(null))["tile:13:group:new"], { x: 4, y: 2, w: 3, h: 4 });
-      assert.equal(writes, 1, "the stale read must not write the group again at a first-free spot");
-      assert.ok(reads >= 2, "discard the stale read and re-read storage after the write");
-      assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
-      await flush(ff); await flush(ff);
-      assert.equal(writes, 1);
-      assert.deepEqual(ff.errors, []);
-    } finally {
-      releaseSaved(); releaseRead(); releaseWrite();
-      sync.get = get; sync.set = set; ff.browser.runtime.sendMessage = send; endName(root);
-      await flush(ff);
-    }
-  });
-}
-
-test("a pending tile write queued two microtasks after a layout reply cannot restore a stale rectangle", async () => {
-  const { root, ff, groupId, setReply } = await pendingDrop();
-  endName(root); await flush(ff); await flush(ff);
-  const sync = ff.browser.storage.sync, get = sync.get, set = sync.set, send = ff.browser.runtime.sendMessage;
-  let releaseRead, releaseSaved, releaseWrite, readBegan, savedBegan, writeBegan;
-  const readGate = new Promise(resolve => { releaseRead = resolve; });
-  const savedGate = new Promise(resolve => { releaseSaved = resolve; });
-  const readStarted = new Promise(resolve => { readBegan = resolve; });
-  const savedStarted = new Promise(resolve => { savedBegan = resolve; });
-  const writeGate = new Promise(resolve => { releaseWrite = resolve; });
-  const writeStarted = new Promise(resolve => { writeBegan = resolve; });
-  let reads = 0;
-  sync.get = async keys => {
-    const value = await get(keys);
-    if (keys === null && ++reads === 1) { readBegan(); await readGate; }
-    return value;
-  };
-  ff.browser.runtime.sendMessage = async message => {
-    const reply = await send(message);
-    if (message.type === "foxy:saved") { savedBegan(); await savedGate; }
-    return reply;
-  };
-  sync.set = async entries => {
-    if (entries["tile:13:group:new"]) { writeBegan(); await writeGate; }
-    return set(entries);
-  };
-  try {
-    setReply({ saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote", [groupId]: "new" } });
-    ff.fire("bookmarks.onCreated", "new", { id: "new", type: "folder" });
-    await ff.settle(); await nextFrame(); await savedStarted;
-    ff.fire("storage.onChanged", { settings: { newValue: { showDate: false } } }, "sync");
-    await ff.settle(); await nextFrame(); await readStarted;
-    ff.calls.length = 0;
-    releaseRead();
-    for (let i = 0; i < 2; i++) await null;
-    releaseSaved();
-    await writeStarted; await nextFrame(); await nextFrame();
-    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
-    releaseWrite();
-    for (let i = 0; i < 6; i++) await flush(ff);
-    const writes = ff.calls.filter(c => c.api === "storage.sync.set" && c.args[0]["tile:13:group:new"]);
-    assert.deepEqual((await get(null))["tile:13:group:new"], { x: 4, y: 2, w: 3, h: 4 });
-    assert.equal(writes.length, 1, "a chain queued during the await must finish before checking the write counter");
-    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
-    assert.deepEqual(ff.errors, []);
-  } finally {
-    releaseRead(); releaseSaved(); releaseWrite(); sync.get = get; sync.set = set; ff.browser.runtime.sendMessage = send;
-    endName(root); await flush(ff);
-  }
-});
-
-test("a fast folder mapping during the final tab read preserves the pending drop rectangle", async () => {
-  let folders = { 101: "one", 102: "two", 201: "remote" };
-  const { root, ff, control } = await controller(setup(), message => message.type === "foxy:reconcile" ? { ok: true }
-    : message.type === "foxy:saved" ? { saved: [], missing: [], folders } : undefined, dropLayout);
-  const query = ff.browser.tabs.query;
-  let release, began;
-  const gate = new Promise(resolve => { release = resolve; });
-  const started = new Promise(resolve => { began = resolve; });
-  ff.browser.tabs.query = async (...args) => { const tabs = await query(...args); began(); await gate; return tabs; };
-  folders = { ...folders, 202: "fast" };
-  const dropping = control.handlers.onTabDrop(15, { zone: "cell", rect: { x: 4, y: 2, w: 3, h: 4 } });
-  try {
-    await started; await flush(ff);
-    assert.equal(root.querySelector('[data-tile-id="group:fast"]'), null, "post-drop snapshot has not returned yet");
-    release(); ff.browser.tabs.query = query; await dropping; await flush(ff); await flush(ff);
-    assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:fast"]')), { x: 4, y: 2, w: 3, h: 4 });
-    assert.ok(root.querySelector('[data-tile-id="group:fast"] .name-editor'));
-    assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:13:group:fast"], { x: 4, y: 2, w: 3, h: 4 });
-  } finally { release(); ff.browser.tabs.query = query; await dropping; endName(root); }
-});
-
-for (const [label, invalid] of [
-  ["missing map", { saved: [], missing: [] }],
-  ["array map", { saved: [], missing: [], folders: [] }],
-  ["null map", { saved: [], missing: [], folders: null }],
-  ["invalid folder value", { saved: [], missing: [], folders: { 101: 17 } }],
-  ["failed reply", { ok: false, saved: [], missing: [], folders: {} }],
-]) {
-  test(`pending tile and other new tiles wait for valid saved folders after ${label}`, async () => {
-    const warnings = [], warn = console.warn; console.warn = (...args) => warnings.push(args);
-    let root;
-    try {
-      const dropped = await pendingDrop(invalid); root = dropped.root;
-      const { ff, groupId, setReply } = dropped;
-      assert.ok(groupId !== -1);
-      assert.deepEqual(rectOf(root.querySelector(`[data-tile-id="local:${groupId}"]`)), { x: 4, y: 2, w: 3, h: 4 });
-      setReply({ ...invalid, folders: { [groupId]: "new" } });
-      // For failures, keep the explicit failure marker. For malformed maps,
-      // preserve the malformed map while introducing a truthy group mapping.
-      if (label === "array map") { const folders = []; folders[groupId] = "new"; setReply({ ...invalid, folders }); }
-      else if (label === "invalid folder value") setReply({ ...invalid, folders: { 101: 17, [groupId]: "new" } });
-      else if (label !== "failed reply") setReply(invalid);
-      endName(root); ff.fire("bookmarks.onChanged", "new", { title: "Pending" });
-      await flush(ff); await flush(ff);
-      assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set"), [], "no writes before a valid folders reply");
-      setReply({ saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote", [groupId]: "new" } });
-      ff.fire("bookmarks.onChanged", "new", { title: "Mapped" }); await flush(ff); await flush(ff);
-      assert.deepEqual((await ff.browser.storage.sync.get(null))["tile:13:group:new"], { x: 4, y: 2, w: 3, h: 4 });
-      assert.deepEqual(rectOf(root.querySelector('[data-tile-id="group:new"]')), { x: 4, y: 2, w: 3, h: 4 });
-      assert.deepEqual(ff.errors, []);
-    } finally { endName(root ?? document.createElement("div")); console.warn = warn; }
-  });
-}
-
-test("a pending group's removal drops its rectangle without saving a later stale mapping", async () => {
-  const { root, ff, control, groupId, setReply } = await pendingDrop();
-  try {
-    assert.ok(groupId !== -1);
-    await ff.browser.tabs.remove(15); await flush(ff); await flush(ff);
-    assert.equal(root.querySelector(`[data-tile-id="local:${groupId}"]`), null);
-    assert.equal(root.querySelector(".name-editor"), null);
-    setReply({ saved: [], missing: [], folders: { 101: "one", 102: "two", 201: "remote", [groupId]: "gone" } });
-    ff.fire("bookmarks.onChanged", "gone", { title: "Late" }); await flush(ff); await control.refresh(); await flush(ff);
-    assert.equal((await ff.browser.storage.sync.get(null))["tile:13:group:gone"], undefined);
-    assert.deepEqual(ff.calls.filter(c => c.api === "storage.sync.set"), []);
-  } finally { endName(root); }
-});
-
 test("unknown drag types and malformed IDs cannot trigger a move", async () => {
   const { root, calls } = await draw();
   const target = root.querySelector('.rows[data-zone="tabs"]'), dt = new DataTransfer();
@@ -1103,101 +568,6 @@ test("fix r1: legacy dnd controller helper reads without background warnings", a
   finally { console.warn = warn; }
 });
 
-test("a failed key check for a post-paint group retries on a later render instead of never saving", async () => {
-  const timer = groupTimers(); let root;
-  const warn = console.warn; console.warn = () => {};
-  try {
-    const result = await externalGroup(timer.options); root = result.root;
-    const { ff, control } = result;
-    const get = ff.browser.storage.sync.get;
-    let failNext = true;
-    ff.browser.storage.sync.get = async key => {
-      if (failNext && key === "tile:13:group:external") { failNext = false; throw new Error("transient"); }
-      return get(key);
-    };
-    timer.fire(); await flush(ff); await flush(ff);
-    assert.equal((await get(null))["tile:13:group:external"], undefined);
-    await control.refresh(); await flush(ff);
-    assert.equal(timer.timers.size, 1, "a later render schedules the check again");
-    timer.fire(); await flush(ff); await flush(ff);
-    assert.deepEqual((await get(null))["tile:13:group:external"], { x: 6, y: 4, w: 3, h: 4 });
-  } finally { console.warn = warn; if (root) { endName(root); root.remove(); } timer.restore(); }
-});
-
-// Using the stretched cell for defaults loses a row except at the exact Custom 144 pitch.
-for (const [width, pitch] of [[1000, 1016 / 6], [1366, 1382 / 8], [1584, 160], [1600, 161.6]]) {
-  test(`Custom 144 tab drop at ${width}px previews and saves the setting's 2 by 3 default`, async () => {
-    let reply = { folders: {}, saved: [], missing: [] };
-    const set = { windows: [{ id: 1, focused: true }], selfTabId: 99, groups: [],
-      tabs: [{ id: 15, windowId: 1 }, { id: 99, windowId: 1 }] };
-    const { root, ff, control } = await controller(set, message => message.type === "foxy:reconcile"
-      ? { ok: true } : message.type === "foxy:saved" ? reply : undefined,
-      { settings: { showClock: false, showPinned: false, showSaved: false } });
-    root.style.width = `${width}px`;
-    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 144 } });
-    await control.refresh(); await flush(ff); await flush(ff);
-    const grid = root.querySelector(".grid"), bounds = grid.getBoundingClientRect();
-    const coords = { clientX: bounds.left + 1.2 * pitch, clientY: bounds.top + 1.2 * pitch };
-    const source = tab(root), dataTransfer = start(source);
-    try {
-      const hit = document.elementFromPoint(coords.clientX, coords.clientY);
-      assert.equal(hit, grid, "pointer hits an empty cell");
-      assert.ok(dispatchDrag("dragover", hit, { dataTransfer, ...coords }).defaultPrevented);
-      const preview = grid.querySelector(".cell-preview").getBoundingClientRect();
-      for (const [actual, expected] of [[preview.left - bounds.left, pitch], [preview.top - bounds.top, pitch],
-        [preview.width, 2 * pitch - 16], [preview.height, 3 * pitch - 16]]) {
-        assert.ok(Math.abs(actual - expected) < 0.5, `stretched preview geometry: expected ${expected}, got ${actual}`);
-      }
-      dispatchDrag("drop", hit, { dataTransfer, ...coords });
-      dispatchDrag("dragend", source, { dataTransfer });
-      await flush(ff); await flush(ff);
-      const groupId = (await ff.browser.tabs.get(15)).groupId;
-      assert.deepEqual(rectOf(root.querySelector(`[data-tile-id="local:${groupId}"]`)), { x: 1, y: 1, w: 2, h: 3 });
-      reply = { ...reply, folders: { [groupId]: "new" } };
-      endName(root); await control.refresh(); await flush(ff); await flush(ff);
-      assert.deepEqual((await ff.browser.storage.sync.get(`tile:${control.view.k}:group:new`))[`tile:${control.view.k}:group:new`],
-        { x: 1, y: 1, w: 2, h: 3 });
-    } finally { dispatchDrag("dragend", source, { dataTransfer }); endName(root); }
-  });
-}
-
-for (const [label, x, y, expected] of [
-  ["empty cell", 5.2, 0.2, { zone: "cell", tabId: 15, rect: { x: 5, y: 0, w: 3, h: 4 } }],
-  ["empty trailing gap", 5.95, 0.2, { zone: "cell", tabId: 15, rect: { x: 5, y: 0, w: 3, h: 4 } }],
-  ["right tile gap", 2.95, 0.2, { zone: "group", groupId: 101, slot: 0, tabId: 15 }],
-  ["next column", 3.01, 0.2, { zone: "cell", tabId: 15, rect: { x: 3, y: 0, w: 3, h: 4 } }],
-  ["bottom tile gap", 0.2, 1.95, { zone: "group", groupId: 101, slot: 2, tabId: 15 }],
-  ["next row", 0.2, 2.01, { zone: "cell", tabId: 15, rect: { x: 0, y: 2, w: 3, h: 4 } }],
-]) {
-  test(`fractional pitch: ${label} selects the cell or covered tile under the pointer`, async () => {
-    const { root, board, calls, handlers, renderBoard } = await draw(setup(), 1237.5);
-    renderBoard(root, { ...board, columns: board.columns.filter(g => g.id === 101) }, {}, handlers, {
-      synced: { showClock: false, showPinned: false, showSaved: false, railCells: 3, otherWindows: true },
-      folders: { 101: "one" }, layout: [{ id: "group:one", x: 0, y: 0, w: 3, h: 2 }],
-    });
-    const grid = root.querySelector(".grid"), bounds = grid.getBoundingClientRect(), pitch = 1253.5 / 13;
-    const coords = { clientX: bounds.left + x * pitch, clientY: bounds.top + y * pitch };
-    const hit = document.elementFromPoint(coords.clientX, coords.clientY);
-    assert.ok(hit && root.contains(hit));
-    const source = tab(root), dataTransfer = start(source);
-    try {
-      assert.ok(dispatchDrag("dragover", hit, { dataTransfer, ...coords }).defaultPrevented);
-      if (expected.zone === "cell") {
-        const box = root.querySelector(".cell-preview").getBoundingClientRect();
-        assert.ok(Math.abs(box.left - (bounds.left + expected.rect.x * pitch)) < 0.5);
-        assert.ok(Math.abs(box.top - (bounds.top + expected.rect.y * pitch)) < 0.5);
-        assert.ok(Math.abs(box.width - (3 * pitch - 16)) < 0.5);
-      } else {
-        assert.equal(root.querySelector(".cell-preview"), null);
-        assert.ok(root.querySelector('.rows[data-group-id="101"] .drop-line'));
-      }
-      dispatchDrag("drop", hit, { dataTransfer, ...coords });
-      assert.deepEqual(calls.tabs, [[15, expected]]);
-    } finally { dispatchDrag("dragend", source, { dataTransfer }); }
-  });
-}
-
-
 for (const [targetSelector, drop] of [
   ['.rows[data-group-id="101"]', {zone:'group', groupId:101, slot:0, tabId:21}],
   ['.rows[data-group-id="201"]', {zone:'group', groupId:201, slot:0, tabId:21}],
@@ -1218,18 +588,3 @@ for (const [targetSelector, drop] of [
   });
 }
 
-test('remote pin icon drags to an empty cell to create a group', async () => {
-  const { root, calls } = await draw();
-  const source = root.querySelector('[data-tab-id="21"] .row-open'), dataTransfer = start(source);
-  const grid = root.querySelector('.grid'), bounds = grid.getBoundingClientRect();
-  const pitch = parseFloat(grid.style.getPropertyValue('--pitch'));
-  const point = {clientX:bounds.left + 12 * pitch + 20, clientY:bounds.top + 20};
-  try {
-    assert.equal(document.elementFromPoint(point.clientX, point.clientY), grid);
-    assert.ok(dispatchDrag('dragover', grid, {dataTransfer, ...point}).defaultPrevented);
-    dispatchDrag('drop', grid, {dataTransfer, ...point});
-    assert.deepEqual(calls.tabs, [[21, {zone:'cell', tabId:21, rect:{x:10,y:0,w:3,h:4}}]]);
-    assert.deepEqual(calls.opened, []);
-  } finally { dispatchDrag('dragend', source, {dataTransfer}); }
-  clean(root);
-});

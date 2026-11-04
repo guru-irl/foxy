@@ -219,12 +219,12 @@ def poll(label, read, ready, timeout=WAIT_SECONDS, minimum=0):
 
 
 BOARD_SCRIPT = """
-    const tiles = [...document.querySelectorAll('#board .grid .tile')].map(tile =>
+    const tiles = [...document.querySelectorAll('#board .tile')].map(tile =>
         tile.dataset.kind === 'pinned' && tile.querySelector('.pinned-grid') ? 'PINNED' :
         (tile.querySelector('.column-title, .group-name')?.textContent || '').trim());
-    return {board: !!document.querySelector('#board .grid'), tiles,
+    return {board: !!document.querySelector('#board .kanban') && !!document.querySelector('#board .widgets'), tiles,
             rail: document.querySelector('#board .rail .column-title')?.textContent.trim() === 'UNGROUPED TABS',
-            clock: !!document.querySelector('#board .grid .tile .clock-time')?.textContent.trim(),
+            clock: !!document.querySelector('#board .widgets .clock-time')?.textContent.trim(),
             fontsReady: document.fonts.status === 'loaded', url: location.href};
 """
 
@@ -551,7 +551,7 @@ def run_checks(client, root, scratch, results, base):
                      lambda s: s["board"] and s["fontsReady"] and s["clock"] and s["rail"] and
                      "PINNED" in {title.upper() for title in s["tiles"]}, minimum=3)
         return ", ".join(filter(None, state["tiles"])) + "; UNGROUPED TABS rail; clock tile; fonts ready"
-    results.check("grid: tiles and rail rendered", board)
+    results.check("board: widgets, kanban and rail rendered", board)
     results.check("settings: pane opens", lambda: check_settings(client))
 
     def fonts():
@@ -612,7 +612,7 @@ def run_checks(client, root, scratch, results, base):
     results.check("sync round-trip", round_trip)
 
     def smoke_tile():
-        state = poll("SMOKE grid tile", lambda: client.script(BOARD_SCRIPT),
+        state = poll("SMOKE kanban tile", lambda: client.script(BOARD_SCRIPT),
                      lambda s: any(title.upper() == "SMOKE" for title in s["tiles"]))
         return ", ".join(filter(None, state["tiles"]))
     results.check("SMOKE tile", smoke_tile)

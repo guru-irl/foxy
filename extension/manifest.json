@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Foxy",
-  "version": "3.4.0",
+  "version": "4.0.0",
   "description": "A grid board of your tabs and tab groups, shared across devices through bookmarks.",
   "permissions": ["tabs", "tabGroups", "bookmarks", "storage", "scripting", "nativeMessaging"],
   "optional_permissions": ["geolocation"],

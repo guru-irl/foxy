@@ -1,3 +1,4 @@
+import { resetBoard } from '../kanban/store.js';
 import { saveSetting, cardAlpha } from "./store.js";
 import { searchPlaces } from "../weather/location.js";
 import { hasConsent, requestConsent, watchConsent } from "../weather/consent.js";
@@ -31,8 +32,7 @@ export function settingActions(api, onReset, fetch) {
 }
 
 export async function resetLayout(api) {
-  const stored = await api.storage.sync.get(null);
-  await api.storage.sync.remove(Object.keys(stored).filter(key => key.startsWith("tile:") || key.startsWith("layout:") || key === "layouts"));
+  await resetBoard(api);
 }
 
 /** Shared pane. Repeated calls update values without replacing focused nodes. */
@@ -57,7 +57,6 @@ export function renderSettings(container, state, handlers) {
         if (pane.saving.get(id) === 1) update();
       } finally {
         pane.saving.set(id, pane.saving.get(id) - 1);
-        if (key === "railCells" && !pane.saving.get(id)) update();
       }
     };
     function section(title) {
@@ -101,45 +100,11 @@ export function renderSettings(container, state, handlers) {
       }); row.append(node);
       pane.controls.push(() => node.setAttribute("aria-checked", String(pane.state.synced[key])));
     }
-    const grid = section("Grid");
-    segmented(grid, "Cell size", "device", "cellSize", [["S", "S"], ["custom", "Custom"]], true);
-    const custom = el("div", "setting setting-custom"), customLabel = el("label", "setting-label", "Cell size in px");
-    const field = el("input", "settings-number"); field.type = "number"; field.min = "40"; field.max = "240"; field.step = "1";
-    field.id = `setting-${++sequence}`; field.dataset.key = "customCell"; customLabel.htmlFor = field.id;
-    custom.append(customLabel, field); grid.append(custom);
-    field.addEventListener("change", () => {
-      const value = field.valueAsNumber;
-      if (!Number.isInteger(value) || value < 40 || value > 240) { field.value = pane.state.device.customCell; return; }
-      if (value !== pane.state.device.customCell) change("device", "customCell", value);
-    });
-    pane.controls.push(() => {
-      custom.hidden = field.hidden = pane.state.device.cellSize !== "custom";
-      field.value = pane.state.device.customCell;
-    });
-    const { row: rail, title: railLabel } = label(grid, "Ungrouped tabs rail width"), stepper = el("div", "settings-stepper");
-    stepper.setAttribute("role", "group"); stepper.setAttribute("aria-labelledby", railLabel.id);
-    const minus = button("−"), plus = button("+"), count = el("output", "", "");
-    minus.dataset.rail = "minus"; plus.dataset.rail = "plus"; count.dataset.rail = "value";
-    minus.setAttribute("aria-label", "Decrease ungrouped tabs rail width"); plus.setAttribute("aria-label", "Increase ungrouped tabs rail width");
-    const railCells = () => Math.max(2, Math.min(pane.state.railMax, pane.state.synced.railCells));
-    function showRail(value) {
-      const cells = Math.max(2, Math.min(pane.state.railMax, value));
-      count.textContent = cells; minus.disabled = cells <= 2; plus.disabled = cells >= pane.state.railMax;
-    }
-    function stepRail(delta) {
-      showRail(Number(count.textContent) + delta);
-      change("synced", "railCells", Number(count.textContent));
-    }
-    minus.addEventListener("click", () => stepRail(-1));
-    plus.addEventListener("click", () => stepRail(1));
-    stepper.append(minus, count, plus); rail.append(stepper);
-    pane.controls.push(() => {
-      showRail(pane.saving.get("synced:railCells") ? Number(count.textContent) : railCells());
-    });
-    const tiles = section("Tiles");
+    const tiles = section("Widgets");
     toggle(tiles, "Show clock", "showClock"); toggle(tiles, "Show pinned", "showPinned"); toggle(tiles, "Show saved", "showSaved");
     toggle(tiles, "Show memory", "showMemory");
     toggle(tiles, "Show weather", "showWeather");
+    tiles.append(el("p", "settings-help", "Reset restores widget and group order, heights and both bar widths."));
     const reset = button("Reset layout"); reset.className = "settings-reset settings-pill"; tiles.append(reset);
     const clearConfirm = () => { clearTimeout(pane.timer); pane.confirmed = false; reset.textContent = "Reset layout"; };
     reset.addEventListener("keydown", event => {

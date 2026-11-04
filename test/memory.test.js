@@ -1,8 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadLayouts, saveTiles } from '../extension/src/grid/store.js';
-import { kindOf, defaultSize, clampRect } from '../extension/src/grid/layout.js';
-import { buildView } from '../extension/src/grid/view.js';
 import { loadSettings, saveSetting, DEFAULT_SETTINGS, DEFAULT_DEVICE } from '../extension/src/settings/store.js';
 import { createFirefox } from './fakes/firefox.js';
 const memory = await import('../extension/src/tiles/memory.js').catch(() => ({}));
@@ -66,35 +63,6 @@ test('sparkline centres small drift within a minimum 256 MB vertical span', () =
   const points = memory.sparklinePoints([{time:0,bytes:734003200},{time:5000,bytes:796917760}])
     .split(' ').map(p=>p.split(',').map(Number));
   assert.deepEqual(points.map(p=>p[1]), [19.28,12.72]);
-});
-
-test('memory placements reload and a hidden tile retains its saved rectangle without new writes', async () => {
-  const ff = createFirefox();
-  await saveTiles(ff.browser, 13, [{id:'memory',x:2,y:1,w:5,h:6}], {now:10});
-  const {layouts} = await loadLayouts(ff.browser);
-  assert.deepEqual(layouts[13].tiles, [{id:'memory',x:2,y:1,w:5,h:6}]);
-  const options = {layouts,synced:{...DEFAULT_SETTINGS,showClock:false,showPinned:false,showWeather:false},device:DEFAULT_DEVICE,contentWidth:1600};
-  const board = {columns:[],saved:[],tabs:[],pinned:[]};
-  assert.deepEqual(buildView(board,options).newTiles, []);
-  const hidden = buildView(board,{...options,synced:{...options.synced,showMemory:false}});
-  assert.deepEqual(hidden.tiles, []);
-  assert.deepEqual(hidden.saved, [{id:'memory',x:2,y:1,w:5,h:6}]);
-});
-
-test('memory is visible by default with a 5 x 6 rectangle and its own minimum', async () => {
-  const ff = createFirefox(); const settings = await loadSettings(ff.browser);
-  assert.equal(settings.synced.showMemory, true);
-  assert.equal(kindOf('memory'), 'memory');
-  assert.deepEqual(defaultSize('memory', 48, 20), {w:5,h:6});
-  assert.deepEqual(defaultSize('memory', 80, 20), {w:5,h:6});
-  assert.deepEqual(clampRect('memory', {x:0,y:0,w:1,h:1}, 20), {id:'memory',x:0,y:0,w:4,h:5});
-  const options = {layouts:{},synced:{...DEFAULT_SETTINGS,showClock:false,showPinned:false,showWeather:false},device:DEFAULT_DEVICE,contentWidth:1600};
-  const board = {columns:[],saved:[],tabs:[],pinned:[]};
-  assert.deepEqual(buildView(board,options).tiles.map(t=>t.kind), ['memory']);
-  await saveSetting(ff.browser,'synced','showMemory',false);
-  assert.equal((await loadSettings(ff.browser)).synced.showMemory,false);
-  assert.deepEqual(buildView(board,{...options,synced:{...options.synced,showMemory:false}}).tiles,[]);
-  await assert.rejects(()=>saveSetting(ff.browser,'synced','showMemory','yes'), /Invalid/);
 });
 
 test('UNLOAD skips currently audible tabs even when they started playing after the query', async () => {

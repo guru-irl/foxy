@@ -7,7 +7,6 @@ import { createController } from "../../extension/src/main.js";
 import { forecastJson, fakeFetch, fakeGeolocation, GEOCODING } from "../fakes/weather.js";
 import { parseForecast, REFRESH_MS } from "../../extension/src/weather/data.js";
 import { showWeatherState, startWeather } from "../../extension/src/tiles/weather.js";
-import { attachGridDrag } from "../../extension/src/grid/drag.js";
 
 const NOW = (1790985600 - 3600 + 13 * 3600 + 1200) * 1000;
 const SYNCED = { ...DEFAULT_SETTINGS, showWeather: true, showClock: false, showPinned: false, showSaved: false };
@@ -29,7 +28,7 @@ async function tile(w, h, state = okState(), { scheme = "dark", synced = SYNCED,
   node.style.cssText = `width:1600px;height:900px;color-scheme:${scheme}`;
   fixture().append(node);
   renderBoard(node, { columns: [], pinned: [], tabs: [], saved: [] }, {}, {}, {
-    layout: [{ id: "weather", x: 0, y: 0, w, h }], synced, device: { ...DEFAULT_DEVICE, cellSize: "S" },
+    boxes: [{ id: "weather", width: w * 64 - 16, height: h * 64 - 16 }], synced, device: { ...DEFAULT_DEVICE, cellSize: "S" },
   });
   showWeatherState(node, state, synced, now);
   await nextFrame();
@@ -403,7 +402,7 @@ async function withTile(deps) {
   const node = document.createElement("div"); node.className = "board"; node.style.cssText = "width:1600px;height:900px";
   fixture().append(node);
   renderBoard(node, { columns: [], pinned: [], tabs: [], saved: [] }, {}, {}, {
-    layout: [{ id: "weather", x: 0, y: 0, w: 5, h: 5 }], synced: deps.current.synced, device: { ...DEFAULT_DEVICE, cellSize: "S" } });
+    boxes: [{ id: "weather", width: 304, height: 304 }], synced: deps.current.synced, device: { ...DEFAULT_DEVICE, cellSize: "S" } });
   return node;
 }
 const settle = async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
@@ -618,6 +617,40 @@ test("board without locationInfo shows the Allow weather pill and never geolocat
   assert.equal(geolocation.calls, 0);
 });
 
+test("weather reorders by its body, but the retry button does not start a widget move", async () => {
+  await styles();
+  const ff = createBoardFirefox({windows: [{id: 1}], tabs: [{id: 99, windowId: 1}], selfTabId: 99});
+  await ff.browser.storage.sync.set({board: {order: [], heights: {}, widgets: [], t: 1},
+    settings: {showClock: true, showPinned: false, showSaved: false, showMemory: false, showWeather: true}});
+  const node = document.createElement('div'); node.className = 'board'; node.style.cssText = 'width:1600px;height:900px';
+  fixture().append(node);
+  const control = createController(node, ff.browser, undefined, {weather: {fetch: fakeFetch(), geolocation: fakeGeolocation()}});
+  const flush = async () => { for (let i = 0; i < 5; i++) { await ff.settle(); await nextFrame(); } };
+  await control.refresh(); await flush(); ff.calls.length = 0;
+  const pointer = (target, type, x, y) => target.dispatchEvent(new PointerEvent(type, {bubbles: true, cancelable: true,
+    pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y}));
+  const press = target => {
+    const r = target.getBoundingClientRect(), x = r.left + 2, y = r.top + 2;
+    pointer(target, 'pointerdown', x, y); return [x, y];
+  };
+  showWeatherState(node, {status: 'error', want: 'auto'}, SYNCED, NOW);
+  const [rx, ry] = press(node.querySelector('.weather-retry'));
+  pointer(document, 'pointermove', rx, ry - 180); pointer(document, 'pointerup', rx, ry - 180); await flush();
+  assert.equal(control.ui.layoutDragging, false);
+  assert.equal(node.querySelector('.layout-insertion'), null);
+  assert.equal(ff.calls.filter(c => c.api === 'storage.sync.set').length, 0);
+  showWeatherState(node, okState(), SYNCED, NOW);
+  press(node.querySelector('.weather-condition'));
+  const r = node.querySelector('.clock').getBoundingClientRect(), x = r.left + 20, y = r.top + 20;
+  pointer(document, 'pointermove', x, y); await nextFrame();
+  assert.ok(node.querySelector('.layout-insertion'));
+  assert.equal(getComputedStyle(node.querySelector('.weather-body')).cursor, 'grab');
+  pointer(document, 'pointerup', x, y); await flush();
+  assert.deepEqual([...node.querySelectorAll('.widget')].map(w => w.dataset.kind), ['weather', 'clock']);
+  assert.deepEqual((await ff.browser.storage.sync.get('board')).board.widgets.map(w => w.kind), ['weather', 'clock', 'pinned', 'memory', 'saved']);
+  assert.equal(ff.calls.filter(c => c.api === 'storage.sync.set').length, 1);
+});
+
 test("board without weather access shows no weather tile", async () => {
   await styles();
   const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], tabs: [{ id: 99, windowId: 1 }], selfTabId: 99 });
@@ -629,29 +662,3 @@ test("board without weather access shows no weather tile", async () => {
   assert.equal(node.querySelector(".tile.weather"), null);
 });
 
-test("the tile moves by its empty space; the retry button does not start a move", async () => {
-  await styles();
-  const node = document.createElement("div"); node.className = "board"; node.style.cssText = "width:1600px;height:900px";
-  fixture().append(node);
-  const view = renderBoard(node, { columns: [], pinned: [], tabs: [], saved: [] }, {}, {}, {
-    layout: [{ id: "weather", x: 0, y: 0, w: 5, h: 5 }], synced: SYNCED, device: { ...DEFAULT_DEVICE, cellSize: "S" } });
-  const states = [];
-  const detach = attachGridDrag(node, { view: () => view, onState: (active, id) => states.push([active, id]),
-    onPreview() {}, onCommit() {}, onCancel() {}, onRail() {}, canCommit: async () => true });
-  try {
-    const press = target => {
-      const box = target.getBoundingClientRect();
-      for (const type of ["pointerdown", "pointerup"]) {
-        target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse",
-          isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1, clientX: box.left + 2, clientY: box.top + 2 }));
-      }
-    };
-    showWeatherState(node, { status: "error", want: "auto" }, SYNCED, NOW);
-    press(node.querySelector(".weather-retry")); await settle();
-    assert.deepEqual(states, []);
-    showWeatherState(node, okState(), SYNCED, NOW);
-    press(node.querySelector(".weather-condition")); await settle();
-    assert.deepEqual(states[0], [true, "weather"]);
-    assert.equal(getComputedStyle(node.querySelector(".weather-body")).cursor, "grab");
-  } finally { detach(); }
-});

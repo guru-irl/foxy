@@ -9,16 +9,16 @@ import preview
 
 
 class ScenarioTests(unittest.TestCase):
-    def test_selects_grid_sizes_narrow_fit_and_both_settings_schemes(self):
+    def test_selects_v40_viewports_and_both_schemes(self):
+        names = ["v40-2560-dark", "v40-mac-light", "v40-1024-dark", "v40-narrow-light"]
         with patch.object(preview, "build_page"), patch.object(preview, "ensure_profile"), \
                 patch.object(preview, "shoot") as shoot:
-            preview.main(["grid-custom-80", "grid-custom-144", "grid-narrow", "settings-open", "settings-open-light"])
+            preview.main(names)
         self.assertEqual(shoot.call_args_list, [
-            unittest.mock.call("grid-custom-80", "scenario=grid-custom-80", 1600, 1000),
-            unittest.mock.call("grid-custom-144", "scenario=grid-custom-144", 1600, 1000),
-            unittest.mock.call("grid-narrow", "scenario=grid-narrow", 700, 1000),
-            unittest.mock.call("settings-open", "scenario=settings-open&settings=open", 1600, 1000),
-            unittest.mock.call("settings-open-light", "scenario=settings-open&settings=open&scheme=light", 1600, 1000),
+            unittest.mock.call("v40-2560-dark", "scenario=v40&scheme=dark", 2560, 1440),
+            unittest.mock.call("v40-mac-light", "scenario=v40&scheme=light", 1440, 945),
+            unittest.mock.call("v40-1024-dark", "scenario=v40&scheme=dark", 1024, 768),
+            unittest.mock.call("v40-narrow-light", "scenario=v40-narrow&scheme=light", 640, 1100),
         ])
 
     def test_selects_saved_and_banner_at_1600_by_1000(self):

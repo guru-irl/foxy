@@ -7,13 +7,11 @@ import { resolveTabTarget } from "./board/targets.js";
 import { openTab, closeTabs, closeGroup, bringGroupHere, renameGroup, recolorGroup,
   dropTab } from "./board/moves.js";
 
-import { PendingLayoutWrites, pendingPlacement, buildPendingView, showPending } from "./grid/pending.js";
-import { attachGridDrag } from "./grid/drag.js";
-import { place, railLimits } from "./grid/layout.js";
-import { renderSettings, settingActions, resetLayout } from "./settings/pane.js";
-import { targetLayout, mergeTiles, withWrites } from "./grid/layouts.js";
-import { tileKey, parseTileKey, loadLayouts, saveTiles, removeGroupTiles, watchStorage, persistLayouts } from "./grid/store.js";
-import { loadSettings, saveSetting, cardAlpha } from "./settings/store.js";
+import { buildView } from './kanban/view.js';
+import { attachGestures } from './kanban/gestures.js';
+import { createBoardStore, validBoard } from './kanban/store.js';
+import { renderSettings, settingActions, resetLayout } from './settings/pane.js';
+import { loadSettings, saveSetting, cardAlpha, DEFAULT_SETTINGS, DEFAULT_DEVICE } from "./settings/store.js";
 import { startWeather } from "./tiles/weather.js";
 export { renderTime, updateClock } from "./board/render.js";
 
@@ -47,49 +45,37 @@ function startClock(root, settings) {
 
 /** All board interactions share this state; DnD and editors set it via handlers. */
 export function createController(root, api, ui = { editGroupId: null, dragging: false, editing: false },
-  { maxWait = 30000, newGroupDelay = 1000, weather = null } = {}) {
+  { maxWait = 30000, weather = null } = {}) {
   const memory = createMemoryController(root, api);
   ui.confirmFolderId ??= null;
-  ui.gridDragging ??= false;
+  ui.layoutDragging ??= false;
   ui.busy ??= new Set();
   let board;
   let view;
-  let gridState;
-  let gridRead;
+  let layoutState;
+  let layoutRead;
+  let layoutRetryTimer = 0;
+  let layoutRetried = false;
   let storageVersion = 0;
-  let tileWriteVersion = 0;
   let loadedVersion = -1;
-  let pendingGrid = false;
+  let pendingLayout = false;
   let pendingView = false;
   let hasSavedReply = false;
   let hasValidSavedReply = false;
   let firstPaintReady = false;
   let firstPaintTimer = 0;
-  let pruned = false;
   let persistence = Promise.resolve();
-  const pendingTiles = new Map();
-  const pendingWrites = new PendingLayoutWrites();
-  let storedWidths = new Set();
-  const checkingTargets = new Set();
-  // User commits wait for writable storage and a valid folder reply.
-  const heldWrites = new Map();
+  const boardStore = createBoardStore(api);
   const settingsPane = root.parentElement?.querySelector(":scope > .settings-pane");
   const paneHandlers = settingActions(api, async () => {
     await persistence;
+    if (!layoutState?.writable) throw new Error('Load board before writing');
     await resetLayout(api);
-    pendingTiles.clear();
-    pendingWrites.clear();
-    heldWrites.clear();
   }, weather?.fetch);
+  paneHandlers.onChange = (scope, key, value) => layoutState?.writable
+    ? saveSetting(api, scope, key, value) : Promise.reject(new Error('Load board before writing'));
   const page = root.parentElement?.matches(".page") ? root.parentElement : root;
-  // Measure the available width, not the below-three-column overflow floor.
-  const pageWidth = () => {
-    const minimum = page.style.minWidth;
-    page.style.minWidth = "0px";
-    const width = page.getBoundingClientRect().width;
-    page.style.minWidth = minimum;
-    return width;
-  };
+  const pageWidth = () => page.getBoundingClientRect().width;
   const gear = () => root.querySelector(".settings-gear");
   function setPaneOpen(open) {
     if (!settingsPane) return;
@@ -106,8 +92,6 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       event.preventDefault(); setPaneOpen(false);
     }
   });
-  const deferredGroups = new Map();
-  let firstPaintGroups;
   let unloaded = false;
   let self;
   let generation = 0;
@@ -124,13 +108,12 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let warnedSaved = false;
   let retryQueued = true;
   let lastRenderedKey;
+  let transientLayout;
   let actionsInFlight = 0;
   let requestedEditGroupId = null;
-  let draggedTileId;
-  let gestureView;
-  const held = () => actionsInFlight > 0 || ui.dragging || ui.gridDragging || ui.editing || ui.editGroupId != null;
+  const held = () => actionsInFlight > 0 || ui.dragging || ui.layoutDragging || ui.editing || ui.editGroupId != null;
   // An editor holds board reads/renders, but must not hide its own removal.
-  const canCheckEdit = () => actionsInFlight === 0 && !ui.dragging && !ui.gridDragging && (ui.editGroupId != null || ui.editTabId != null);
+  const canCheckEdit = () => actionsInFlight === 0 && !ui.dragging && !ui.layoutDragging && (ui.editGroupId != null || ui.editTabId != null);
   function releaseMissingEdit() {
     ui.editGroupId = null;
     ui.editTabId = null;
@@ -138,86 +121,49 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     ++generation;
   }
 
-  function clearDeferredGroup(groupId) {
-    const entry = deferredGroups.get(groupId);
-    if (entry) clearTimeout(entry.timer);
-    deferredGroups.delete(groupId);
-  }
-
-  function maySaveNewGroup(groupId, tileId, k) {
-    if (unloaded) return false;
-    if (firstPaintGroups.has(groupId) || pendingTiles.has(groupId)) return true;
-    if (deferredGroups.has(groupId) && deferredGroups.get(groupId).k !== k) clearDeferredGroup(groupId);
-    if (!deferredGroups.has(groupId)) {
-      const entry = { k, ready: false, timer: 0 };
-      deferredGroups.set(groupId, entry);
-      entry.timer = setTimeout(async () => {
-        if (!root.isConnected) { clearDeferredGroup(groupId); return; }
-        try {
-          // The page receiving the drop gets the first chance to save its rect.
-          const key = tileKey(k, tileId), stored = await api.storage.sync.get(key);
-          if (deferredGroups.get(groupId) !== entry || unloaded) return;
-          entry.ready = stored[key] === undefined;
-          // Re-read and publish through the normal interaction and write guards.
-          ++storageVersion;
-          pendingGrid = true;
-          enqueue();
-        } catch (error) {
-          console.warn("Foxy: could not check new group tile", error);
-          // Let a later render schedule the check again.
-          if (deferredGroups.get(groupId) === entry) deferredGroups.delete(groupId);
+  // Reads are independent of tab snapshots, and never publish across a gesture.
+  async function readLayout() {
+    if (layoutState && loadedVersion === storageVersion) return true;
+    if (!layoutRead) {
+      const version = storageVersion;
+      layoutRead = (async () => {
+        await persistence;
+        // Settings default per scope on read failure. Track failures so those
+        // defaults cannot enable writes or start an upgrade of unread storage.
+        let failed = false;
+        const readingApi = { storage: Object.fromEntries(['sync', 'local'].map(area => [area, {
+          get: async (...args) => {
+            try { return await api.storage[area].get(...args); }
+            catch (error) { failed = true; throw error; }
+          },
+        }])) };
+        const settings = await loadSettings(readingApi);
+        if (failed) throw new Error('Could not read settings');
+        const layout = await boardStore.load();
+        clearTimeout(layoutRetryTimer); layoutRetryTimer = 0;
+        return { layout, ...settings, version, writable: true };
+      })().catch(error => {
+        console.warn('Foxy: could not read board layout', error);
+        if (!layoutRetried && !layoutRetryTimer) {
+          layoutRetryTimer = setTimeout(() => {
+            layoutRetryTimer = 0; layoutRetried = true;
+            if (unloaded || !root.isConnected) return;
+            ++storageVersion; pendingLayout = true; enqueue();
+          }, 2000);
         }
-      }, newGroupDelay);
+        return layoutState ? { ...layoutState, writable: false, version }
+          : { layout: validBoard(null), synced: { ...DEFAULT_SETTINGS }, device: { ...DEFAULT_DEVICE },
+            writable: false, version };
+      });
     }
-    return deferredGroups.get(groupId).ready;
-  }
-
-  // Storage reads share an order independent of tab and bookmark snapshots.
-  // An old read, or one completed during an interaction, cannot apply settings.
-  async function readGrid() {
-    if (gridState && loadedVersion === storageVersion) return true;
-    if (!gridRead) {
-      const version = storageVersion, writeVersion = tileWriteVersion;
-      let failed = false;
-      // Stores log failures and return defaults. Track read failures separately
-      // so those defaults cannot overwrite a layout we have not read.
-      const readingApi = { storage: Object.fromEntries(["sync", "local"].map(area => [area, {
-        get: async (...args) => {
-          try { return await api.storage[area].get(...args); }
-          catch (error) { failed = true; throw error; }
-        },
-      }])) };
-      gridRead = Promise.all([loadLayouts(readingApi), loadSettings(readingApi)])
-        .then(([layouts, settings]) => ({ ...layouts, ...settings, version, writeVersion, writable: !failed }));
-    }
-    const next = await gridRead;
-    gridRead = null;
-    // A read can return the old layout before our queued write is visible.
-    // Wait for persistence, then reject snapshots spanning a local tile write.
-    let settled;
-    do { settled = persistence; await settled; } while (settled !== persistence);
-    if (held() || next.version !== storageVersion || next.writeVersion !== tileWriteVersion) {
-      pendingGrid = true;
-      enqueue();
-      return false;
-    }
-    if (next.writable) {
-      const widths = new Set(Object.keys(next.layouts).map(Number));
-      if (storedWidths.size && !widths.size) { pendingTiles.clear(); pendingWrites.clear(); heldWrites.clear(); }
-      for (const k of storedWidths) if (!widths.has(k)) discardTarget(k);
-      storedWidths = widths;
-      checkingTargets.clear();
-    }
-    gridState = !next.writable && gridState ? { ...gridState, writable: false } : next;
-    // Keep held user placements visible over intervening remote changes.
-    for (const [k, writes] of heldWrites) gridState.layouts = withWrites(gridState.layouts, k, [...writes.values()]);
-    loadedVersion = next.version;
-    pendingGrid = false;
+    const next = await layoutRead; layoutRead = null;
+    if (held() || next.version !== storageVersion) { pendingLayout = true; enqueue(); return false; }
+    layoutState = next; loadedVersion = next.version; pendingLayout = false;
     return true;
   }
 
-  async function refreshGrid() {
-    if (await readGrid()) {
+  async function refreshLayout() {
+    if (await readLayout()) {
       publish();
       if (pendingSaved) enqueue();
     }
@@ -329,7 +275,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
         releaseMissingEdit();
       }
       const mine = ++generation;
-      if (!await readGrid()) { pending = true; return; }
+      if (!await readLayout()) { pending = true; return; }
       if (mine !== generation) return;
       pending = false;
       pendingSaved = false;
@@ -345,11 +291,8 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       if (mine !== generation) { pending = true; return; }
       const nextSnapshot = { windows, tabs, groups, currentWindowId: current.windowId,
         selfTabId: current.id, selfUrl: location.origin + location.pathname };
-      const nextBoard = buildBoard({ ...nextSnapshot, ...savedReply, otherWindows: gridState.synced.otherWindows });
+      const nextBoard = buildBoard({ ...nextSnapshot, ...savedReply, otherWindows: layoutState.synced.otherWindows });
       snapshot = nextSnapshot;
-      const liveGroups = new Set(groups.map(group => group.id));
-      for (const id of pendingTiles.keys()) if (!liveGroups.has(id)) { pendingTiles.delete(id); pendingWrites.removeGroup(id); }
-      for (const id of deferredGroups.keys()) if (!liveGroups.has(id)) clearDeferredGroup(id);
       self = current;
       board = nextBoard;
       // Introduce a newly created tile/editor in the final action snapshot.
@@ -369,92 +312,57 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     } finally { if (reading) --readsInFlight; }
   }
 
-  function publish(save = true) {
-    if (ui.gridDragging) { pendingView = true; return; }
-    if (!board || !gridState || !firstPaintReady) return;
-    board = buildBoard({ ...snapshot, ...savedReply, otherWindows: gridState.synced.otherWindows });
-    firstPaintGroups ??= new Set(board.columns.map(group => group.id));
-    for (const id of deferredGroups.keys()) {
-      if (gridState.layouts[deferredGroups.get(id).k]?.tiles.some(tile => tile.id === `group:${savedReply.folders?.[id]}`)) clearDeferredGroup(id);
-    }
-    const options = { ...gridState, contentWidth: pageWidth(),
-      folders: savedReply.folders ?? {} };
-    view = buildGridView(options);
-    const inUse = view.k;
-    for (const [id, entry] of deferredGroups) {
-      if (entry.k !== inUse) {
-        const tileId = `group:${options.folders[id]}`;
-        if (view.newTiles.some(tile => tile.id === tileId)) maySaveNewGroup(id, tileId, inUse);
-        else clearDeferredGroup(id);
-      }
-    }
-    const knowsFolders = hasValidSavedReply && validFoldersReply(savedReply);
-    const writable = save && gridState.writable && knowsFolders;
-    const batches = new Map();
-    let prune = false, migrate = false;
-    function collect(k, tiles) {
-      if (!tiles.length) return;
-      const previous = batches.get(k) ?? [];
-      batches.set(k, mergeTiles(previous, tiles)
-        .map(({ id, x, y, w, h }) => ({ id, x, y, w, h })));
-    }
-    if (writable) {
-      const mapped = pendingWrites.resolve(options.folders, checkingTargets);
-      const mappedIds = new Set([...pendingTiles.keys()].map(id => `group:${options.folders[id]}`));
-      const fresh = view.newTiles.filter(tile => !mappedIds.has(tile.id))
-        .filter(tile => {
-          if (!tile.id.startsWith("group:")) return true;
-          const group = board.columns.find(group => tile.id === `group:${options.folders[group.id]}`);
-          return maySaveNewGroup(group.id, tile.id, view.k);
-        });
-      if (!checkingTargets.has(view.k)) collect(view.k, fresh);
-      for (const [k, writes] of heldWrites) if (!checkingTargets.has(k)) collect(k, [...writes.values()]);
-      for (const [k, writes] of mapped.batches) collect(k, writes);
-      for (const [k, writes] of batches) gridState.layouts = withWrites(gridState.layouts, k, writes);
-      for (const k of batches.keys()) heldWrites.delete(k);
-      for (const id of mapped.groups) pendingTiles.delete(id);
-      // Saved comparisons and display must use the just-committed target layout.
-      view = buildGridView({ ...options, layouts: gridState.layouts });
-      prune = !pruned;
-      if (prune) pruned = true;
-      migrate = !!gridState.legacy;
-      if (migrate) gridState.legacy = null;
-    }
-    // Pending rectangles have placement priority for display too, but local ids
-    // and any tiles they push are never written until a valid mapping arrives.
-    displayPending(view);
+  function liveIds() {
+    return new Set([...Object.values(savedReply.folders ?? {}).map(id => `group:${id}`),
+      ...board.saved.map(g => `group:${g.folderId}`), ...board.missing.map(g => `group:${g.folderId}`)]);
+  }
+
+  // Local-only identities remain in this page's draft, never in sync storage.
+  // Promote them in memory when the bookmark mapping arrives; a later gesture
+  // can persist that identity, but the mapping/render itself writes nothing.
+  function displayLayout() {
+    if (transientLayout && JSON.stringify(transientLayout.base) !== JSON.stringify(layoutState.layout)) transientLayout = null;
+    if (!transientLayout) return layoutState.layout;
+    const mapped = id => id.startsWith('local:') && savedReply.folders?.[id.slice(6)]
+      ? `group:${savedReply.folders[id.slice(6)]}` : id;
+    const draft = transientLayout.draft;
+    transientLayout.draft = { ...draft, order: draft.order.map(mapped),
+      heights: Object.fromEntries(Object.entries(draft.heights).map(([id,h]) => [mapped(id),h])) };
+    return transientLayout.draft;
+  }
+
+  function makeView(layout, widths = {}) {
+    const synced = { ...layoutState.synced, ...widths, ...(!weather ? { showWeather: false } : {}) };
+    return buildView(board, { board: layout, synced, device: layoutState.device,
+      contentWidth: pageWidth(), folders: savedReply.folders ?? {} });
+  }
+
+  function paint(next) {
+    const saved = captureView(root);
+    renderBoard(root, board, next, ui, handlers, layoutState.synced);
+    memory.update();
+    gear()?.setAttribute('aria-expanded', String(settingsPane ? !settingsPane.hidden : false));
+    if (settingsPane?.id) gear()?.setAttribute('aria-controls', settingsPane.id);
+    restoreView(root, saved);
+  }
+
+  function publish() {
+    if (ui.layoutDragging) { pendingView = true; return; }
+    if (!board || !layoutState || !firstPaintReady) return;
+    board = buildBoard({ ...snapshot, ...savedReply, otherWindows: layoutState.synced.otherWindows });
+    view = makeView(displayLayout());
     pendingView = false;
-    // JSON.stringify(Set) is {}, so serialize its folder IDs explicitly.
-    const { saved: savedLayout, newTiles, ...shown } = view;
-    const key = JSON.stringify({ board, view: shown, settings: gridState.synced, device: gridState.device,
+    const key = JSON.stringify({ board, view, settings: layoutState.synced, device: layoutState.device,
       ui: { ...ui, busy: [...ui.busy].sort() } });
     if (key !== lastRenderedKey) {
-      const saved = captureView(root);
-      root.style.setProperty("--card-alpha-dark", cardAlpha(gridState.synced.transparency, "dark"));
-      root.style.setProperty("--card-alpha-light", cardAlpha(gridState.synced.transparency, "light"));
-      root.style.setProperty("--row", gridState.device.density === "compact" ? "24px" : "32px");
-      renderBoard(root, board, view, ui, handlers, gridState.synced);
-      memory.update();
-      gear()?.setAttribute("aria-expanded", String(settingsPane ? !settingsPane.hidden : false));
-      if (settingsPane?.id) gear()?.setAttribute("aria-controls", settingsPane.id);
-      restoreView(root, saved);
+      root.style.setProperty('--card-alpha-dark', cardAlpha(layoutState.synced.transparency, 'dark'));
+      root.style.setProperty('--card-alpha-light', cardAlpha(layoutState.synced.transparency, 'light'));
+      root.style.setProperty('--row', layoutState.device.density === 'compact' ? '24px' : '32px');
+      paint(view);
       lastRenderedKey = key;
+      if (hasValidSavedReply) boardStore.observe(liveIds());
     }
-    if (page !== root) page.style.minWidth = root.style.getPropertyValue("--board-min-width");
-    if (settingsPane) {
-      settingsPane.style.setProperty("--board-width", root.style.getPropertyValue("--board-width"));
-      renderSettings(settingsPane, { synced: gridState.synced, device: gridState.device,
-        railMax: railLimits(view.total).max }, paneHandlers);
-    }
-    {
-      const keep = new Set([...Object.values(savedReply.folders ?? {}),
-        ...board.saved.map(group => group.folderId), ...board.missing.map(group => group.folderId)]);
-      const evict = writable && Object.keys(gridState.layouts).length > 4;
-      persistence = persistence.then(async () => {
-        try { await persistLayouts(api, { inUse, batches, migrate, prune, keep, evict }); }
-        finally { if (batches.size || migrate) ++tileWriteVersion; }
-      }).catch(() => {}); // Stores log failed writes with the Foxy prefix.
-    }
+    if (settingsPane) renderSettings(settingsPane, { synced: layoutState.synced, device: layoutState.device }, paneHandlers);
   }
 
   function schedule(retry = true) {
@@ -474,9 +382,9 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     retryQueued = retry;
     requestAnimationFrame(() => {
       queued = false;
-      if ((held() && !(pending && canCheckEdit())) || (!pending && !pendingSaved && !pendingGrid && !pendingView)) return;
+      if ((held() && !(pending && canCheckEdit())) || (!pending && !pendingSaved && !pendingLayout && !pendingView)) return;
       if (pending) refresh(retryQueued);
-      else if (pendingGrid) refreshGrid();
+      else if (pendingLayout) refreshLayout();
       else if (pendingSaved) refreshSaved(retryQueued);
       else publish(false);
     });
@@ -490,7 +398,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       // during an otherwise idle interaction must not cause tab re-read storms.
       if (readsInFlight) pending = true;
       if (savedReadsInFlight) pendingSaved = true;
-    } else if (pending || pendingSaved || pendingGrid || pendingView) enqueue();
+    } else if (pending || pendingSaved || pendingLayout || pendingView) enqueue();
     else if (!held()) publish();
   }
 
@@ -520,12 +428,6 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
           }),
         ]);
         if (reply?.ok !== true) throw new Error(`${message.type} was not accepted`);
-        if (deleting) {
-          await removeGroupTiles(api, id);
-          for (const layout of Object.values(gridState.layouts)) {
-            layout.tiles = layout.tiles.filter(tile => tile.id !== `group:${id}`);
-          }
-        }
         return reply;
       } finally {
         clearTimeout(timer);
@@ -560,7 +462,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     onRestoreAll: () => savedAction("banner", { type: "foxy:restore-all", windowId: self?.windowId }),
     onDismissMissing: () => savedAction("banner", { type: "foxy:dismiss-missing" }),
     onOpen: row => action(() => openTab(api, row, self, { close: history.length === 1,
-      pinsMoveHere: gridState.synced.pinsMoveHere })),
+      pinsMoveHere: layoutState.synced.pinsMoveHere })),
     onCloseTab: tabId => action(() => closeTabs(api, [tabId], self?.id)),
     onCloseGroup: groupId => action(() => closeGroup(api, groupId, self?.id)),
     onBringHere: groupId => action(() => bringGroupHere(api, groupId, self.windowId)),
@@ -590,20 +492,10 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
         console.debug("Foxy: ignored drop of a tab not on the board", tabId);
         return;
       }
-      const source = view ?? buildGridView({ ...gridState, contentWidth: pageWidth(), folders: savedReply.folders ?? {} });
-      const before = { ...source, tiles: source.tiles.map(tile => ({ ...tile })) };
       return action(async () => {
         const target = resolveTabTarget(board, { ...drop, tabId }, self.windowId);
         const result = await dropTab(api, tabId, target);
-        if (result.ok && result.groupId != null) {
-          requestedEditGroupId = result.groupId;
-          if (result.rect) {
-            const id = `local:${result.groupId}`, placed = place(before.tiles, id, result.rect, before.cols);
-            const target = targetLayout(before.tiles, before.saved, placed, before.k, before.cols);
-            pendingWrites.capture(target);
-            pendingTiles.set(result.groupId, pendingPlacement(result.rect, before, target.k));
-          }
-        }
+        if (result.ok && result.groupId != null) requestedEditGroupId = result.groupId;
         return result;
       });
     },
@@ -622,129 +514,68 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     },
   };
 
-  // Only a page given weather access (the real new tab page) shows the tile.
-  const buildGridView = (options, pending = pendingTiles) => buildPendingView(board,
-    weather ? options : { ...options, synced: { ...options.synced, showWeather: false } }, pending);
-  const displayPending = (next, pending = pendingTiles) => showPending(board, savedReply.folders ?? {}, next, pending);
-
-  function discardTarget(k) {
-    heldWrites.delete(k); pendingWrites.discard(k);
-    for (const [id, rect] of pendingTiles) if (rect.k === k) pendingTiles.delete(id);
-  }
-
-  function previewTiles(tiles) {
-    const metadata = new Map(view.tiles.map(tile => [tile.id, tile]));
-    view.tiles = tiles.map(tile => ({ ...metadata.get(tile.id), ...tile }));
-    root.querySelector(".grid").style.setProperty("--cols", view.cols);
-    root.querySelector(".rail").style.setProperty("--rail-cells", view.railCells);
-    positionTiles(root.querySelector(".grid"), view.tiles);
-    updateScrollEdges(root);
-  }
-
-  function tileChangeState(changed) {
-    const rectangles = changed.map(({ id, x, y, w, h }) => ({ id, x, y, w, h }));
-    const pending = new Map(pendingTiles);
-    const before = gestureView ?? view;
-    const placed = mergeTiles(before.tiles, rectangles);
-    const target = targetLayout(before.tiles, before.saved, placed, before.k, before.cols);
-    for (const tile of target.writes) {
-      if (tile.id.startsWith("local:")) {
-        const group = board.columns.find(group => tile.id === `local:${group.id}`);
-        if (group) pending.set(group.id, pendingPlacement(tile, before, target.k));
+  const detachGestures = attachGestures(root, {
+    state: () => ({ view, layout: displayLayout(), density: layoutState.device.density }),
+    canStart: () => !!view && !unloaded && !held(),
+    canCommit: async id => { try { await api.tabGroups.get(id); return !unloaded; } catch { return false; } },
+    onState: active => interaction('layoutDragging', active),
+    onCancel: () => { lastRenderedKey = undefined; pendingView = true; },
+    onPreview: (draft, widths) => {
+      view = makeView(draft, widths);
+      if (widths) paint(view);
+      else {
+        positionTiles(root.querySelector('.kanban-tiles'), view.tiles);
+        for (const widget of view.widgets) {
+          root.querySelector(`[data-kind="${widget.kind}"]`).style.height = `${widget.height}px`;
+        }
+        updateScrollEdges(root);
       }
-    }
-    const writes = draggedTileId?.startsWith("local:") ? [] : target.writes.filter(tile => !tile.id.startsWith("local:"));
-    return { pending, writes, k: target.k, placed, target };
-  }
-
-  const detachGridDrag = attachGridDrag(root, {
-    view: () => view,
-    canCommit: async tile => {
-      try { await api.tabGroups.get(tile.group.id); return !unloaded; }
-      catch { return false; }
     },
-    onState: (active, id) => {
-      if (active) {
-        draggedTileId = id;
-        gestureView = { ...view, tiles: view.tiles.map(tile => ({ ...tile })) };
-      }
-      interaction("gridDragging", active);
-      if (!active) { draggedTileId = undefined; gestureView = undefined; }
-    },
-    onPreview: changed => {
-      const { pending, writes, k } = tileChangeState(changed);
-      const layouts = withWrites(gridState.layouts, k, writes);
-      const preview = buildGridView({ ...gridState, layouts, contentWidth: pageWidth(),
-        folders: savedReply.folders ?? {} }, pending);
-      displayPending(preview, pending);
-      previewTiles(preview.tiles);
-    },
-    onCancel: () => { pendingView = true; },
-    onCommit: changed => {
-      const { pending, writes, k, target } = tileChangeState(changed);
-      pendingWrites.capture(target);
-      for (const [groupId, rect] of pending) pendingTiles.set(groupId, rect);
-      if (!writes.length) return;
-      gridState.layouts = withWrites(gridState.layouts, k, writes);
-      if (!gridState.writable || checkingTargets.has(k) || !hasValidSavedReply || !validFoldersReply(savedReply)) {
-        const previous = heldWrites.get(k) ?? new Map();
-        for (const tile of writes) previous.set(tile.id, tile);
-        heldWrites.set(k, previous);
-        return;
-      }
-      const inUse = gestureView.k;
-      persistence = persistence.then(async () => {
-        try { await saveTiles(api, k, writes, { inUse }); }
-        finally { ++tileWriteVersion; }
-      }).catch(() => {});
-    },
-    onRail: (cells, commit) => {
-      view = buildGridView({ ...gridState, synced: { ...gridState.synced, railCells: cells },
-        contentWidth: pageWidth(), folders: savedReply.folders ?? {} });
-      displayPending(view);
-      previewTiles(view.tiles);
-      if (!commit) return;
-      gridState.synced = { ...gridState.synced, railCells: cells };
-      persistence = persistence.then(async () => {
-        try { await saveSetting(api, "synced", "railCells", cells); }
-        finally { ++tileWriteVersion; }
-      }).catch(() => {});
+    onCommit: (draft, widths) => {
+      const save = persistence.then(async () => {
+        if (!layoutState.writable) throw new Error('Load board before writing');
+        if (widths) {
+          const [key, value] = Object.entries(widths)[0];
+          await saveSetting(api, 'synced', key, value);
+          layoutState.synced = { ...layoutState.synced, [key]: value };
+        } else {
+          const written = await boardStore.gesture(() => draft, liveIds());
+          transientLayout = { base: written, draft: { ...draft, t: written.t } };
+          layoutState.layout = written;
+        }
+        lastRenderedKey = undefined; pendingView = true;
+      });
+      persistence = save.catch(() => {});
+      return save;
     },
   });
 
-  watchStorage(api, (keys, changes) => {
-    for (const key of keys) {
-      const k = parseTileKey(key)?.k ?? (/^layout:[1-9]\d*$/.test(key) ? Number(key.slice(7)) : null);
-      if (k === null) continue;
-      if (changes[key].newValue === undefined) checkingTargets.add(k);
-      else storedWidths.add(k);
+  api.storage.onChanged.addListener((changes, area) => {
+    if (!root.isConnected) return;
+    if ((area === 'sync' && ('board' in changes || 'settings' in changes)) ||
+        (area === 'local' && 'deviceSettings' in changes)) {
+      ++storageVersion; pendingLayout = true; enqueue();
     }
-    ++storageVersion;
-    pendingGrid = true;
-    enqueue();
   });
   window.addEventListener("resize", () => {
     if (!root.isConnected) return;
     pendingView = true;
     enqueue();
   });
-  startClock(root, () => gridState?.synced);
+  startClock(root, () => layoutState?.synced);
   const weatherLoop = weather && startWeather(root, { api, ...weather,
-    settings: () => gridState && { synced: gridState.synced, device: gridState.device } });
+    settings: () => layoutState && { synced: layoutState.synced, device: layoutState.device } });
 
   const onChange = () => schedule();
   window.addEventListener("pagehide", () => {
     unloaded = true;
+    clearTimeout(layoutRetryTimer);
     memory.stop();
-    detachGridDrag();
+    detachGestures();
     weatherLoop?.stop();
-    for (const id of deferredGroups.keys()) clearDeferredGroup(id);
   }, { once: true });
 
   const onGroupRemoved = group => {
-    pendingTiles.delete(group.id);
-    pendingWrites.removeGroup(group.id);
-    clearDeferredGroup(group.id);
     if (group.id === ui.editGroupId) releaseMissingEdit();
     schedule();
   };
@@ -809,17 +640,17 @@ function captureView(root) {
       focus = { tabId: row.dataset.tabId, className: active.className,
         rowsKey: rowsKey(list), index: [...list.querySelectorAll(".row")].indexOf(row) };
     } else if (active.matches(".rows")) focus = { rowsKey: rowsKey(active) };
-    else if (active.matches(".grid")) focus = { grid: true };
+    else if (active.matches(".kanban")) focus = { kanban: true };
     else if (active.matches(".settings-gear")) focus = { gear: true };
     else if (active.closest(".weather")) focus = { weather: active.className };
     else if (group) focus = { groupId: group.dataset.groupId, className: active.className,
       index: [...root.querySelectorAll(".column[data-group-id]")].indexOf(group) };
   }
-  return { focus, top: root.querySelector(".grid")?.scrollTop ?? 0,
+  return { focus, top: root.querySelector(".kanban")?.scrollTop ?? 0, widgetsTop: root.querySelector(".widgets")?.scrollTop ?? 0,
     tops: new Map([...root.querySelectorAll(".rows")].map(list => [rowsKey(list), list.scrollTop])) };
 }
 
-function restoreView(root, { focus, top, tops }) {
+function restoreView(root, { focus, top, widgetsTop, tops }) {
   const editor = root.querySelector(".name-editor");
   if (focus && !editor) {
     let active;
@@ -828,12 +659,12 @@ function restoreView(root, { focus, top, tops }) {
       const sites = root.querySelector('[data-kind="memory"] .memory-sites');
       const rows = [...(sites?.querySelectorAll('.memory-row') ?? [])];
       const row = rows.find(row => row.dataset.host === focus.memoryHost) ?? rows[Math.min(focus.index, rows.length - 1)];
-      active = row?.querySelector('.memory-unload') ?? sites ?? root.querySelector('.grid');
+      active = row?.querySelector('.memory-unload') ?? sites ?? root.querySelector('.kanban');
     } else if (focus.gear) active = root.querySelector(".settings-gear");
     else if (focus.weather !== undefined) {
       active = [...root.querySelectorAll(".weather button, .weather [tabindex]")].find(node => node.className === focus.weather);
     }
-    else if (focus.grid) active = root.querySelector(".grid");
+    else if (focus.kanban) active = root.querySelector(".kanban");
     else if (focus.tabId === undefined && focus.rowsKey !== undefined) active = list;
     else {
       const container = focus.tabId !== undefined
@@ -847,17 +678,18 @@ function restoreView(root, { focus, top, tops }) {
         : [...(container?.querySelectorAll("*") ?? [])].find(el => el.className === focus.className);
       if (!container && focus.tabId !== undefined) {
         const rows = [...(list?.querySelectorAll(".row") ?? [])];
-        active = rows[Math.min(focus.index, rows.length - 1)]?.querySelector(".row-open") ?? list ?? root.querySelector(".grid");
+        active = rows[Math.min(focus.index, rows.length - 1)]?.querySelector(".row-open") ?? list ?? root.querySelector(".kanban");
       } else if (!container && focus.groupId !== undefined) {
         const columns = [...root.querySelectorAll(".column[data-group-id]")];
         const neighbour = columns[Math.min(focus.index, columns.length - 1)];
         active = [...(neighbour?.querySelectorAll("button, .rows") ?? [])]
-          .find(el => el.className === focus.className) ?? neighbour?.querySelector(".rows") ?? root.querySelector(".grid");
+          .find(el => el.className === focus.className) ?? neighbour?.querySelector(".rows") ?? root.querySelector(".kanban");
       }
     }
     active?.focus({ preventScroll: true });
   }
-  root.querySelector(".grid").scrollTop = top;
+  root.querySelector(".kanban").scrollTop = top;
+  root.querySelector(".widgets").scrollTop = widgetsTop;
   for (const list of root.querySelectorAll(".rows")) list.scrollTop = tops.get(rowsKey(list)) ?? 0;
   // A new group's input can be below the old grid viewport.
   editor?.scrollIntoView({ block: "nearest", inline: "nearest" });

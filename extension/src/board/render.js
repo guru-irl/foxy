@@ -12,32 +12,14 @@ const confirmations = new WeakMap();
 
 const layouts = new WeakMap();
 
-// Rendering and gesture previews use the same cell rectangles and scroll extent.
-export function positionTiles(grid, tiles) {
-  // The corner dots layer covers all occupied rows, including off-screen tiles.
-  grid.style.setProperty("--rows", Math.max(0, ...tiles.map(tile => tile.y + tile.h)));
+// Rendering and gesture previews share pixel rectangles.
+export function positionTiles(layer, tiles) {
+  layer.style.height = `${Math.max(0, ...tiles.map(t => t.y + t.height))}px`;
   const shown = new Map(tiles.map(tile => [tile.id, tile]));
-  for (const node of grid.querySelectorAll(":scope > .tile")) {
+  for (const node of layer.querySelectorAll(':scope > .tile')) {
     const tile = shown.get(node.dataset.tileId);
-    for (const key of ["x", "y", "w", "h"]) node.style.setProperty(`--${key}`, tile[key]);
-  }
-  if (grid.classList.contains("gesturing")) {
-    const dots = grid.querySelector(".grid-corners"), pitch = parseFloat(grid.style.getPropertyValue("--pitch"));
-    const cols = Number(grid.style.getPropertyValue("--cols"));
-    const height = Math.max(grid.clientHeight, Math.max(0, ...tiles.map(tile => tile.y + tile.h)) * pitch - 16);
-    const dragged = grid.querySelector(".tile.dragging")?.dataset.tileId;
-    const resting = tiles.filter(tile => tile.id !== dragged), circles = [];
-    for (let j = 1; j * pitch - 8 < height; j++) {
-      for (let i = 1; i < cols; i++) {
-        if (resting.some(tile => tile.x < i && i < tile.x + tile.w && tile.y < j && j < tile.y + tile.h)) continue;
-        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        circle.setAttribute("cx", i * pitch - 8);
-        circle.setAttribute("cy", j * pitch - 8);
-        circle.setAttribute("r", "1.5");
-        circles.push(circle);
-      }
-    }
-    dots.replaceChildren(...circles);
+    if (!tile) continue;
+    Object.assign(node.style, { left: `${tile.x}px`, top: `${tile.y}px`, width: `${tile.w}px`, height: `${tile.height}px` });
   }
 }
 
@@ -55,7 +37,7 @@ function writeEdge({ node, start, end }) {
 }
 
 export function updateScrollEdges(root) {
-  const edges = [...root.querySelectorAll(".grid, .rows")].map(readEdge);
+  const edges = [...root.querySelectorAll(".kanban, .widgets, .rows")].map(readEdge);
   for (const edge of edges) writeEdge(edge);
 }
 
@@ -68,7 +50,7 @@ function watchLayout(root) {
   });
   layouts.set(root, observer);
   observer.observe(root);
-  for (const node of root.querySelectorAll(".grid, .rows")) {
+  for (const node of root.querySelectorAll(".kanban, .widgets, .rows")) {
     node.addEventListener("scroll", () => writeEdge(readEdge(node)), { passive: true });
     observer.observe(node);
     for (const child of node.children) observer.observe(child);
@@ -86,54 +68,46 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
   // identity checks prevent this old cleanup from ending a newer editor.
   editors.get(root)?.cancel();
   root.setAttribute("role", "region");
-  root.style.setProperty("--cell", `${view.cell}px`);
-  root.style.setProperty("--gap", "16px");
-  root.style.setProperty("--pitch", `${view.cell + 16}px`);
-  const width = `${(view.cols + view.railCells) * (view.cell + 16) - 16}px`;
-  root.style.setProperty("--board-width", width);
-  root.style.setProperty("--board-min-width", view.total < 3 ? width : "0px");
-  const grid = el("div", "grid");
-  grid.tabIndex = -1;
-  grid.style.setProperty("--cols", view.cols);
-  grid.style.setProperty("--cell", `${view.cell}px`);
-  grid.style.setProperty("--cell-target", `${view.targetCell}px`);
-  grid.style.setProperty("--gap", "16px");
-  grid.style.setProperty("--pitch", `${view.cell + 16}px`);
+  root.style.setProperty('--gap', '16px');
+  root.style.setProperty('--widgets-width', `${view.page.widgets}px`);
+  root.style.setProperty('--rail-width', `${view.page.rail}px`);
+  root.style.setProperty('--board-width', '100%');
+  root.classList.toggle('widgets-inline', view.page.fallback);
+  const kanban = el('div', 'kanban'); kanban.tabIndex = -1;
+  const layer = el('div', 'kanban-tiles');
+  const widgets = el('div', 'widgets'); widgets.tabIndex = -1;
+  const widgetsColumn = el('div', 'widgets-column');
   let pinOverlays, scrollPins;
-  for (const tile of view.tiles) {
-    const pinned = tile.kind === "pinned" ? pinnedTile(root, board.pinned, handlers, editors) : null;
+  for (const tile of [...view.widgets, ...view.tiles]) {
+    const pinned = tile.kind === 'pinned' ? pinnedTile(root, board.pinned, handlers, editors) : null;
     if (pinned) { pinOverlays = pinned.overlays; scrollPins = pinned.onScroll; }
-    const node = tile.kind === "group" ? groupColumn(root, tile.group, handlers)
-      : tile.kind === "pinned" ? pinned.tile
-      : tile.kind === "saved" ? savedColumn(root, board.saved, ui, handlers)
-      : tile.kind === "memory" ? createMemoryTile()
-      : tile.kind === "weather" ? weatherTile() : clockTile();
-    node.classList.add("tile");
-    node.dataset.tileId = tile.id;
-    node.dataset.kind = tile.kind;
-    for (const corner of ["se", "nw", "ne", "sw"]) {
-      const handle = button("tile-resize", `Resize ${tile.kind === "group" ? tile.group.title.trim() || "Unnamed" : tile.kind}`);
-      handle.dataset.corner = corner;
-      handle.tabIndex = -1;
-      handle.setAttribute("aria-hidden", "true");
-      node.append(handle);
-    }
-    grid.append(node);
+    const node = tile.kind === 'group' ? groupColumn(root, tile.group, handlers)
+      : tile.kind === 'pinned' ? pinned.tile
+      : tile.kind === 'saved' ? savedColumn(root, board.saved, ui, handlers)
+      : tile.kind === 'memory' ? createMemoryTile()
+      : tile.kind === 'weather' ? weatherTile() : clockTile();
+    node.classList.add('tile', tile.kind === 'group' ? 'kanban-tile' : 'widget');
+    node.dataset.tileId = tile.id; node.dataset.kind = tile.kind;
+    node.style.height = `${tile.height}px`;
+    if (tile.kind === 'group') node.querySelector('.column-header').tabIndex = 0;
+    const handle = button('tile-resize', `Resize ${tile.kind === 'group' ? tile.group.title.trim() || 'Unnamed' : tile.kind}`);
+    handle.tabIndex = -1; handle.setAttribute('aria-hidden', 'true'); node.append(handle);
+    (tile.kind === 'group' ? layer : widgets).append(node);
   }
-  positionTiles(grid, view.tiles);
-  const corners = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  corners.setAttribute("class", "grid-corners");
-  corners.setAttribute("aria-hidden", "true");
-  grid.append(corners);
-  const rail = fixedColumn(root, "tabs", "UNGROUPED TABS", board.tabs, handlers);
-  rail.classList.add("rail");
-  rail.style.setProperty("--rail-cells", view.railCells);
-  rail.append(el("div", "rail-resize"));
-  const gear = button("settings-gear", "Settings");
-  gear.setAttribute("aria-expanded", "false");
-  rail.append(gear);
-  root.replaceChildren(grid, rail, ...(pinOverlays ? [pinOverlays] : []));
-  if (pinOverlays) grid.addEventListener('scroll', scrollPins, { passive: true });
+  positionTiles(layer, view.tiles);
+  kanban.append(layer);
+  const widgetEdge = el('div', 'bar-resize widgets-resize'); widgetEdge.dataset.bar = 'widgetsWidth';
+  const rail = fixedColumn(root, 'tabs', 'UNGROUPED TABS', board.tabs, handlers);
+  rail.classList.add('rail');
+  const railEdge = el('div', 'bar-resize rail-resize'); railEdge.dataset.bar = 'railWidth'; rail.append(railEdge);
+  const gear = button('settings-gear', 'Settings'); gear.setAttribute('aria-expanded', 'false'); rail.append(gear);
+  if (view.page.fallback) kanban.prepend(widgets);
+  else widgetsColumn.append(widgets, widgetEdge);
+  root.replaceChildren(...(view.page.fallback ? [] : [widgetsColumn]), kanban, rail, ...(pinOverlays ? [pinOverlays] : []));
+  if (pinOverlays) {
+    kanban.addEventListener('scroll', scrollPins, { passive: true });
+    widgets.addEventListener('scroll', scrollPins, { passive: true });
+  }
   updateClock(root, settings);
   paintWeather(root, settings);
   const previousBanner = banners.get(root);
@@ -166,7 +140,7 @@ export function renderBoard(root, board, view, ui, handlers, settings = {}) {
       target = row ? (focus.selector ? row.querySelector(focus.selector) : row)
         : rows[Math.min(focus.index, rows.length - 1)]?.querySelector(".row-open");
     } else target = banners.get(root)?.querySelector(focus.selector);
-    (target ?? grid).focus({ preventScroll: true });
+    (target ?? kanban).focus({ preventScroll: true });
   }
   watchLayout(root);
   if (pinOverlays) requestAnimationFrame(() => restorePinnedHover(root));
