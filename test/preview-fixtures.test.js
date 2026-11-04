@@ -73,3 +73,16 @@ test('v40 preview uses generic groups with remote groups, every widget and fake 
  assert.equal(new Set(Object.values(reply.folders)).size, 8, 'groups in different windows need distinct bookmark folders');
  assert.equal((await api.runtime.sendMessage({type:'foxy:memory'})).firefox,3650722202);
 });
+
+
+test("README preview pins have distinct inline SVG favicons", async () => {
+  const { SCENARIOS } = await import("../preview/fixtures.js");
+  const pins = SCENARIOS.v40.tabs.filter(tab => tab.pinned);
+  assert.equal(pins.length, 7);
+  const icons = pins.map(tab => tab.favIconUrl);
+  assert.equal(new Set(icons).size, pins.length);
+  for (const icon of icons) {
+    assert.match(icon, /^data:image\/svg\+xml,/);
+    assert.match(decodeURIComponent(icon), /<svg\b.*<\/svg>/);
+  }
+});

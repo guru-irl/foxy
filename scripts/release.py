@@ -8,18 +8,12 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSION = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z')
-FILES = ('extension/manifest.json', 'package.json', 'test/manifest.test.js', 'README.md')
+FILES = ('extension/manifest.json', 'package.json', 'test/manifest.test.js')
 
 
 def git(*args, check=True):
     return subprocess.run(['git', *args], cwd=ROOT, text=True, capture_output=True, check=check)
 
-
-def replace_once(text, pattern, replacement, name):
-    result, count = re.subn(pattern, lambda _: replacement, text, count=1, flags=re.MULTILINE)
-    if count != 1:
-        raise SystemExit(f'Cannot find the current version in {name}.')
-    return result
 
 
 def main():
@@ -57,7 +51,6 @@ def main():
         if count != 1:
             raise SystemExit(f'Cannot find {target} in {name}.')
     texts[name] = texts[name].replace(f'Foxy {current}', f'Foxy {version}')
-    texts[FILES[3]] = replace_once(texts[FILES[3]], rf'^Version {re.escape(current)}\.', f'Version {version}.', FILES[3])
     for name, text in texts.items():
         (ROOT / name).write_text(text)
     subprocess.run(['npm', 'test'], cwd=ROOT, check=True)

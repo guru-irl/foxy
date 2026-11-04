@@ -122,6 +122,13 @@ class WorkflowExecutionTest(unittest.TestCase):
         self.assertFalse((self.work / 'gh-args').exists())
 
     def test_steps_publish_generated_assets_and_annotated_notes(self):
+        self.git('tag', 'v4.0.0')
+        (self.repo / 'change').write_text('new')
+        self.git('add', 'change')
+        self.git('commit', '-qm', 'Add feature')
+        (self.repo / 'change').write_text('newer')
+        self.git('add', 'change')
+        self.git('commit', '-qm', 'Fix feature')
         self.git('tag', '-a', 'v4.1.0', '-m', 'Notes for 4.1.0')
         for step in self.steps:
             result = self.run_step(step)
@@ -132,7 +139,8 @@ class WorkflowExecutionTest(unittest.TestCase):
         update = updates['addons']['{4408f971-7930-41ea-9f93-b01231e40861}']['updates'][0]
         self.assertEqual(update['update_hash'], 'sha256:' + hashlib.sha256(b'signed').hexdigest())
         self.assertEqual(update['update_link'], 'https://github.com/guru-irl/foxy/releases/download/v4.1.0/foxy-4.1.0.xpi')
-        self.assertEqual((self.repo / 'release-notes.txt').read_text().strip(), 'Notes for 4.1.0')
+        self.assertEqual((self.repo / 'release-notes.txt').read_text(),
+                         'Notes for 4.1.0\n\nChanges since v4.0.0:\n- Fix feature\n- Add feature\n')
         args = (self.work / 'gh-args').read_text().splitlines()
         self.assertEqual(args[:5], ['release', 'create', 'v4.1.0', 'foxy-4.1.0.xpi', 'updates.json'])
         self.assertEqual(args[-2:], ['--notes-file', 'release-notes.txt'])
@@ -148,7 +156,15 @@ class WorkflowExecutionTest(unittest.TestCase):
         self.git('tag', 'v4.1.0')
         result = self.run_step(self.steps[-1])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual((self.repo / 'release-notes.txt').read_text().splitlines(), ['Fix feature', 'Add feature'])
+        self.assertEqual((self.repo / 'release-notes.txt').read_text(),
+                         'Changes since v4.0.0:\n- Fix feature\n- Add feature\n')
+
+    def test_first_release_lists_commits_after_the_annotation(self):
+        self.git('tag', '-a', 'v4.1.0', '-m', 'First release')
+        result = self.run_step(self.steps[-1])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.repo / 'release-notes.txt').read_text(),
+                         'First release\n\nChanges:\n- Initial commit\n')
 
 
 if __name__ == '__main__':

@@ -2,6 +2,11 @@
   <img src="docs/images/logo.svg" alt="" width="96" height="96">
   <h1>Foxy</h1>
   <p>Your tabs, groups, and widgets on one Firefox page.</p>
+  <p>
+    <a href="https://github.com/guru-irl/foxy/releases"><img src="https://img.shields.io/github/v/release/guru-irl/foxy?style=flat-square&amp;color=555" alt="Latest release"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-555?style=flat-square" alt="MIT licence"></a>
+    <img src="https://img.shields.io/badge/Firefox-140%2B-555?style=flat-square" alt="Firefox 140 or newer">
+  </p>
 </div>
 
 Foxy replaces Firefox's new tab and home pages with a board of open tabs, groups, and widgets. It saves groups and pinned tabs as bookmarks, syncs them across devices, and can switch to an existing tab instead of opening a duplicate. It also includes a Firefox theme and a local helper for agents.
@@ -11,13 +16,17 @@ Foxy replaces Firefox's new tab and home pages with a board of open tabs, groups
   <img src="docs/images/board-light.png" alt="Foxy board with widgets, tab groups, and ungrouped tabs">
 </picture>
 
-Foxy 4.0.0 supports desktop Firefox 140 or newer on macOS, Windows, and Linux. It does not support Android. See the [design notes](docs/design/2026-11-01-foxy-4.0-design.md).
+Foxy supports desktop Firefox 140 or newer on macOS, Windows and Linux, not Android.
 
 ## Install
 
-Download `foxy-<version>.xpi` from the latest GitHub Release; about:addons, gear, Install Add-on From File. Foxy then updates itself.
+1. Download `foxy-<version>.xpi` from the [latest release](https://github.com/guru-irl/foxy/releases/latest).
+2. Open about:addons, click the gear, choose **Install Add-on From File**, and pick the file.
+3. Click **Keep changes** when Firefox asks about the new tab and home pages.
 
-Click **Keep changes** when Firefox asks about the new tab and home pages. To remove Foxy, uninstall it in about:addons. Its bookmark folders remain until you delete them.
+Foxy updates itself after that.
+
+To remove Foxy, uninstall it in about:addons. Its bookmark folders remain until you delete them.
 
 ## Board
 
@@ -95,7 +104,12 @@ Foxy collects no data. Weather requests go to Open-Meteo and BigDataCloud only a
 
 ## Agents
 
-The local helper lets agents list and manage groups in a running Firefox. It supports macOS and Linux, needs Python 3, and uses no packages. Foxy 3.2.0 or newer is required. Remove and delete need 3.4.0 or newer. The helper also powers MEMORY using macOS physical footprint or Linux PSS, with RSS as a fallback. Windows has no helper memory measurement.
+The local helper lets agents list and manage groups in a running Firefox. It supports macOS and Linux, needs Python 3, and uses no packages. The helper also powers MEMORY using macOS physical footprint or Linux PSS, with RSS as a fallback. Windows has no helper memory measurement.
+
+| Helper commands | Minimum Foxy version |
+|---|---|
+| List and manage groups | 3.2.0 |
+| Remove and delete | 3.4.0 |
 
 Install it once from this repository, and keep the repository in place:
 
@@ -114,7 +128,7 @@ agent/foxy remove "To be reviewed" https://example.com/review
 agent/foxy delete "Old work" --close-tabs
 ```
 
-Tabs open in the background. Adding to a saved group adds bookmarks without opening it. Missing groups are refused unless `--create` is used. Remove or delete only what the user asks for. Prefer ungrouping to closing tabs, and report deleted URLs. Active tabs cannot be closed, and a group open on another device may reappear. Commands accept `--json` and exit with 0 for success, 1 for refusal, or 2 when Foxy is unreachable.
+Tabs open in the background. Adding to a saved group adds bookmarks without opening it. Missing groups are refused unless `--create` is used. Active tabs cannot be closed, and a group open on another device may reappear. Commands accept `--json` and exit with 0 for success, 1 for refusal, or 2 when Foxy is unreachable.
 
 The helper runs from this repository. Update it with `git pull` before installing a newer Foxy. An older helper may show "Memory unavailable". To remove it, run `python3 scripts/install_agent.py --uninstall`.
 
@@ -138,6 +152,7 @@ The add-on is in `extension/`. No npm packages are required. Headless runs use t
 - `python3 scripts/preview_v40.py` regenerates the two README images.
 - `python3 scripts/check_private.py` is an optional local pre-push check. It reads a pattern file kept outside this repository.
 - See the [release guide](docs/releasing.md) for publishing a release.
+- Design notes: [`docs/design/`](docs/design/).
 
 ## Credits
 

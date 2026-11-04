@@ -35,11 +35,6 @@ class ReleaseTest(unittest.TestCase):
         for name in FILES[:3]:
             path = self.repo / name
             path.write_text(path.read_text().replace(current, '4.0.0'))
-        # The release tool must not depend on the wording after the version.
-        readme = self.repo / 'README.md'
-        text = readme.read_text()
-        import re
-        readme.write_text(re.sub(r'^Version \d+\.\d+\.\d+\.', 'Version 4.0.0. Different text stays.', text, count=1, flags=re.M))
         git(self.repo, 'init', '-q')
         git(self.repo, 'config', 'user.name', 'Test User')
         git(self.repo, 'config', 'user.email', 'test@example.com')
@@ -64,6 +59,36 @@ class ReleaseTest(unittest.TestCase):
         self.assertIn(phrase, (result.stdout + result.stderr).lower())
         self.assertEqual(git(self.repo, 'rev-parse', 'HEAD'), before)
         self.assertFalse((self.work / 'npm.log').exists())
+
+    def test_releases_current_repo_files_without_changing_readme(self):
+        repo = self.work / 'current-repo'
+        repo.mkdir()
+        names = git(ROOT, 'ls-files', '--cached', '--others', '--exclude-standard', '-z').split('\0')
+        for name in filter(None, names):
+            source, dest = ROOT / name, repo / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_symlink():
+                dest.symlink_to(os.readlink(source))
+            else:
+                shutil.copy2(source, dest)
+        readme = (repo / 'README.md').read_bytes()
+        current = json.loads((repo / FILES[0]).read_text())['version']
+        major, minor, patch = map(int, current.split('.'))
+        version = f'{major}.{minor}.{patch + 1}'
+        git(repo, 'init', '-q')
+        git(repo, 'config', 'user.name', 'Test User')
+        git(repo, 'config', 'user.email', 'test@example.com')
+        git(repo, 'add', '.')
+        git(repo, 'commit', '-qm', 'Initial')
+        result = subprocess.run([sys.executable, str(repo / 'scripts/release.py'), version],
+                                cwd=repo, env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((repo / 'README.md').read_bytes(), readme)
+        self.assertEqual(set(git(repo, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').splitlines()),
+                         set(FILES[:3]))
+        self.assertEqual(json.loads((repo / FILES[0]).read_text())['version'], version)
+        self.assertEqual(git(repo, 'cat-file', '-t', f'v{version}'), 'tag')
+        self.assertEqual((self.work / 'npm.log').read_text(), 'test\n')
 
     def test_refuses_dirty_tree(self):
         (self.repo / 'untracked').write_text('dirty')
@@ -110,7 +135,7 @@ class ReleaseTest(unittest.TestCase):
         test = (self.repo / FILES[2]).read_text()
         self.assertIn('manifest.version, "4.1.0"', test)
         self.assertIn('pkg.version, "4.1.0"', test)
-        self.assertIn('Version 4.1.0. Different text stays.', (self.repo / 'README.md').read_text())
+        self.assertEqual((self.repo / 'README.md').read_text(), (ROOT / 'README.md').read_text())
         self.assertEqual(git(self.repo, 'log', '-1', '--format=%s'), 'Release 4.1.0')
         self.assertEqual(git(self.repo, 'cat-file', '-t', 'v4.1.0'), 'tag')
         self.assertEqual(git(self.repo, 'rev-list', '-n', '1', 'v4.1.0'), git(self.repo, 'rev-parse', 'HEAD'))

@@ -2,8 +2,17 @@ import { demoGroups } from "../test/browser/fixtures/demo-groups.js";
 // Preview fixtures use only inline, neutral icons. No network requests.
 const TITLES = ["YouTube", "Inbox (3)", "Pull request #1234: Fix the flaky sidebar test in the vertical tab strip",
   "Docs", "Calendar", "Figma", "Hacker News", "Weather", "Maps", "Music", "Notes", "Photos"];
-const icon = "data:image/svg+xml," + encodeURIComponent(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="3" fill="#aaa"/></svg>');
+const icons = [
+  '<path d="M6 4.5 12 8l-6 3.5z" fill="#fff" stroke="none"/>',
+  '<rect x="3" y="4.5" width="10" height="7" rx="1"/><path d="m3.5 5 4.5 3 4.5-3"/>',
+  '<path d="M5 3.5h5l2 2v7H5zM10 3.5v2h2M7 8h3M7 10h3"/>',
+  '<rect x="3.5" y="4" width="9" height="8.5" rx="1"/><path d="M3.5 6.5h9M6 3v2M10 3v2"/>',
+  '<circle cx="7" cy="7" r="3.5"/><path d="m9.5 9.5 3 3"/>',
+  '<path d="M4 3.5h8v9H4zM6 6h4M6 8h4M6 10h3"/>',
+  '<path d="M9 3.5v7a2 2 0 1 1-1-1.7V5l4-1v5.5a2 2 0 1 1-1-1.7V3z"/>',
+  '<circle cx="8" cy="8" r="5"/><path d="M3 8h10M8 3c-2 2-2 8 0 10M8 3c2 2 2 8 0 10"/>',
+].map(shape => "data:image/svg+xml," + encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" rx="4" fill="#686868"/><g fill="none" stroke="#fff" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">${shape}</g></svg>`));
 
 function scenario(specs, { pinned = 6, loose = 3, other = false } = {}) {
   const tabs = [], groups = [], windows = [{ id: 1, focused: true }];
@@ -11,8 +20,9 @@ function scenario(specs, { pinned = 6, loose = 3, other = false } = {}) {
   function addWindow(windowId, pinnedCount, groupSpecs, looseCount) {
     let index = 0;
     const add = extra => tabs.push({ id: id++, windowId, index: index++, lastAccessed: 1000 - windowId,
-      title: TITLES[(id - 2) % TITLES.length], favIconUrl: icon, ...extra });
-    for (let i = 0; i < pinnedCount; i++) add({ pinned: true, url: `https://example.com/pin/${windowId}/${i}` });
+      title: TITLES[(id - 2) % TITLES.length], favIconUrl: icons[(id - 2) % icons.length], ...extra });
+    for (let i = 0; i < pinnedCount; i++) add({ pinned: true, favIconUrl: icons[((windowId === 1 ? 0 : pinned) + i) % icons.length],
+      url: `https://example.com/pin/${windowId}/${i}` });
     groupSpecs.forEach((spec, g) => {
       const groupId = windowId * 100 + g + 1;
       groups.push({ id: groupId, windowId, title: spec.title, color: spec.color, collapsed: false });
