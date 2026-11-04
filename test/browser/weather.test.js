@@ -10,7 +10,7 @@ import { showWeatherState, startWeather } from "../../extension/src/tiles/weathe
 
 const NOW = (1790985600 - 3600 + 13 * 3600 + 1200) * 1000;
 const SYNCED = { ...DEFAULT_SETTINGS, showWeather: true, showClock: false, showPinned: false, showSaved: false };
-const okState = (extra = {}) => ({ status: "ok", stale: false, want: "auto", key: "53.35,-6.27", place: "Dublin",
+const okState = (extra = {}) => ({ status: "ok", stale: false, want: "auto", key: "38.72,-9.14", place: "Lisbon",
   fetchedAt: NOW, data: parseForecast(forecastJson()), ...extra });
 
 let css;
@@ -89,7 +89,7 @@ test("every weather text uses Foxy Sans; Foxy Serif is for the clock only", asyn
 test("medium tier shows condition, place and high / low; tall adds the hourly strip from now", async () => {
   const weather = await tile(5, 5);
   assert.equal(weather.querySelector(".weather-condition").textContent, "Partly cloudy");
-  assert.equal(weather.querySelector(".weather-place").textContent, "Dublin");
+  assert.equal(weather.querySelector(".weather-place").textContent, "Lisbon");
   assert.equal(weather.querySelector(".weather-range").textContent.replace(/\s+/g, " ").trim(), "17° / 8°");
   const hours = [...weather.querySelectorAll(".weather-hour-time")].map(n => n.textContent);
   assert.equal(hours[0], "Now"); assert.equal(hours[1], "14"); assert.equal(hours[11], "00");
@@ -358,7 +358,7 @@ test("board re-renders keep the hourly strip's scroll and the focus on Allow wea
     const fetch = fakeFetch({ forecast: forecastJson({ start, offset: 0 }), fail });
     const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], selfTabId: 99, dataCollection, permissions: ["geolocation"],
       tabs: [{ id: 99, windowId: 1 }, { id: 5, windowId: 1, url: "https://a.example/", title: "A" }] });
-    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "S", weatherPlace: { name: "Dublin", lat: 53.35, lon: -6.27 } } });
+    await ff.browser.storage.local.set({ deviceSettings: { cellSize: "S", weatherPlace: { name: "Lisbon", lat: 38.72, lon: -9.14 } } });
     const node = document.createElement("div"); node.className = "board"; node.style.cssText = "width:1232px;height:900px";
     fixture().append(node);
     const control = createController(node, ff.browser, undefined, { weather: { fetch, geolocation: fakeGeolocation() } });
@@ -550,9 +550,9 @@ test("pane: city search is debounced, lists matches and a click picks one", asyn
   assert.deepEqual(queries, ["Dub"]);
   const options = [...container.querySelectorAll(".weather-results button")];
   assert.equal(options.length, 3);
-  assert.equal(options[1].textContent, "DublinCalifornia, United States");
+  assert.equal(options[1].textContent, "LisbonNew Hampshire, United States");
   options[1].click(); await settle();
-  assert.deepEqual(changes, [["device", "weatherPlace", { name: "Dublin", lat: 37.7, lon: -121.94 }]]);
+  assert.deepEqual(changes, [["device", "weatherPlace", { name: "Lisbon", lat: 44.21, lon: -71.91 }]]);
   assert.equal(container.querySelectorAll(".weather-results button").length, 0);
 });
 

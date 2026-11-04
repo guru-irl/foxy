@@ -84,7 +84,7 @@ const valid = [
   ...["low", "medium", "high"].map(value => ["synced", "transparency", value]),
   ["device", "density", "normal"], ["device", "density", "compact"],
   ["synced", "showWeather", false], ["synced", "tempUnit", "F"], ["synced", "tempUnit", "C"],
-  ["device", "weatherPlace", { name: "Dublin", lat: 53.33, lon: -6.25 }], ["device", "weatherPlace", "auto"],
+  ["device", "weatherPlace", { name: "Lisbon", lat: 38.72, lon: -9.14 }], ["device", "weatherPlace", "auto"],
 ];
 for (const [scope, key, value] of valid) {
   test(`saveSetting accepts ${scope}.${key}=${JSON.stringify(value)} in the correct area`, async () => {

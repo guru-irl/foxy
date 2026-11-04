@@ -7,7 +7,7 @@ import { parseForecast } from "../../extension/src/weather/data.js";
 import { weatherTile, renderWeather } from "../../extension/src/tiles/weather.js";
 
 const NOW = (1790985600 - 3600 + 13 * 3600 + 1200) * 1000;
-const ok = (json = {}) => ({ status: "ok", stale: false, want: "auto", key: "53.35,-6.27", place: "Dublin",
+const ok = (json = {}) => ({ status: "ok", stale: false, want: "auto", key: "38.72,-9.14", place: "Lisbon",
   fetchedAt: NOW, data: parseForecast(forecastJson(json)) });
 
 let css;

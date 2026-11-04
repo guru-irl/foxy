@@ -9,7 +9,7 @@ const manifest = JSON.parse(read("manifest.json"));
 test("manifest and package name the add-on Foxy 4.0.0", () => {
   assert.equal(manifest.name, "Foxy");
   assert.equal(manifest.version, "4.0.0");
-  assert.equal(manifest.description, "A grid board of your tabs and tab groups, shared across devices through bookmarks.");
+  assert.equal(manifest.description, "A board of your tabs, tab groups and pinned tabs, saved as bookmarks and synced across devices.");
   const pkg = JSON.parse(readFileSync(new URL("../package.json", root), "utf8"));
   assert.equal(pkg.version, "4.0.0");
 });

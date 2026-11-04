@@ -116,7 +116,7 @@ ROND 0–100). Roundness (ROND) is 0 everywhere. Only group titles are slanted.
    WEDNESDAY, 30 SEPTEMBER
    ↑ ink aligned with PINNED, not the card edge
 
-   PINNED │ SAVED   DEV SERVER   COVERAGE   (more…)   + NEW GROUP │ TABS
+   PINNED │ SAVED   WORK   RESEARCH   (more…)   + NEW GROUP │ TABS
    fixed  │ ← 24px fades only where more content is offscreen → │ fixed
    rows: top/bottom 24px fades only while more rows are hidden
 ```

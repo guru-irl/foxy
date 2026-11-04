@@ -1,4 +1,4 @@
-import { realGroups } from "../test/browser/fixtures/real-groups.js";
+import { demoGroups } from "../test/browser/fixtures/demo-groups.js";
 // Preview fixtures use only inline, neutral icons. No network requests.
 const TITLES = ["YouTube", "Inbox (3)", "Pull request #1234: Fix the flaky sidebar test in the vertical tab strip",
   "Docs", "Calendar", "Figma", "Hacker News", "Weather", "Maps", "Music", "Notes", "Photos"];
@@ -18,6 +18,7 @@ function scenario(specs, { pinned = 6, loose = 3, other = false } = {}) {
       groups.push({ id: groupId, windowId, title: spec.title, color: spec.color, collapsed: false });
       for (let i = 0; i < spec.count; i++) {
         add({ groupId, url: `https://example.com/${groupId}/${i}`,
+          ...(spec.titles ? { title: spec.titles[i] } : {}),
           ...(spec.brokenIcons && i === 1 ? { favIconUrl: "data:image/png;base64,AAAA" } : {}),
           ...(spec.brokenIcons && i === 2 ? { favIconUrl: null } : {}) });
       }
@@ -27,15 +28,15 @@ function scenario(specs, { pinned = 6, loose = 3, other = false } = {}) {
   addWindow(1, pinned, specs, loose);
   if (other) {
     windows.push({ id: 2, focused: false });
-    addWindow(2, 2, [{ title: "READING", color: "orange", count: 6 },
-      { title: "TRAVEL", color: "purple", count: 4 }], 2);
+    addWindow(2, 2, [{ title: "MUSIC", color: "orange", count: 6 },
+      { title: "PHOTOS", color: "purple", count: 4 }], 2);
   }
   // Reverse the API's groups to demonstrate ordering by tab-strip position.
   return { windows, tabs, groups: groups.reverse() };
 }
 
 const one = [
-  { title: "DEV SERVER", color: "red", count: 5, brokenIcons: true },
+  { title: "WORK", color: "red", count: 5, brokenIcons: true },
   { title: "Research with a very long group name that has to be cut off", color: "green", count: 12 },
   { title: "   ", color: "grey", count: 3 },
 ];
@@ -49,8 +50,16 @@ function widgetsBoard() {
   return { ...data, saved, missing: [], folders: Object.fromEntries(data.groups.map(g => [g.id, `preview-${g.id}`])) };
 }
 function realBoard() {
-  const data = scenario(realGroups.map(g => ({ title: g.title, color: g.color, count: 12 })), { pinned: 5, other: true });
-  return { ...data, saved, missing: [], folders: Object.fromEntries(data.groups.map(g => [g.id, g.title.toLowerCase()])),
+  const titles = [
+    ['Reading list', 'A short history of maps', 'The art of noticing', 'Library catalogue', 'Weekend essays'],
+    ['Project notes', 'Design review', 'Team calendar', 'Documentation', 'Tasks for this week', 'Meeting notes'],
+    ['City guide', 'Places to visit', 'Train schedules', 'Museum tickets', 'Weekend itinerary'],
+    ['Dinner ideas', 'Pasta with tomatoes', 'Vegetable soup', 'Bread recipe', 'Seasonal favourites'],
+    ['Research notes', 'Reference library', 'Data sources', 'Ideas to explore'],
+    ['Side project notes', 'Sketches', 'Inspiration', 'Next steps'],
+  ];
+  const data = scenario(demoGroups.map((g, i) => ({ title: g.title, color: g.color, titles: titles[i], count: titles[i].length })), { pinned: 5, other: true });
+  return { ...data, saved, missing: [], folders: Object.fromEntries(data.groups.map(g => [g.id, `preview-${g.id}`])),
     syncedSettings: { otherWindows: true }, deviceSettings: { density: 'normal' },
     board: { order: [], heights: {}, widgets: [], t: 1 } };
 }
@@ -71,7 +80,7 @@ export const SCENARIOS = {
   "two-windows": scenario(one, { other: true }),
   "remote-header": scenario([{ title: "LOCAL", color: "grey", count: 3 }], { other: true }),
   "many-groups": scenario([
-    { title: "DEV SERVER", color: "red", count: 20 },
+    { title: "WORK", color: "red", count: 20 },
     { title: "READING", color: "blue", count: 20 },
     { title: "TRAVEL", color: "purple", count: 3 },
     { title: "SHOPPING", color: "yellow", count: 5 },

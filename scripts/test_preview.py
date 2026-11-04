@@ -2,10 +2,13 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import struct
+import zlib
 import unittest
 from unittest.mock import patch
 
 import preview
+import preview_v40
 
 
 class ScenarioTests(unittest.TestCase):
@@ -29,6 +32,44 @@ class ScenarioTests(unittest.TestCase):
             unittest.mock.call("saved", "scenario=saved", 1600, 1000),
             unittest.mock.call("banner", "scenario=banner", 1600, 1000),
         ])
+
+
+class ReadmePreviewTests(unittest.TestCase):
+    def test_creates_dark_and_light_images_at_1440_by_900(self):
+        scratch = preview.ROOT / ".spider" / "scratch"
+        scratch.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="readme-preview-", dir=scratch) as directory:
+            root = Path(directory)
+            out = root / "docs" / "images"
+
+            def shoot(name, query, width, height):
+                def chunk(kind, data):
+                    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+                header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+                pixels = (b"\0" + b"\0" * width * 3) * height
+                preview.OUT.mkdir(parents=True, exist_ok=True)
+                (preview.OUT / f"{name}.png").write_bytes(
+                    b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header)
+                    + chunk(b"IDAT", zlib.compress(pixels, 0)) + chunk(b"IEND", b""))
+
+            with patch.object(preview, "ROOT", root), patch.object(preview, "OUT", out), \
+                    patch.object(preview, "PAGE"), patch.object(preview, "build_page"), \
+                    patch.object(preview, "ensure_profile"), patch.object(preview, "shoot", side_effect=shoot):
+                preview_v40.main()
+            self.assertTrue(out.is_dir(), "README images directory was not created")
+            self.assertEqual(sorted(p.name for p in out.iterdir()), ["board-dark.png", "board-light.png"])
+            for path in out.iterdir():
+                data = path.read_bytes()
+                self.assertEqual(struct.unpack(">II", data[16:24]), (1440, 900))
+                self.assertLess(len(data), 400_000)
+                offset, parts = 8, []
+                while offset < len(data):
+                    size = struct.unpack(">I", data[offset:offset + 4])[0]
+                    kind = data[offset + 4:offset + 8]
+                    if kind == b"IDAT":
+                        parts.append(data[offset + 8:offset + 8 + size])
+                    offset += size + 12
+                self.assertEqual(zlib.decompress(b"".join(parts)), (b"\0" + b"\0" * 1440 * 3) * 900)
 
 
 class IsolationTests(unittest.TestCase):
