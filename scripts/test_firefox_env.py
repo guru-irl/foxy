@@ -36,6 +36,14 @@ class FirefoxEnvironmentTests(unittest.TestCase):
             with firefox_environment(Path.home() / 'not-scratch'):
                 self.fail('non-scratch environment was accepted')
 
+    def test_disposable_runs_allow_marionette_system_access(self):
+        # Firefox 159 refuses chrome-context Marionette without this, and every
+        # harness that drives a throwaway profile needs it.
+        SCRATCH.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix='env-', dir=SCRATCH) as directory:
+            with firefox_environment(Path(directory) / 'run') as env:
+                self.assertEqual(env['MOZ_REMOTE_ALLOW_SYSTEM_ACCESS'], '1')
+
 
     def test_every_firefox_launcher_uses_the_scratch_environment(self):
         scripts = Path(__file__).resolve().parent

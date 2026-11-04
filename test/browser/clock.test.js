@@ -94,7 +94,8 @@ test("clock settings show 13:05 or 1:05 PM, an ISO time value, and an optional S
 test("clock uses bundled bold upright lining tabular figures and the raised colon", async () => {
   const { time, renderTime } = await clock(); renderTime(time, "12:24");
   const style = getComputedStyle(time);
-  assert.equal(style.fontFamily, '"Foxy Serif", serif'); assert.equal(style.fontWeight, "700");
+  // Firefox 159 drops the quotes from computed family names; compare without them.
+  assert.equal(style.fontFamily.replaceAll('"', ""), "Foxy Serif, serif"); assert.equal(style.fontWeight, "700");
   assert.equal(style.fontStyle, "normal"); assert.equal(style.fontVariantNumeric, "lining-nums tabular-nums");
   assert.equal(style.whiteSpace, "nowrap");
   const colon = getComputedStyle(time.querySelector(".clock-colon"));
