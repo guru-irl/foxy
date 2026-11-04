@@ -834,147 +834,73 @@ button.dot {
   white-space: nowrap;
 }
 
-/* Square cells fill the width; the grid and rail reach the board bottom. */
+/* Three columns share the viewport; only their contents scroll. */
 .board {
   display: flex;
-  justify-content: flex-start;
   flex: 1;
-  /* Title, one tab row, footer gap and gear, with the rail's padding. */
-  min-height: calc(2 * var(--column-padding) + 2 * var(--row) + var(--gap) + var(--settings-gear-size));
+  min-width: 0;
+  min-height: 0;
   position: relative;
   gap: var(--gap);
+  overflow: clip;
 }
-
-.grid {
-  position: relative;
-  isolation: isolate;
-  flex: none;
-  width: calc(var(--cols) * var(--pitch) - var(--gap));
+.pin-overlays { position: absolute; top: 0; left: 0; width: 0; height: 0; }
+.widgets-column { position: relative; flex: none; width: var(--widgets-width); height: 100%; min-height: 0; }
+.widgets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
   height: 100%;
   min-height: 0;
   overflow-y: auto;
-  overflow-x: hidden;
-  /* Classic scrollbars must not take width from the whole-cell tracks. */
   scrollbar-width: none;
 }
-
-.rail {
+.kanban {
   position: relative;
-  flex: none;
-  width: calc(var(--rail-cells) * var(--pitch) - var(--gap));
+  isolation: isolate;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  outline: none;
 }
-
-.rail .rows {
-  margin-bottom: calc(var(--settings-gear-size) + var(--gap));
-}
-
-.tile {
-  position: absolute;
-  left: calc(var(--x) * var(--pitch));
-  top: calc(var(--y) * var(--pitch));
-  width: calc(var(--w) * var(--pitch) - var(--gap));
-  height: calc(var(--h) * var(--pitch) - var(--gap));
-}
-
-.tile .column-header,
-.tile .column-title,
-.tile-header,
-.tile-grab {
-  touch-action: none;
-  cursor: grab;
-}
-
-.tile-header {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 24px;
-}
-
+.kanban-tiles { position: relative; width: 100%; }
+.widgets-inline .widgets { height: auto; overflow: visible; margin-bottom: var(--gap); }
+.rail { position: relative; flex: none; width: var(--rail-width); height: 100%; }
+.rail .rows { margin-bottom: calc(var(--settings-gear-size) + var(--gap)); }
+.tile { position: relative; flex: none; min-width: 0; }
+.kanban-tile { position: absolute; }
+.widget { width: 100%; border-radius: 12px; background: var(--card); backdrop-filter: blur(28px); }
+.tile .column-header, .tile .column-title, .tile-header, .tile-grab { touch-action: none; cursor: grab; }
+.tile-header { position: absolute; top: 0; left: 0; right: 0; height: 24px; }
 .tile-resize {
   position: absolute;
-  z-index: 1;
-  width: 16px;
-  height: 16px;
-  opacity: 0;
-  cursor: nwse-resize;
-  touch-action: none;
-}
-
-.tile-resize[data-corner="nw"] { top: 0; left: 0; }
-.tile-resize[data-corner="ne"] { top: 0; right: 0; cursor: nesw-resize; }
-.tile-resize[data-corner="sw"] { bottom: 0; left: 0; cursor: nesw-resize; }
-.tile-resize[data-corner="se"] { bottom: 0; right: 0; }
-
-.rail-resize {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -4px;
-  width: 8px;
-  cursor: col-resize;
-  touch-action: none;
-}
-
-.grid.gesturing .tile,
-.grid.settling .tile {
-  transition: left 200ms ease-out, top 200ms ease-out, width 200ms ease-out, height 200ms ease-out, transform 200ms ease-out;
-}
-
-.grid .tile { z-index: 1; }
-
-.grid .tile.dragging,
-.grid .tile.sliding {
-  z-index: 3;
-  opacity: 1;
-  box-shadow: none;
-}
-
-.grid .tile.dragging { transition: none; }
-
-.drop-outline {
-  position: absolute;
   z-index: 2;
-  pointer-events: none;
-  box-sizing: border-box;
-  left: calc(var(--x) * var(--pitch));
-  top: calc(var(--y) * var(--pitch));
-  width: calc(var(--w) * var(--pitch) - var(--gap));
-  height: calc(var(--h) * var(--pitch) - var(--gap));
-  border: 2px solid light-dark(rgba(0, 0, 0, 0.45), rgba(255, 255, 255, 0.45));
-  background: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.08));
-  border-radius: 12px;
-}
-
-.grid-corners {
-  position: absolute;
-  z-index: 0;
-  pointer-events: none;
-  left: 0;
-  top: 0;
   width: 100%;
-  height: max(100%, calc(var(--rows) * var(--pitch) - var(--gap)));
-  fill: light-dark(rgba(0, 0, 0, 0.35), rgba(255, 255, 255, 0.35));
+  height: 8px;
+  left: 0;
+  bottom: 0;
+  padding: 0;
   opacity: 0;
-  transition: opacity 120ms ease-out;
+  cursor: ns-resize;
+  touch-action: none;
 }
-
-.grid.gesturing .grid-corners { opacity: 1; }
-
-@media (prefers-reduced-motion: reduce) {
-  .grid.gesturing .tile, .grid.settling .tile, .grid-corners { transition: none; }
+.bar-resize { position: absolute; z-index: 3; top: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; }
+.rail-resize { left: -4px; }
+.widgets-resize { right: -4px; }
+.board[data-layout-dragging] { user-select: none; }
+.board[data-layout-dragging] .kanban, .board[data-layout-dragging] .widgets { mask-image: none; }
+.layout-insertion {
+  position: absolute;
+  pointer-events: none;
+  height: 2px;
+  border-radius: 999px;
+  z-index: 4;
+  background: light-dark(rgba(0,0,0,.65), rgba(255,255,255,.65));
 }
-
-.board[data-grid-dragging] {
-  user-select: none;
-}
-
-.board[data-grid-dragging] .grid {
-  mask-image: none;
-}
-
 .settings-gear {
   position: absolute;
   right: var(--column-padding);
@@ -1011,6 +937,7 @@ button.dot {
   padding: var(--column-padding);
   border-radius: 12px;
   background: var(--card);
+  backdrop-filter: blur(28px);
 }
 
 .column-header,
@@ -1079,31 +1006,37 @@ button.dot {
 /* Masks fade the scrolling content itself, not an overlay or a shadow.
    Missing edge attributes leave a full-strength edge; fitting content has
    no mask at all. Hit testing and the DnD insertion geometry are unchanged. */
+.widgets,
 .rows,
-.grid {
+.kanban {
   --fade-start: 0px;
   --fade-end: 0px;
 }
 
+.widgets[data-scroll-start],
 .rows[data-scroll-start],
-.grid[data-scroll-start] {
+.kanban[data-scroll-start] {
   --fade-start: 24px;
 }
 
+.widgets[data-scroll-end],
 .rows[data-scroll-end],
-.grid[data-scroll-end] {
+.kanban[data-scroll-end] {
   --fade-end: 24px;
 }
 
+.widgets[data-scroll-start],
 .rows[data-scroll-start],
+.widgets[data-scroll-end],
 .rows[data-scroll-end],
-.grid[data-scroll-start],
-.grid[data-scroll-end] {
+.kanban[data-scroll-start],
+.kanban[data-scroll-end] {
   mask-image: linear-gradient(to bottom, transparent, black var(--fade-start), black calc(100% - var(--fade-end)), transparent);
 }
 
+.board[data-dragging] .widgets,
 .board[data-dragging] .rows,
-.board[data-dragging] .grid {
+.board[data-dragging] .kanban {
   mask-image: none;
 }
 
@@ -1113,7 +1046,7 @@ button.dot {
 }
 
 .rows:focus-visible,
-.grid:focus-visible,
+.kanban:focus-visible,
 .row:focus-visible {
   outline: none;
 }
@@ -1189,13 +1122,7 @@ button.group-name:focus-visible {
   background: color-mix(in srgb, var(--card) 85%, var(--text));
 }
 
-.cell-preview {
-  position: absolute;
-  z-index: 1;
-  pointer-events: none;
-  border-radius: 12px;
-  background: light-dark(rgba(0, 0, 0, 0.12), rgba(255, 255, 255, 0.12));
-}
+
 
 .drop-line {
   position: absolute;
@@ -1447,20 +1374,14 @@ button.group-name:focus-visible {
   .memory-system { display: none; }
 }
 
-/* --- Pinned cells ------------------------------------------------------- */
-.pinned {
-  padding: 0;
-  background: transparent;
-  cursor: grab;
-  touch-action: none;
-}
+/* --- Pinned icons ------------------------------------------------------ */
+.pinned { cursor: grab; touch-action: none; }
 .pinned-grid {
+  --cell: 48px;
   display: grid;
-  flex: none;
-  height: 100%;
-  grid-template-columns: repeat(var(--w), var(--cell));
-  grid-auto-rows: var(--cell);
-  gap: var(--gap);
+  grid-template-columns: repeat(auto-fill, 48px);
+  grid-auto-rows: 48px;
+  gap: 16px;
   align-content: start;
   scrollbar-width: none;
 }
@@ -1481,12 +1402,12 @@ button.group-name:focus-visible {
   place-items: center;
   width: 100%;
   height: 100%;
-  background: var(--card);
+  background: transparent;
   border-radius: 8px;
   text-align: center;
 }
-.pin-icon .row-open:hover { background: color-mix(in srgb, var(--card) 92%, var(--text)); }
-.pin-icon .row-open:active, .pin-icon .row-open:focus-visible { background: color-mix(in srgb, var(--card) 85%, var(--text)); }
+.pin-icon .row-open:hover { background: var(--hover); }
+.pin-icon .row-open:active, .pin-icon .row-open:focus-visible { background: var(--pressed); }
 .pin-icon .row-close {
   position: absolute;
   top: 8px;

@@ -28,7 +28,7 @@ test('bars clamp before testing the narrow fallback without mutating preferences
 test('widget default sizes follow content and respect their minimums', () => {
   assert.equal(model.widgetHeight?.('clock',null,304,0,'normal'),160);
   assert.equal(model.widgetHeight?.('clock',20,304,0,'normal'),112);
-  assert.equal(model.widgetHeight?.('pinned',null,304,30,'normal'),184);
+  assert.equal(model.widgetHeight?.('pinned',null,304,30,'normal'),224);
   assert.equal(model.widgetHeight?.('saved',null,304,30,'compact'),240);
   assert.equal(model.widgetHeight?.('weather',null,304,0,'normal'),304);
 });

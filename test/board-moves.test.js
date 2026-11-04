@@ -202,10 +202,10 @@ for (const [tabId, one, two = W2] of [
   });
 }
 
-test("empty-cell new group returns its rectangle after adopting and unpinning a foreign pin", async () => {
+test("empty-kanban new group adopts and unpins a foreign pin", async () => {
   const ff = fixture(), rect = { x: 4, y: 6, w: 3, h: 4 };
   assert.deepEqual(await dropTab(ff.browser, 11, { kind: "new-group", windowId: 1, rect }), {
-    ok: true, groupId: 203, rect: { x: 4, y: 6, w: 3, h: 4 },
+    ok: true, groupId: 203,
   });
   await layouts(ff, "P1 P2 | 3 [101: 4 5] 6 [102: 7 8] 9 [203: 11]", "P12 | 13 [201: 14 15] 16 [202: 17 18] 19");
   assert.equal(ff.calls.some(call => call.api === "storage.sync.set"), false);

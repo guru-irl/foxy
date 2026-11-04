@@ -1,4 +1,3 @@
-import { CELL_PRESETS } from "../grid/layout.js";
 import { validPlace } from "../weather/location.js";
 
 export const DEFAULT_SETTINGS = Object.freeze({
@@ -83,13 +82,6 @@ async function writeSetting(api, scope, key, value) {
   }
   return { synced: await loadScope(api, "sync", "settings", DEFAULT_SETTINGS, syncedRules),
     device: validScope(written, DEFAULT_DEVICE, rules) };
-}
-
-export function cellPx(device) {
-  if (device?.cellSize === "custom") {
-    return Number.isInteger(device.customCell) ? Math.max(40, Math.min(240, device.customCell)) : 80;
-  }
-  return Object.hasOwn(CELL_PRESETS, device?.cellSize) ? CELL_PRESETS[device.cellSize] : CELL_PRESETS.S;
 }
 
 export function cardAlpha(transparency, scheme) {

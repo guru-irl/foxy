@@ -13,7 +13,7 @@ async function styles() {
 }
 function setup() {
   assert.equal(typeof memory.createMemoryController,'function','memory controller exists');
-  const root=document.createElement('div'); fixture().append(root);
+  const root=document.createElement('div'); root.className='board';root.style.cssText='width:1440px;height:600px';fixture().append(root);
   let hidden=false, time=0, timerId=0, reads=0;
   const timers=new Map(), discarded=[];
   const doc=new EventTarget(); Object.defineProperty(doc,'hidden',{get:()=>hidden});
@@ -23,7 +23,7 @@ function setup() {
     tabs:{query:async()=>tabs,get:async id=>tabs.find(t=>t.id===id),discard:async id=>{discarded.push(id);tabs.find(t=>t.id===id).discarded=true;}}};
   const controller=memory.createMemoryController(root,api,{document:doc,now:()=>time,schedule:(fn,ms)=>{timers.set(++timerId,{fn,ms});return timerId;},cancel:id=>timers.delete(id)});
   const board={columns:[],saved:[],pinned:[],tabs:[],missing:[]};
-  const view={cell:48,targetCell:48,total:16,cols:13,railCells:3,tiles:[{id:'memory',kind:'memory',x:0,y:0,w:5,h:6}]};
+  const view={page:{widgets:304,rail:304,kanban:800,fallback:false},widgets:[{id:'memory',kind:'memory',height:360}],tiles:[]};
   const render=()=>{renderBoard(root,board,view,{},{});controller.update();};
   const settle=async()=>{for(let i=0;i<8;i++) await Promise.resolve();await nextFrame();};
   return {root,controller,api,view,tabs,timers,discarded,render,settle,get reads(){return reads;},
@@ -88,8 +88,8 @@ test('memory polls every 5 s only while visible and shown; board rerenders retai
     f.render();await f.settle();assert.equal(f.reads,2);assert.equal(f.root.querySelector('polyline').getAttribute('points'),points);
     f.hide(true);assert.equal(f.timers.size,0);f.controller.update();await f.settle();assert.equal(f.reads,2);
     f.hide(false);await f.settle();assert.equal(f.reads,3);
-    f.view.tiles=[];f.render();await f.settle();assert.equal(f.timers.size,0);assert.equal(f.reads,3);
-    f.view.tiles=[{id:'memory',kind:'memory',x:0,y:0,w:5,h:6}];f.render();await f.settle();assert.equal(f.reads,4);
+    f.view.widgets=[];f.render();await f.settle();assert.equal(f.timers.size,0);assert.equal(f.reads,3);
+    f.view.widgets=[{id:'memory',kind:'memory',height:360}];f.render();await f.settle();assert.equal(f.reads,4);
   } finally {f.controller.stop();f.root.remove();}
 });
 
@@ -155,7 +155,7 @@ test('live board toggles memory through storage and restores its saved placement
     const control=createController(root,ff.browser);await control.refresh();await flush();
     assert.equal(root.querySelector('.memory-total').textContent,'1.0 GB');
     const before=await ff.browser.storage.sync.get(null);
-    const key=Object.keys(before).find(key=>key.endsWith(':memory'));assert.ok(key);
+    const key='board';assert.ok(before.board.widgets.some(w=>w.kind==='memory'));
     ff.calls.length=0;control.schedule();await flush();
     assert.equal(ff.calls.filter(call=>call.api==='storage.sync.set').length,0,'placement is not recreated');
     const shownRequests=requests;
@@ -272,13 +272,13 @@ test('minimum memory tile at S exposes three site rows and hides sparkline befor
     for(let id=10;id<20;id++)f.tabs.push({id,windowId:1,url:`https://host${id}.test/`});
     f.render();await f.settle();
     assert.ok(getComputedStyle(f.root.querySelector('.memory-sparkline')).display!=='none','roomy sparkline');
-    f.view.tiles[0]={id:'memory',kind:'memory',x:0,y:0,w:4,h:5};f.render();await f.settle();
+    f.view.widgets[0]={id:'memory',kind:'memory',height:304};f.render();await f.settle();
     assert.equal(getComputedStyle(f.root.querySelector('.memory-sparkline')).display,'none','hide sparkline first');
     assert.ok(getComputedStyle(f.root.querySelector('.memory-system')).display!=='none','system fits at S minimum');
     const list=f.root.querySelector('.memory-sites'), rows=[...list.querySelectorAll('.memory-row')];
     assert.ok(rows.length>=3);
     assert.ok(rows[2].getBoundingClientRect().bottom<=list.getBoundingClientRect().bottom,'three full rows fit at S');
-    f.view.cell=f.view.targetCell=40;f.render();await f.settle();
+    f.view.widgets[0].height=240;f.render();await f.settle();
     assert.equal(getComputedStyle(f.root.querySelector('.memory-system')).display,'none','hide system next on shorter cells');
     const shortList=f.root.querySelector('.memory-sites');
     assert.ok(shortList.querySelectorAll('.memory-row')[2].getBoundingClientRect().bottom<=shortList.getBoundingClientRect().bottom);

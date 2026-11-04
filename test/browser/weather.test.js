@@ -7,7 +7,6 @@ import { createController } from "../../extension/src/main.js";
 import { forecastJson, fakeFetch, fakeGeolocation, GEOCODING } from "../fakes/weather.js";
 import { parseForecast, REFRESH_MS } from "../../extension/src/weather/data.js";
 import { showWeatherState, startWeather } from "../../extension/src/tiles/weather.js";
-import { attachGridDrag } from "../../extension/src/grid/drag.js";
 
 const NOW = (1790985600 - 3600 + 13 * 3600 + 1200) * 1000;
 const SYNCED = { ...DEFAULT_SETTINGS, showWeather: true, showClock: false, showPinned: false, showSaved: false };
@@ -29,7 +28,7 @@ async function tile(w, h, state = okState(), { scheme = "dark", synced = SYNCED,
   node.style.cssText = `width:1600px;height:900px;color-scheme:${scheme}`;
   fixture().append(node);
   renderBoard(node, { columns: [], pinned: [], tabs: [], saved: [] }, {}, {}, {
-    layout: [{ id: "weather", x: 0, y: 0, w, h }], synced, device: { ...DEFAULT_DEVICE, cellSize: "S" },
+    boxes: [{ id: "weather", width: w * 64 - 16, height: h * 64 - 16 }], synced, device: { ...DEFAULT_DEVICE, cellSize: "S" },
   });
   showWeatherState(node, state, synced, now);
   await nextFrame();
@@ -82,7 +81,7 @@ test("every weather text uses Foxy Sans; Foxy Serif is for the clock only", asyn
     for (const node of [weather, ...weather.querySelectorAll(".weather-body *")]) {
       if (node instanceof SVGElement || !shown(node)) continue;
       const family = getComputedStyle(node).fontFamily;
-      assert.ok(family.startsWith('"Foxy Sans"') && !family.includes("Serif"), `${w}x${h} .${node.className}: ${family}`);
+      assert.ok(family.replaceAll('"', '').startsWith('Foxy Sans') && !family.includes("Serif"), `${w}x${h} .${node.className}: ${family}`);
     }
   }
 });
@@ -403,7 +402,7 @@ async function withTile(deps) {
   const node = document.createElement("div"); node.className = "board"; node.style.cssText = "width:1600px;height:900px";
   fixture().append(node);
   renderBoard(node, { columns: [], pinned: [], tabs: [], saved: [] }, {}, {}, {
-    layout: [{ id: "weather", x: 0, y: 0, w: 5, h: 5 }], synced: deps.current.synced, device: { ...DEFAULT_DEVICE, cellSize: "S" } });
+    boxes: [{ id: "weather", width: 304, height: 304 }], synced: deps.current.synced, device: { ...DEFAULT_DEVICE, cellSize: "S" } });
   return node;
 }
 const settle = async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setTimeout(resolve, 0)); };
@@ -629,29 +628,3 @@ test("board without weather access shows no weather tile", async () => {
   assert.equal(node.querySelector(".tile.weather"), null);
 });
 
-test("the tile moves by its empty space; the retry button does not start a move", async () => {
-  await styles();
-  const node = document.createElement("div"); node.className = "board"; node.style.cssText = "width:1600px;height:900px";
-  fixture().append(node);
-  const view = renderBoard(node, { columns: [], pinned: [], tabs: [], saved: [] }, {}, {}, {
-    layout: [{ id: "weather", x: 0, y: 0, w: 5, h: 5 }], synced: SYNCED, device: { ...DEFAULT_DEVICE, cellSize: "S" } });
-  const states = [];
-  const detach = attachGridDrag(node, { view: () => view, onState: (active, id) => states.push([active, id]),
-    onPreview() {}, onCommit() {}, onCancel() {}, onRail() {}, canCommit: async () => true });
-  try {
-    const press = target => {
-      const box = target.getBoundingClientRect();
-      for (const type of ["pointerdown", "pointerup"]) {
-        target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse",
-          isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1, clientX: box.left + 2, clientY: box.top + 2 }));
-      }
-    };
-    showWeatherState(node, { status: "error", want: "auto" }, SYNCED, NOW);
-    press(node.querySelector(".weather-retry")); await settle();
-    assert.deepEqual(states, []);
-    showWeatherState(node, okState(), SYNCED, NOW);
-    press(node.querySelector(".weather-condition")); await settle();
-    assert.deepEqual(states[0], [true, "weather"]);
-    assert.equal(getComputedStyle(node.querySelector(".weather-body")).cursor, "grab");
-  } finally { detach(); }
-});

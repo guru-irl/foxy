@@ -40,7 +40,7 @@ async function scroll(el, axis, value) {
 }
 
 test("grid scrolls vertically with edge fades, never as a horizontal strip", async () => {
-  const { root } = await draw(); const grid = root.querySelector(".grid");
+  const { root } = await draw(); const grid = root.querySelector(".kanban");
   edges(grid, false, true);
   assert.equal(grid.scrollWidth, grid.clientWidth);
   await scroll(grid, "scrollTop", 100); edges(grid, true, true);
@@ -58,7 +58,7 @@ for (const selector of ['.rows[data-zone="pinned"]', '.rows[data-zone="tabs"]', 
     await scroll(rows, "scrollTop", 0); edges(rows, false, true);
     root.style.height = "1000px";
     const tile = rows.closest(".tile");
-    if (tile) tile.style.setProperty("--h", "12");
+    if (tile) tile.style.height = "1600px";
     await nextFrame(); await nextFrame(); edges(rows, false, false);
   });
 }
@@ -75,7 +75,7 @@ test("even one pixel of hidden row content gets an edge hint", async () => {
   await scroll(rows, "scrollTop", 1); edges(rows, true, false);
 });
 
-for (const [selector, axis, dimension] of [[".rows[data-zone='pinned']", "scrollTop", "height"], [".grid", "scrollTop", "height"]]) {
+for (const [selector, axis, dimension] of [[".rows[data-zone='pinned']", "scrollTop", "height"], [".kanban", "scrollTop", "height"]]) {
   test(`${dimension} with a fractional container size clears the end fade at the scroll maximum`, async () => {
     const { root } = await draw({ height: 600 });
     // Fractional scaling reproduces Firefox's subpixel scroll maximum on a
@@ -93,7 +93,7 @@ for (const [selector, axis, dimension] of [[".rows[data-zone='pinned']", "scroll
 
 test("scroll edge refresh reads every container before writing any edge attributes", async () => {
   const { root } = await draw();
-  const containers = [...root.querySelectorAll(".grid, .rows")];
+  const containers = [...root.querySelectorAll(".kanban, .widgets, .rows")];
   const operations = [];
   const properties = ["scrollLeft", "scrollTop", "scrollWidth", "clientWidth", "scrollHeight", "clientHeight"];
   try {
@@ -125,7 +125,7 @@ for (const sourceSelector of [".row-open"]) {
   test(`dragging a ${sourceSelector} disables all scroll masks until dragend`, async () => {
     const states = [];
     const { root } = await draw({}, { onDragState: active => states.push(active) });
-    const containers = [...root.querySelectorAll(".grid, .rows")];
+    const containers = [...root.querySelectorAll(".kanban, .widgets, .rows")];
     const before = containers.map(node => getComputedStyle(node).maskImage);
     assert.ok(before.every(mask => mask.includes("linear-gradient")));
     const source = root.querySelector(sourceSelector);
@@ -140,7 +140,7 @@ for (const sourceSelector of [".row-open"]) {
   });
 }
 
-for (const selector of [".grid", '.rail .rows[data-zone="tabs"]']) {
+for (const selector of [".kanban", '.rail .rows[data-zone="tabs"]']) {
   test(`tab drag continuously scrolls both vertical edges of ${selector} at 12px per frame`, async () => {
     const { root } = await draw({ height: 360 });
     const area = root.querySelector(selector), source = root.querySelector(".row-open");
@@ -194,16 +194,16 @@ for (const selector of [".grid", '.rail .rows[data-zone="tabs"]']) {
 
 test("short lists and a fitting grid never acquire a fade", async () => {
   const { root } = await draw({ width: 1800, height: 600, groups: 1, count: 1 });
-  for (const el of root.querySelectorAll(".grid, .rows")) edges(el, false, false);
+  for (const el of root.querySelectorAll(".kanban, .widgets, .rows")) edges(el, false, false);
 });
 
 test("new render recalculates fades instead of retaining old edge states", async () => {
   const { root, model } = await draw();
-  const old = root.querySelector(".grid"); await scroll(old, "scrollTop", 100);
+  const old = root.querySelector(".kanban"); await scroll(old, "scrollTop", 100);
   root.style.width = "1800px"; root.style.height = "1000px";
   renderBoard(root, { ...model, columns: [], saved: [], pinned: [{ current: true, rows: model.pinned[0].rows.slice(0, 1) }], tabs: [] }, { editGroupId: null }, {});
   await nextFrame(); await nextFrame();
-  for (const el of root.querySelectorAll(".grid, .rows")) edges(el, false, false);
+  for (const el of root.querySelectorAll(".kanban, .widgets, .rows")) edges(el, false, false);
 });
 
 test("masked scrolled rows still accept a drag and show its insertion line", async () => {
@@ -227,6 +227,6 @@ for (const [scheme, expected] of [["dark", "rgba(22, 22, 24, 0.6)"], ["light", "
   test(`glass cards have the requested ${scheme} transparency`, async () => {
     const { root } = await draw(); root.style.colorScheme = scheme;
     assert.equal(getComputedStyle(root.querySelector(".group")).backgroundColor, expected);
-    assert.equal(getComputedStyle(root.querySelector(".pin-icon .row-open")).backgroundColor, expected);
+    assert.equal(getComputedStyle(root.querySelector(".pinned")).backgroundColor, expected);
   });
 }

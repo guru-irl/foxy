@@ -89,8 +89,8 @@ export function createBoardStore(api) {
 }
 
 export async function resetBoard(api) {
-  const { settings = {} } = await api.storage.sync.get('settings');
+  const { settings = {} } = await api.storage.sync.get(null);
   const { widgetsWidth, railWidth, ...rest } = settings;
-  await api.storage.sync.set({ settings: rest });
   await api.storage.sync.remove('board');
+  await api.storage.sync.set({ settings: rest });
 }

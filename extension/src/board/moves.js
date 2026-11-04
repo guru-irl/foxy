@@ -15,7 +15,7 @@ export async function dropTab(api, tabId, target) {
     }
     if (target.kind === "new-group") {
       const groupId = await api.tabs.group({ tabIds: [tabId], createProperties: { windowId: target.windowId } });
-      return { ok: true, groupId, ...(target.rect ? { rect: target.rect } : {}) };
+      return { ok: true, groupId };
     }
     if (target.kind === "group") {
       await dropIntoGroup(api, tab, target);

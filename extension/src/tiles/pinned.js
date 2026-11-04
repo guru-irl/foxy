@@ -106,7 +106,7 @@ export function pinnedTile(root, sections, handlers, editors) {
       node.style.top = `${Math.max(4, below + size.height <= innerHeight - 4 ? below : bounds.top - size.height - 6)}px`;
     }
     function show() {
-      if (root.hasAttribute('data-dragging') || root.hasAttribute('data-grid-dragging') || root.querySelector('.name-editor')) return;
+      if (root.hasAttribute('data-dragging') || root.hasAttribute('data-layout-dragging') || root.querySelector('.name-editor')) return;
       for (const other of overlays.querySelectorAll('.pin-tooltip')) if (other !== tip) hide(other);
       cancelHide(tip); tip.hidden = false; locate(tip);
     }
@@ -165,7 +165,7 @@ export function pinnedTile(root, sections, handlers, editors) {
   list.addEventListener('keydown', event => {
     if (!event.target.matches('.row-open') || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     const buttons = [...list.querySelectorAll('.row-open')], index = buttons.indexOf(event.target);
-    const cols = Number(tile.style.getPropertyValue('--w'));
+    const cols = Math.max(1, Math.floor((list.clientWidth + 16) / 64));
     const offset = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -cols, ArrowDown: cols }[event.key];
     if (offset === undefined) return;
     event.preventDefault(); event.stopPropagation();
@@ -173,7 +173,8 @@ export function pinnedTile(root, sections, handlers, editors) {
     if (event.key === 'ArrowDown' && Math.floor(index / cols) === Math.floor((buttons.length - 1) / cols)) return;
     buttons[Math.max(0, Math.min(buttons.length - 1, index + offset))]?.focus();
   });
-  tile.append(list);
+  const heading = el('h2', 'column-title'); heading.textContent = 'PINNED';
+  tile.append(heading, list);
   return { tile, overlays, onScroll };
 }
 
@@ -182,7 +183,7 @@ export function pinnedTile(root, sections, handlers, editors) {
 export function pinnedPlacement(zone, x, y) {
   const items = [...zone.querySelectorAll(':scope > .row')], bounds = zone.getBoundingClientRect();
   const cell = parseFloat(getComputedStyle(zone).getPropertyValue('--cell')), pitch = cell + 16;
-  const cols = Number(zone.closest('.tile').style.getPropertyValue('--w'));
+  const cols = Math.max(1, Math.floor((zone.clientWidth + 16) / 64));
   const row = Math.max(0, Math.floor((y - bounds.top + zone.scrollTop) / pitch));
   const localX = Math.max(0, x - bounds.left), col = Math.min(cols - 1, Math.floor(localX / pitch));
   const slot = Math.min(items.length, row * cols + col + (localX - col * pitch >= cell / 2 ? 1 : 0));

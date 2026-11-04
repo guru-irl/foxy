@@ -9,7 +9,7 @@ async function clock(w = 3, h = 2, cell = 80) {
   fixture().append(node);
   const { updateClock, renderTime } = await import("../../extension/src/main.js");
   renderBoard(node, { columns: [], pinned: [], tabs: [], saved: [] }, {}, {}, {
-    layout: [{ id: "clock", x: 0, y: 0, w, h }], device: { ...DEFAULT_DEVICE, cellSize: cell === "S" ? "S" : "custom", customCell: cell === "S" ? 80 : cell },
+    boxes: [{ id: "clock", width: w * ((cell === "S" ? 48 : cell) + 16) - 16, height: h * ((cell === "S" ? 48 : cell) + 16) - 16 }], device: { ...DEFAULT_DEVICE, cellSize: cell === "S" ? "S" : "custom", customCell: cell === "S" ? 80 : cell },
   });
   await document.fonts.ready; await nextFrame();
   return { node, time: node.querySelector(".clock-time"), date: node.querySelector(".clock-date"), updateClock, renderTime };
@@ -94,7 +94,7 @@ test("clock settings show 13:05 or 1:05 PM, an ISO time value, and an optional S
 test("clock uses bundled bold upright lining tabular figures and the raised colon", async () => {
   const { time, renderTime } = await clock(); renderTime(time, "12:24");
   const style = getComputedStyle(time);
-  assert.equal(style.fontFamily, '"Foxy Serif", serif'); assert.equal(style.fontWeight, "700");
+  assert.equal(style.fontFamily.replaceAll('"', ''), 'Foxy Serif, serif'); assert.equal(style.fontWeight, "700");
   assert.equal(style.fontStyle, "normal"); assert.equal(style.fontVariantNumeric, "lining-nums tabular-nums");
   assert.equal(style.whiteSpace, "nowrap");
   const colon = getComputedStyle(time.querySelector(".clock-colon"));

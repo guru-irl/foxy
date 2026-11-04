@@ -1,7 +1,6 @@
 import { pinnedPlacement } from "../tiles/pinned.js";
 import { slotFromPointer, resolveTabTarget } from "./targets.js";
-import { scrollAtEdge } from "../grid/scroll.js";
-import { GAP, clampRect, defaultSize } from "../grid/layout.js";
+import { scrollAtEdge } from "../kanban/scroll.js";
 
 const TAB = "application/x-foxy-tab";
 const bindings = new WeakMap();
@@ -15,7 +14,7 @@ export function attachDnd(root, handlers, board) {
   let clickTimer = 0, frame = 0, pointer = null;
 
   function clearFeedback() {
-    root.querySelectorAll(".drop-line, .cell-preview").forEach(line => line.remove());
+    root.querySelectorAll(".drop-line, .kanban-drop").forEach(line => line.remove());
     root.querySelectorAll(".drop-target").forEach(tile => tile.classList.remove("drop-target"));
   }
   function stopScroll() {
@@ -35,7 +34,7 @@ export function attachDnd(root, handlers, board) {
   function edgeScroll(event) {
     const target = event.target;
     const element = target instanceof Element && root.contains(target)
-      ? target.closest(".pinned-grid") ?? target.closest(".rail")?.querySelector(".rows") ?? target.closest(".grid") : null;
+      ? target.closest(".pinned-grid") ?? target.closest(".rail")?.querySelector(".rows") ?? target.closest(".kanban") : null;
     const bounds = element?.getBoundingClientRect();
     const rail = element?.closest(".rail"), area = rail?.getBoundingClientRect() ?? bounds;
     const { clientX: x, clientY: y } = event;
@@ -45,7 +44,7 @@ export function attachDnd(root, handlers, board) {
     // Keep the actual pointer for hit testing, but scroll the footer like the list's bottom edge.
     const pinned = element.matches('.pinned-grid');
     pointer = { element, x, y, scrollY: rail ? Math.min(y, bounds.bottom - 1) : y,
-      band: pinned ? Math.min(12, bounds.height / 4) : 48, fallback: pinned ? target.closest('.grid') : null };
+      band: pinned ? Math.min(12, bounds.height / 4) : 48, fallback: pinned ? target.closest('.widgets, .kanban') : null };
     if (!frame) frame = requestAnimationFrame(scrollStep);
   }
   function accepts(transfer) {
@@ -56,14 +55,12 @@ export function attachDnd(root, handlers, board) {
     if (!(target instanceof Element) || !root.contains(target)) return null;
     let tile = target.closest(".tile");
     if (!tile && !target.closest(".rail")) {
-      const grid = target.closest(".grid");
+      const grid = target.closest(".kanban");
       if (!grid) return null;
-      const { col, row } = cellPlacement(grid, x, y);
-      tile = [...grid.querySelectorAll(":scope > .tile")].find(tile => {
-        const left = Number(tile.style.getPropertyValue("--x")), top = Number(tile.style.getPropertyValue("--y"));
-        const width = Number(tile.style.getPropertyValue("--w"));
-        const height = Number(tile.style.getPropertyValue("--h"));
-        return col >= left && col < left + width && row >= top && row < top + height;
+      if (target.closest('.widgets')) return null;
+      tile = [...grid.querySelectorAll('.kanban-tile')].find(tile => {
+        const box = tile.getBoundingClientRect();
+        return x >= box.left && x < box.right && y >= box.top && y < box.bottom;
       });
       if (!tile) return grid;
       target = tile.querySelector(".rows") ?? tile;
@@ -71,16 +68,6 @@ export function attachDnd(root, handlers, board) {
     if (tile && !tile.matches('[data-kind="group"], [data-kind="pinned"]')) return null;
     const column = tile ?? target.closest(".rail");
     return target.closest(".rows, .column-header, .column-title, .other-window") ?? column;
-  }
-  function cellPlacement(grid, x, y) {
-    const style = getComputedStyle(grid), bounds = grid.getBoundingClientRect();
-    const cell = parseFloat(style.getPropertyValue("--cell")), cols = Number(style.getPropertyValue("--cols"));
-    const left = parseFloat(style.paddingLeft) || 0, top = parseFloat(style.paddingTop) || 0;
-    const col = Math.max(0, Math.min(cols - 1, Math.floor((x - bounds.left - left + grid.scrollLeft) / (cell + GAP))));
-    const row = Math.max(0, Math.floor((y - bounds.top - top + grid.scrollTop) / (cell + GAP)));
-    const targetCell = parseFloat(style.getPropertyValue("--cell-target"));
-    const { id, ...rect } = clampRect("group:new", { x: col, y: row, ...defaultSize("group", targetCell, cols) }, cols);
-    return { rect, cell, left, top, col, row };
   }
   function dropZone(target) {
     return target.matches(".rows") ? target : target.closest(".column").querySelector(".rows");
@@ -108,15 +95,12 @@ export function attachDnd(root, handlers, board) {
   function feedback(target, x, y) {
     clearFeedback();
     if (!target) return;
-    if (target.matches(".grid")) {
-      const { rect, cell, left, top } = cellPlacement(target, x, y);
-      const preview = document.createElement("div");
-      preview.className = "cell-preview";
-      preview.setAttribute("aria-hidden", "true");
-      Object.assign(preview.style, { left: `${left + rect.x * (cell + GAP)}px`,
-        top: `${top + rect.y * (cell + GAP)}px`, width: `${rect.w * (cell + GAP) - GAP}px`,
-        height: `${rect.h * (cell + GAP) - GAP}px` });
-      target.append(preview);
+    if (target.matches(".kanban")) {
+      const line = document.createElement('div'); line.className = 'drop-line kanban-drop';
+      line.setAttribute('aria-hidden', 'true');
+      const box = target.getBoundingClientRect();
+      Object.assign(line.style, { left: '8px', right: '8px', top: `${y - box.top + target.scrollTop}px` });
+      target.append(line);
       return;
     }
     const { slot, offset, left } = placement(target, x, y);
@@ -168,9 +152,8 @@ export function attachDnd(root, handlers, board) {
     const value = event.dataTransfer.getData(TAB);
     if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) return;
     const id = Number(value);
-    if (target.matches(".grid")) {
-      state.handlers.onTabDrop?.(id, { zone: "cell", tabId: id,
-        rect: cellPlacement(target, event.clientX, event.clientY).rect });
+    if (target.matches(".kanban")) {
+      state.handlers.onTabDrop?.(id, { zone: "kanban", tabId: id });
       return;
     }
     const { slot } = placement(target, event.clientX, event.clientY), zone = dropZone(target);

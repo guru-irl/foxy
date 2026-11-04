@@ -28,15 +28,15 @@ export function groupHeight(tabs, rows = null, density = 'normal') {
 }
 
 export function widgetMinimum(kind, density = 'normal') {
-  return kind === 'pinned' ? 88 : kind === 'saved' ? HEADER + (density === 'compact' ? 24 : 32)
-    : kind === 'memory' ? 176 : 112;
+  return kind === 'pinned' ? 96 : kind === 'saved' ? HEADER + (density === 'compact' ? 24 : 32)
+    : kind === 'memory' ? 304 : 112;
 }
 
 export function widgetHeight(kind, h, width, count = 0, density = 'normal') {
   const row = density === 'compact' ? 24 : 32;
-  const perRow = Math.max(1, Math.floor((width - 16 + 8) / 48));
+  const perRow = Math.max(1, Math.floor((width - 16 + 16) / 64));
   const defaults = { clock: 160, weather: 304, memory: 360,
-    pinned: 40 + clamp(Math.ceil(count / perRow), 1, 3) * 48,
+    pinned: 32 + clamp(Math.ceil(count / perRow), 1, 3) * 64,
     saved: HEADER + clamp(count, 1, 8) * row };
   return Math.max(widgetMinimum(kind, density), h ?? defaults[kind]);
 }
