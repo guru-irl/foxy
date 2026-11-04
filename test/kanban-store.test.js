@@ -62,3 +62,34 @@ test('failed load rejects so a default cannot overwrite unread data',async t=>{
   await assert.rejects(state.load(),/offline/);
   await assert.rejects(state.gesture(b=>b,new Set()),/load/i);
 });
+
+test('the board fits the actual per-item byte quota even with long live GUIDs and explicit heights',async()=>{
+  const ff=createFirefox();await ff.browser.storage.sync.set({board:defaults});const state=store.createBoardStore(ff.browser);await state.load();
+  const order=Array.from({length:400},(_,i)=>`group:${String(i).padStart(12,'0')}`);
+  await state.gesture(b=>({...b,order,heights:Object.fromEntries(order.map(id=>[id,40]))}),new Set(order),999);
+  const value=(await ff.browser.storage.sync.get('board')).board;
+  assert.ok(Buffer.byteLength(JSON.stringify({board:value}),'utf8')<=7600);
+  assert.equal(Object.keys(value.heights).length,0,'known heights go before known ids');
+  assert.equal(value.order[0],order[0]);assert.equal(value.order.includes(order.at(-1)),false);
+  assert.ok(value.order.length>0);assert.ok(value.order.length<=400);
+});
+
+test('the exact 7600-byte boundary survives, but one more byte drops the final known id',async()=>{
+ const raw={...defaults,order:['group:'],t:10};
+ const fill=7600-Buffer.byteLength(JSON.stringify({board:raw}),'utf8');
+ const id='group:'+ 'x'.repeat(fill);
+ for(const extra of ['', 'x']){
+  const ff=createFirefox();await ff.browser.storage.sync.set({board:defaults});const state=store.createBoardStore(ff.browser);await state.load();
+  await state.gesture(b=>({...b,order:[id+extra]}),new Set([id+extra]),10);
+  const written=(await ff.browser.storage.sync.get('board')).board;
+  assert.equal(written.order.length,extra?0:1);
+  assert.ok(Buffer.byteLength(JSON.stringify({board:written}),'utf8')<=7600);
+ }
+});
+test('oversize unknowns lose their heights before a known group loses its height',async()=>{
+ const ff=createFirefox();await ff.browser.storage.sync.set({board:defaults});const state=store.createBoardStore(ff.browser);await state.load();
+ const order=['group:unknown'+ 'x'.repeat(7500),'group:live'];
+ await state.gesture(b=>({...b,order,heights:{[order[0]]:4,'group:live':20}}),new Set(['group:live']),99);
+ const written=(await ff.browser.storage.sync.get('board')).board;
+ assert.deepEqual(written.order,['group:live']);assert.deepEqual(written.heights,{'group:live':20});
+});

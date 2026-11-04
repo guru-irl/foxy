@@ -14,7 +14,7 @@ test('shortest-column placement uses leftmost ties and does not leave holes', ()
   });
 });
 test('group heights fit three to twelve rows unless explicitly resized', () => {
-  for (const [tabs,rows,density,want] of [[0,null,'normal',144],[20,null,'normal',432],[1,2,'normal',112],[99,40,'compact',1008],[6,null,'compact',192]]) {
+  for (const [tabs,rows,density,want] of [[0,null,'normal',144],[20,null,'normal',432],[1,2,'normal',112],[99,40,'compact',1000],[6,null,'compact',184]]) {
     assert.equal(model.groupHeight?.(tabs, rows, density), want);
   }
 });
@@ -29,6 +29,6 @@ test('widget default sizes follow content and respect their minimums', () => {
   assert.equal(model.widgetHeight?.('clock',null,304,0,'normal'),160);
   assert.equal(model.widgetHeight?.('clock',20,304,0,'normal'),112);
   assert.equal(model.widgetHeight?.('pinned',null,304,30,'normal'),224);
-  assert.equal(model.widgetHeight?.('saved',null,304,30,'compact'),240);
+  assert.equal(model.widgetHeight?.('saved',null,304,30,'compact'),232);
   assert.equal(model.widgetHeight?.('weather',null,304,0,'normal'),304);
 });

@@ -847,6 +847,7 @@ button.dot {
 .pin-overlays { position: absolute; top: 0; left: 0; width: 0; height: 0; }
 .widgets-column { position: relative; flex: none; width: var(--widgets-width); height: 100%; min-height: 0; }
 .widgets {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--gap);
@@ -1060,6 +1061,8 @@ button.dot {
 .column-header:hover {
   background: var(--hover);
 }
+
+.column-header:focus-visible { outline: none; background: var(--pressed); }
 
 .row:active,
 .row:focus-visible,

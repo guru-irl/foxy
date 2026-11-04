@@ -8,6 +8,7 @@ import { openTab, closeTabs, closeGroup, bringGroupHere, renameGroup, recolorGro
   dropTab } from "./board/moves.js";
 
 import { buildView } from './kanban/view.js';
+import { attachGestures } from './kanban/gestures.js';
 import { createBoardStore } from './kanban/store.js';
 import { renderSettings, settingActions, resetLayout } from './settings/pane.js';
 import { loadSettings, saveSetting, cardAlpha } from "./settings/store.js";
@@ -102,6 +103,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let warnedSaved = false;
   let retryQueued = true;
   let lastRenderedKey;
+  let transientLayout;
   let actionsInFlight = 0;
   let requestedEditGroupId = null;
   const held = () => actionsInFlight > 0 || ui.dragging || ui.layoutDragging || ui.editing || ui.editGroupId != null;
@@ -291,26 +293,46 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       ...board.saved.map(g => `group:${g.folderId}`), ...board.missing.map(g => `group:${g.folderId}`)]);
   }
 
+  // Local-only identities remain in this page's draft, never in sync storage.
+  // Promote them in memory when the bookmark mapping arrives; a later gesture
+  // can persist that identity, but the mapping/render itself writes nothing.
+  function displayLayout() {
+    if (!transientLayout || transientLayout.t !== layoutState.layout.t) return layoutState.layout;
+    const mapped = id => id.startsWith('local:') && savedReply.folders?.[id.slice(6)]
+      ? `group:${savedReply.folders[id.slice(6)]}` : id;
+    transientLayout = { ...transientLayout, order: transientLayout.order.map(mapped),
+      heights: Object.fromEntries(Object.entries(transientLayout.heights).map(([id,h]) => [mapped(id),h])) };
+    return transientLayout;
+  }
+
+  function makeView(layout, widths = {}) {
+    const synced = { ...layoutState.synced, ...widths, ...(!weather ? { showWeather: false } : {}) };
+    return buildView(board, { board: layout, synced, device: layoutState.device,
+      contentWidth: pageWidth(), folders: savedReply.folders ?? {} });
+  }
+
+  function paint(next) {
+    const saved = captureView(root);
+    renderBoard(root, board, next, ui, handlers, layoutState.synced);
+    memory.update();
+    gear()?.setAttribute('aria-expanded', String(settingsPane ? !settingsPane.hidden : false));
+    if (settingsPane?.id) gear()?.setAttribute('aria-controls', settingsPane.id);
+    restoreView(root, saved);
+  }
+
   function publish() {
     if (ui.layoutDragging) { pendingView = true; return; }
     if (!board || !layoutState || !firstPaintReady) return;
     board = buildBoard({ ...snapshot, ...savedReply, otherWindows: layoutState.synced.otherWindows });
-    const synced = weather ? layoutState.synced : { ...layoutState.synced, showWeather: false };
-    view = buildView(board, { board: layoutState.layout, synced, device: layoutState.device,
-      contentWidth: pageWidth(), folders: savedReply.folders ?? {} });
+    view = makeView(displayLayout());
     pendingView = false;
     const key = JSON.stringify({ board, view, settings: layoutState.synced, device: layoutState.device,
       ui: { ...ui, busy: [...ui.busy].sort() } });
     if (key !== lastRenderedKey) {
-      const saved = captureView(root);
       root.style.setProperty('--card-alpha-dark', cardAlpha(layoutState.synced.transparency, 'dark'));
       root.style.setProperty('--card-alpha-light', cardAlpha(layoutState.synced.transparency, 'light'));
       root.style.setProperty('--row', layoutState.device.density === 'compact' ? '24px' : '32px');
-      renderBoard(root, board, view, ui, handlers, layoutState.synced);
-      memory.update();
-      gear()?.setAttribute('aria-expanded', String(settingsPane ? !settingsPane.hidden : false));
-      if (settingsPane?.id) gear()?.setAttribute('aria-controls', settingsPane.id);
-      restoreView(root, saved);
+      paint(view);
       lastRenderedKey = key;
       if (hasValidSavedReply) boardStore.observe(liveIds());
     }
@@ -466,6 +488,41 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     },
   };
 
+  const detachGestures = attachGestures(root, {
+    state: () => ({ view, layout: displayLayout(), density: layoutState.device.density }),
+    canStart: () => !!view && !unloaded && !held(),
+    canCommit: async id => { try { await api.tabGroups.get(id); return !unloaded; } catch { return false; } },
+    onState: active => interaction('layoutDragging', active),
+    onCancel: () => { lastRenderedKey = undefined; pendingView = true; },
+    onPreview: (draft, widths) => {
+      view = makeView(draft, widths);
+      if (widths) paint(view);
+      else {
+        positionTiles(root.querySelector('.kanban-tiles'), view.tiles);
+        for (const widget of view.widgets) {
+          root.querySelector(`[data-kind="${widget.kind}"]`).style.height = `${widget.height}px`;
+        }
+        updateScrollEdges(root);
+      }
+    },
+    onCommit: (draft, widths) => {
+      const save = persistence.then(async () => {
+        if (widths) {
+          const [key, value] = Object.entries(widths)[0];
+          await saveSetting(api, 'synced', key, value);
+          layoutState.synced = { ...layoutState.synced, [key]: value };
+        } else {
+          const written = await boardStore.gesture(() => draft, liveIds());
+          transientLayout = { ...draft, t: written.t };
+          layoutState.layout = written;
+        }
+        lastRenderedKey = undefined; pendingView = true;
+      });
+      persistence = save.catch(() => {});
+      return save;
+    },
+  });
+
   api.storage.onChanged.addListener((changes, area) => {
     if (!root.isConnected) return;
     if ((area === 'sync' && ('board' in changes || 'settings' in changes)) ||
@@ -486,6 +543,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   window.addEventListener("pagehide", () => {
     unloaded = true;
     memory.stop();
+    detachGestures();
     weatherLoop?.stop();
   }, { once: true });
 

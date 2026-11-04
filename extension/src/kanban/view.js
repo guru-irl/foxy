@@ -11,6 +11,6 @@ export function buildView(data, { board, synced, device, contentWidth, folders =
   }));
   const rank = new Map(board.order.map((id,i)=>[id,i]));
   groups.sort((a,b) => Number(b.group.current) - Number(a.group.current) || (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
-  const placed = placeTiles(groups.map(g => ({ ...g, height: groupHeight(g.group.rows.length, board.heights[g.id], device.density) })), page.kanban);
+  const placed = placeTiles(groups.map(g => ({ ...g, height: groupHeight(g.group.rows.length, board.heights[g.id], device.density, !g.group.current) })), page.kanban);
   return { page, widgets, ...placed };
 }

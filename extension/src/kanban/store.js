@@ -19,14 +19,25 @@ export function validBoard(raw) {
 
 function bounded(board, live, absent) {
   const ids = [...new Set([...board.order, ...Object.keys(board.heights)])];
-  const keep = ids.filter(id => live.has(id) || (absent.get(id) ?? 0) < 2);
-  while (keep.length > 400) {
-    const unknown = keep.findIndex(id => !live.has(id));
-    keep.splice(unknown < 0 ? keep.length - 1 : unknown, 1);
+  const expired = ids.filter(id => !live.has(id) && (absent.get(id) ?? 0) >= 2);
+  const next = { ...board, order: [...board.order], heights: { ...board.heights } };
+  const remove = id => {
+    next.order = next.order.filter(value => value !== id);
+    delete next.heights[id];
+    const index = ids.indexOf(id); if (index >= 0) ids.splice(index, 1);
+  };
+  expired.forEach(remove);
+  // Counting the envelope is slightly more conservative than key + value.
+  const bytes = () => new TextEncoder().encode(JSON.stringify({ board: next })).byteLength;
+  const unknown = ids.filter(id => !live.has(id));
+  while (unknown.length && (ids.length > 400 || bytes() > 7600)) remove(unknown.shift());
+  while (ids.length > 400) remove(ids.at(-1));
+  for (const id of [...ids].reverse()) {
+    if (bytes() <= 7600) break;
+    delete next.heights[id];
   }
-  const allowed = new Set(keep);
-  return { ...board, order: board.order.filter(id => allowed.has(id)),
-    heights: Object.fromEntries(Object.entries(board.heights).filter(([id]) => allowed.has(id))) };
+  while (bytes() > 7600 && ids.length) remove(ids.at(-1));
+  return next;
 }
 
 async function upgrade(api, entries) {
@@ -76,8 +87,7 @@ export function createBoardStore(api) {
     gesture(change, live, now = Date.now()) {
       if (!loaded) return Promise.reject(new Error('Load board before writing'));
       const job = writes.then(async () => {
-        const next = bounded(validBoard(change(structuredClone(value))), live, absent);
-        next.t = now;
+        const next = bounded({ ...validBoard(change(structuredClone(value))), t: now }, live, absent);
         await api.storage.sync.set({ board: next });
         value = next;
         return next;
