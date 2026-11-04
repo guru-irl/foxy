@@ -36,7 +36,7 @@ function scenario(specs, { pinned = 6, loose = 3, other = false } = {}) {
 }
 
 const one = [
-  { title: "DEV SERVER", color: "red", count: 5, brokenIcons: true },
+  { title: "WORK", color: "red", count: 5, brokenIcons: true },
   { title: "Research with a very long group name that has to be cut off", color: "green", count: 12 },
   { title: "   ", color: "grey", count: 3 },
 ];
@@ -80,7 +80,7 @@ export const SCENARIOS = {
   "two-windows": scenario(one, { other: true }),
   "remote-header": scenario([{ title: "LOCAL", color: "grey", count: 3 }], { other: true }),
   "many-groups": scenario([
-    { title: "DEV SERVER", color: "red", count: 20 },
+    { title: "WORK", color: "red", count: 20 },
     { title: "READING", color: "blue", count: 20 },
     { title: "TRAVEL", color: "purple", count: 3 },
     { title: "SHOPPING", color: "yellow", count: 5 },

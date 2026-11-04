@@ -17,7 +17,7 @@ and delete require Foxy 3.4.0 or newer.
 agent/foxy groups --json
 agent/foxy tabs "To be reviewed" --json
 agent/foxy add "To be reviewed" https://example.com/review
-agent/foxy add "Dev server" http://localhost:3000
+agent/foxy add "Side project" http://localhost:3000
 # Both creation forms below require a group name explicitly given by the user:
 agent/foxy new "Release notes" https://example.com/release --color blue
 agent/foxy add "Research" https://example.com/article --create --color green

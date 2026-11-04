@@ -5,7 +5,7 @@ import { buildBoard } from "../../extension/src/board/model.js";
 const setup = () => ({
   windows: [{ id: 1, focused: true }, { id: 2 }, { id: 3 }], selfTabId: 99,
   groups: [
-    { id: 101, windowId: 1, title: "DEV SERVER", color: "red" },
+    { id: 101, windowId: 1, title: "WORK", color: "red" },
     { id: 102, windowId: 1, title: "   ", color: "grey" },
     { id: 201, windowId: 2, title: "Research with a very long name that must never widen its column", color: "green" },
   ],
@@ -104,9 +104,9 @@ test("close, bring, rename and colour labels identify their tab or group", async
   const node = await draw();
   assert.equal(node.querySelector('[data-tab-id="12"] .row-close').getAttribute("aria-label"), "Close tab: <b>Literal title</b>");
   const named = node.querySelector('[data-group-id="101"]');
-  assert.equal(named.querySelector(".column-close").getAttribute("aria-label"), "Close group: DEV SERVER");
-  assert.equal(named.querySelector(".group-name").getAttribute("aria-label"), "Rename DEV SERVER");
-  assert.equal(named.querySelector(".dot").getAttribute("aria-label"), "Colour of DEV SERVER");
+  assert.equal(named.querySelector(".column-close").getAttribute("aria-label"), "Close group: WORK");
+  assert.equal(named.querySelector(".group-name").getAttribute("aria-label"), "Rename WORK");
+  assert.equal(named.querySelector(".dot").getAttribute("aria-label"), "Colour of WORK");
   const unnamed = node.querySelector('[data-group-id="102"]');
   assert.equal(unnamed.querySelector(".column-close").getAttribute("aria-label"), "Close group: Unnamed");
   assert.equal(unnamed.querySelector(".group-name").getAttribute("aria-label"), "Rename Unnamed");

@@ -85,7 +85,7 @@ Open the gear on the board, or open Foxy's options in about:addons. Changes appl
 | Location data collection (optional) | Allow weather requests |
 | Site access (optional) | Rename a pin on that site |
 
-Foxy collects no data. Weather requests go to Open-Meteo and BigDataCloud only after **Allow weather**. Location coordinates are rounded to two decimals before requests. A searched city does not need geolocation permission. Revoking either permission removes the cached forecast and place name. Weather needs no API key, account, or cookies.
+Foxy collects no data. Weather requests go to Open-Meteo and BigDataCloud only after **Allow weather**. Location coordinates are rounded to two decimals before requests. A searched city does not need geolocation permission. Revoking location data consent removes the cached forecast and place name. When weather uses your location, revoking geolocation removes them too. Weather needs no API key, account, or cookies.
 
 ## Limits
 
@@ -108,13 +108,13 @@ ln -s "$PWD/skills/foxy-tabs" ~/.agents/skills/foxy-tabs
 agent/foxy groups
 agent/foxy tabs "To be reviewed"
 agent/foxy add "To be reviewed" https://example.com/review
-agent/foxy new "Dev server" http://localhost:3000 --color blue
+agent/foxy new "Side project" http://localhost:3000 --color blue
 agent/foxy add "Research" https://example.com/article --create
 agent/foxy remove "To be reviewed" https://example.com/review
 agent/foxy delete "Old work" --close-tabs
 ```
 
-Tabs open in the background. Adding to a saved group adds bookmarks without opening it. Missing groups are refused unless `--create` is used. Remove or delete only what the user asks for. Active tabs cannot be closed, and a group open on another device may reappear. Commands accept `--json` and exit with 0 for success, 1 for refusal, or 2 when Foxy is unreachable.
+Tabs open in the background. Adding to a saved group adds bookmarks without opening it. Missing groups are refused unless `--create` is used. Remove or delete only what the user asks for. Prefer ungrouping to closing tabs, and report deleted URLs. Active tabs cannot be closed, and a group open on another device may reappear. Commands accept `--json` and exit with 0 for success, 1 for refusal, or 2 when Foxy is unreachable.
 
 The helper runs from this repository. Update it with `git pull` before installing a newer Foxy. An older helper may show "Memory unavailable". To remove it, run `python3 scripts/install_agent.py --uninstall`.
 
