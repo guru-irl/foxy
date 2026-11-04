@@ -81,8 +81,8 @@ test("every weather text uses Foxy Sans; Foxy Serif is for the clock only", asyn
     const weather = await tile(w, h);
     for (const node of [weather, ...weather.querySelectorAll(".weather-body *")]) {
       if (node instanceof SVGElement || !shown(node)) continue;
-      const family = getComputedStyle(node).fontFamily;
-      assert.ok(family.startsWith('"Foxy Sans"') && !family.includes("Serif"), `${w}x${h} .${node.className}: ${family}`);
+      const family = getComputedStyle(node).fontFamily.replaceAll('"', "");
+      assert.ok(family.startsWith("Foxy Sans") && !family.includes("Serif"), `${w}x${h} .${node.className}: ${family}`);
     }
   }
 });
