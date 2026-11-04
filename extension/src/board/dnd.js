@@ -44,7 +44,7 @@ export function attachDnd(root, handlers, board) {
     // Keep the actual pointer for hit testing, but scroll the footer like the list's bottom edge.
     const pinned = element.matches('.pinned-grid');
     pointer = { element, x, y, scrollY: rail ? Math.min(y, bounds.bottom - 1) : y,
-      band: pinned ? Math.min(12, bounds.height / 4) : 48, fallback: pinned ? target.closest('.widgets, .kanban') : null };
+      band: pinned ? Math.min(12, bounds.height / 4) : 48, fallback: pinned ? target.closest('.kanban') ?? target.closest('.widgets') : null };
     if (!frame) frame = requestAnimationFrame(scrollStep);
   }
   function accepts(transfer) {

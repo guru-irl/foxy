@@ -110,6 +110,26 @@ for(const compact of [false,true])test(`${compact?'compact':'normal'} remote til
  assert.equal((await board(ff)).heights['group:three'],5);assert.equal(root.querySelector('[data-tile-id="group:three"] .rows').clientHeight,5*row);
 });
 
+test('1511px page uses whole-pixel bar, tile, handle and insertion edges, flush with the kanban', async () => {
+ const {root,ff}=await setup({width:1511});
+ const whole = node => {
+  const r=node.getBoundingClientRect();
+  for(const key of ['left','right','top','bottom','width','height']) assert.ok(Number.isInteger(r[key]),`${node.className} ${key} = ${r[key]}`);
+ };
+ const check = () => root.querySelectorAll('.tile, .widgets-column, .kanban, .rail, .bar-resize, .tile-resize, .layout-insertion').forEach(whole);
+ check();
+ const tiles=[...root.querySelectorAll('.kanban-tile')].map(t=>t.getBoundingClientRect());
+ assert.equal(Math.max(...tiles.map(r=>r.right)),root.querySelector('.kanban').getBoundingClientRect().right,'last track takes the remainder');
+ for(const [source,target] of [['[data-tile-id="group:one"] .column-header','[data-tile-id="group:two"]'],['.clock','.saved']]) {
+  begin(root.querySelector(source));const [x,y]=at(root.querySelector(target),.5,.9);
+  pointer(document,'pointermove',x,y);await nextFrame();assert.ok(root.querySelector('.layout-insertion'));check();
+  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await flush(ff);
+ }
+ await ff.browser.storage.sync.set({settings:{widgetsWidth:1000,railWidth:1000}});await flush(ff);check();
+ assert.equal(root.querySelector('.rail').getBoundingClientRect().width,503,'bar clamp floors a third of the page');
+ assert.equal(root.querySelector('.widgets-column').getBoundingClientRect().width,503);
+});
+
 test('a later synced board wins even when its timestamp matches this page draft',async()=>{
  const {root,ff}=await setup();const [x,y]=begin(root.querySelector('.clock .tile-resize'));
  pointer(document,'pointermove',x,y+71);pointer(document,'pointerup',x,y+71);await flush(ff);

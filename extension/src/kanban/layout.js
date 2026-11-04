@@ -4,11 +4,12 @@ export const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
 export function columns(width) {
   const count = clamp(Math.floor((width + GAP) / 316), 1, 4);
-  return { count, width: (width - (count - 1) * GAP) / count };
+  return { count, width: Math.floor((width - (count - 1) * GAP) / count) };
 }
 
 export function pageColumns(width, widgetsWidth = 304, railWidth = 304) {
-  const widgets = clamp(widgetsWidth, 240, width / 3), rail = clamp(railWidth, 240, width / 3);
+  const maximum = Math.floor(width / 3);
+  const widgets = clamp(widgetsWidth, 240, maximum), rail = clamp(railWidth, 240, maximum);
   const available = width - widgets - rail - 2 * GAP, fallback = available < 200;
   return { widgets, rail, kanban: fallback ? Math.max(0, width - rail - GAP) : available, fallback };
 }
@@ -18,7 +19,8 @@ export function placeTiles(entries, width) {
   const tiles = entries.map(tile => {
     const column = bottoms.indexOf(Math.min(...bottoms)), y = bottoms[column];
     bottoms[column] += tile.height + GAP;
-    return { ...tile, x: column * (geometry.width + GAP), y, w: geometry.width };
+    const x = column * (geometry.width + GAP);
+    return { ...tile, x, y, w: column === geometry.count - 1 ? width - x : geometry.width };
   });
   return { tiles, height: Math.max(0, ...bottoms) - (tiles.length ? GAP : 0) };
 }

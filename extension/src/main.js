@@ -9,9 +9,9 @@ import { openTab, closeTabs, closeGroup, bringGroupHere, renameGroup, recolorGro
 
 import { buildView } from './kanban/view.js';
 import { attachGestures } from './kanban/gestures.js';
-import { createBoardStore } from './kanban/store.js';
+import { createBoardStore, validBoard } from './kanban/store.js';
 import { renderSettings, settingActions, resetLayout } from './settings/pane.js';
-import { loadSettings, saveSetting, cardAlpha } from "./settings/store.js";
+import { loadSettings, saveSetting, cardAlpha, DEFAULT_SETTINGS, DEFAULT_DEVICE } from "./settings/store.js";
 import { startWeather } from "./tiles/weather.js";
 export { renderTime, updateClock } from "./board/render.js";
 
@@ -54,6 +54,8 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   let view;
   let layoutState;
   let layoutRead;
+  let layoutRetryTimer = 0;
+  let layoutRetried = false;
   let storageVersion = 0;
   let loadedVersion = -1;
   let pendingLayout = false;
@@ -67,8 +69,11 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   const settingsPane = root.parentElement?.querySelector(":scope > .settings-pane");
   const paneHandlers = settingActions(api, async () => {
     await persistence;
+    if (!layoutState?.writable) throw new Error('Load board before writing');
     await resetLayout(api);
   }, weather?.fetch);
+  paneHandlers.onChange = (scope, key, value) => layoutState?.writable
+    ? saveSetting(api, scope, key, value) : Promise.reject(new Error('Load board before writing'));
   const page = root.parentElement?.matches(".page") ? root.parentElement : root;
   const pageWidth = () => page.getBoundingClientRect().width;
   const gear = () => root.querySelector(".settings-gear");
@@ -123,16 +128,34 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
       const version = storageVersion;
       layoutRead = (async () => {
         await persistence;
+        // Settings default per scope on read failure. Track failures so those
+        // defaults cannot enable writes or start an upgrade of unread storage.
+        let failed = false;
+        const readingApi = { storage: Object.fromEntries(['sync', 'local'].map(area => [area, {
+          get: async (...args) => {
+            try { return await api.storage[area].get(...args); }
+            catch (error) { failed = true; throw error; }
+          },
+        }])) };
+        const settings = await loadSettings(readingApi);
+        if (failed) throw new Error('Could not read settings');
         const layout = await boardStore.load();
-        const settings = await loadSettings(api);
+        clearTimeout(layoutRetryTimer); layoutRetryTimer = 0;
         return { layout, ...settings, version, writable: true };
       })().catch(error => {
         console.warn('Foxy: could not read board layout', error);
-        return layoutState ? { ...layoutState, writable: false, version } : null;
+        if (!layoutRetried && !layoutRetryTimer) {
+          layoutRetryTimer = setTimeout(() => {
+            layoutRetryTimer = 0; layoutRetried = true;
+            if (unloaded || !root.isConnected) return;
+            ++storageVersion; pendingLayout = true; enqueue();
+          }, 2000);
+        }
+        return { layout: validBoard(null), synced: { ...DEFAULT_SETTINGS }, device: { ...DEFAULT_DEVICE },
+          writable: false, version };
       });
     }
     const next = await layoutRead; layoutRead = null;
-    if (!next) return false;
     if (held() || next.version !== storageVersion) { pendingLayout = true; enqueue(); return false; }
     layoutState = next; loadedVersion = next.version; pendingLayout = false;
     return true;
@@ -509,6 +532,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
     },
     onCommit: (draft, widths) => {
       const save = persistence.then(async () => {
+        if (!layoutState.writable) throw new Error('Load board before writing');
         if (widths) {
           const [key, value] = Object.entries(widths)[0];
           await saveSetting(api, 'synced', key, value);
@@ -544,6 +568,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   const onChange = () => schedule();
   window.addEventListener("pagehide", () => {
     unloaded = true;
+    clearTimeout(layoutRetryTimer);
     memory.stop();
     detachGestures();
     weatherLoop?.stop();

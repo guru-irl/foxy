@@ -617,6 +617,40 @@ test("board without locationInfo shows the Allow weather pill and never geolocat
   assert.equal(geolocation.calls, 0);
 });
 
+test("weather reorders by its body, but the retry button does not start a widget move", async () => {
+  await styles();
+  const ff = createBoardFirefox({windows: [{id: 1}], tabs: [{id: 99, windowId: 1}], selfTabId: 99});
+  await ff.browser.storage.sync.set({board: {order: [], heights: {}, widgets: [], t: 1},
+    settings: {showClock: true, showPinned: false, showSaved: false, showMemory: false, showWeather: true}});
+  const node = document.createElement('div'); node.className = 'board'; node.style.cssText = 'width:1600px;height:900px';
+  fixture().append(node);
+  const control = createController(node, ff.browser, undefined, {weather: {fetch: fakeFetch(), geolocation: fakeGeolocation()}});
+  const flush = async () => { for (let i = 0; i < 5; i++) { await ff.settle(); await nextFrame(); } };
+  await control.refresh(); await flush(); ff.calls.length = 0;
+  const pointer = (target, type, x, y) => target.dispatchEvent(new PointerEvent(type, {bubbles: true, cancelable: true,
+    pointerId: 1, pointerType: 'mouse', isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x, clientY: y}));
+  const press = target => {
+    const r = target.getBoundingClientRect(), x = r.left + 2, y = r.top + 2;
+    pointer(target, 'pointerdown', x, y); return [x, y];
+  };
+  showWeatherState(node, {status: 'error', want: 'auto'}, SYNCED, NOW);
+  const [rx, ry] = press(node.querySelector('.weather-retry'));
+  pointer(document, 'pointermove', rx, ry - 180); pointer(document, 'pointerup', rx, ry - 180); await flush();
+  assert.equal(control.ui.layoutDragging, false);
+  assert.equal(node.querySelector('.layout-insertion'), null);
+  assert.equal(ff.calls.filter(c => c.api === 'storage.sync.set').length, 0);
+  showWeatherState(node, okState(), SYNCED, NOW);
+  press(node.querySelector('.weather-condition'));
+  const r = node.querySelector('.clock').getBoundingClientRect(), x = r.left + 20, y = r.top + 20;
+  pointer(document, 'pointermove', x, y); await nextFrame();
+  assert.ok(node.querySelector('.layout-insertion'));
+  assert.equal(getComputedStyle(node.querySelector('.weather-body')).cursor, 'grab');
+  pointer(document, 'pointerup', x, y); await flush();
+  assert.deepEqual([...node.querySelectorAll('.widget')].map(w => w.dataset.kind), ['weather', 'clock']);
+  assert.deepEqual((await ff.browser.storage.sync.get('board')).board.widgets.map(w => w.kind), ['weather', 'clock', 'pinned', 'memory', 'saved']);
+  assert.equal(ff.calls.filter(c => c.api === 'storage.sync.set').length, 1);
+});
+
 test("board without weather access shows no weather tile", async () => {
   await styles();
   const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }], tabs: [{ id: 99, windowId: 1 }], selfTabId: 99 });

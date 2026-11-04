@@ -276,15 +276,21 @@ test("two failed toggle clicks end showing the stored value", async () => {
     assert.ok(warnings.some(args => String(args[0]).startsWith("Foxy:")));
   } finally { ff.browser.storage.sync.set = set; console.warn = warn; }
 });
-test("a failed reset logs and keeps tile keys, with the reset button usable again", async () => {
-  const { ff, node, pane } = await setup(); node.querySelector(".settings-gear").click();
-  const before = await ff.browser.storage.sync.get(null), remove = ff.browser.storage.sync.remove, warn = console.warn, warnings = [];
-  ff.browser.storage.sync.remove = async () => { throw new Error("unavailable"); }; console.warn = (...args) => warnings.push(args);
+for (const method of ['set', 'remove']) test(`a failed reset ${method} logs, keeps the board and legacy keys, and leaves Reset usable`, async () => {
+  const {ff, node, pane} = await setup();
+  await ff.browser.storage.sync.set({settings: {widgetsWidth: 400, railWidth: 300, showClock: false},
+    'tile:12:group:one': {}, 'layout:12': {t: 1}, railCells: 2}); await flush(ff);
+  node.querySelector('.settings-gear').click();
+  const before = await ff.browser.storage.sync.get(null), original = ff.browser.storage.sync[method], warn = console.warn, warnings = [];
+  ff.browser.storage.sync[method] = async () => { throw new Error('unavailable'); }; console.warn = (...args) => warnings.push(args);
   try {
-    const reset = pane.querySelector(".settings-reset"); reset.click(); await waitForConfirm(); reset.click(); await flush(ff);
-    assert.deepEqual(await ff.browser.storage.sync.get(null), before); assert.equal(reset.disabled, false);
-    assert.ok(warnings.some(args => String(args[0]).startsWith("Foxy:")));
-  } finally { ff.browser.storage.sync.remove = remove; console.warn = warn; }
+    const reset = pane.querySelector('.settings-reset'); reset.click(); await waitForConfirm(); reset.click(); await flush(ff);
+    // Settings must be durable before removal. If removal fails, only widths
+    // have reset; a failed settings write must leave everything untouched.
+    assert.deepEqual(await ff.browser.storage.sync.get(null), method === 'set' ? before : {...before, settings: {showClock: false}});
+    assert.equal(reset.disabled, false);
+    assert.ok(warnings.some(args => String(args[0]).startsWith('Foxy:')));
+  } finally { ff.browser.storage.sync[method] = original; console.warn = warn; }
 });
 test('reset clears the board and pixel widths while keeping widget toggles',async()=>{
  const {ff,node,pane}=await setup();
@@ -376,7 +382,7 @@ test("options.html renders the shared pane, saves and resets tile keys and layou
   assert.equal(writes(ff).length - before, 1); assert.equal(node.style.getPropertyValue("--row"), "24px");
   const reset = pane.querySelector(".settings-reset"), start = ff.calls.length; reset.click(); await waitForConfirm(); reset.click(); await flush(ff);
   const removals = ff.calls.slice(start).filter(c => c.api === "storage.sync.remove"); assert.equal(removals.length, 1);
-  assert.equal(removals[0].args[0], "board");
+  assert.deepEqual(removals[0].args[0], ["board"]);
   const stored = await ff.browser.storage.sync.get(null); assert.equal(stored.keep, 7);
   assert.deepEqual(stored.settings, { transparency: "high" });
   assert.ok(!stored.board || stored.board.order.length === 0); assert.equal((await ff.browser.storage.local.get("deviceSettings")).deviceSettings.density, "compact");

@@ -7,8 +7,8 @@ const defaults = {order:[],heights:{},widgets:kinds.map(kind=>({kind,h:null})),t
 
 test('board validates the storage boundary and excludes local-only identities', () => {
   assert.deepEqual(store.validBoard?.({ order:['group:a','local:9','bad','group:a','group:b'],
-    heights:{'group:a':4,'group:b':41,'local:9':5}, widgets:[{kind:'saved',h:200},{kind:'saved',h:300},{kind:'bad',h:4}], t:12 }),
-  {order:['group:a','group:b'],heights:{'group:a':4},widgets:[{kind:'saved',h:200},...kinds.slice(0,4).map(kind=>({kind,h:null}))],t:12});
+    heights:{'group:a':4,'group:b':41,'group:c':1,'group:d':2,'local:9':5}, widgets:[{kind:'saved',h:200},{kind:'saved',h:300},{kind:'bad',h:4}], t:12 }),
+  {order:['group:a','group:b'],heights:{'group:a':4,'group:d':2},widgets:[{kind:'saved',h:200},...kinds.slice(0,4).map(kind=>({kind,h:null}))],t:12});
   assert.deepEqual(store.validBoard?.(null),defaults);
 });
 test('renders track absence but never write; a gesture prunes only after a full missing cycle', async () => {
@@ -40,10 +40,11 @@ test('3.x upgrade uses last shown layout, sorts y then x, converts rail and remo
   await ff.browser.storage.local.set({layoutsShown:{12:100,18:50}});
   await ff.browser.storage.sync.set({settings:{railCells:5,showClock:false},'layout:12':{t:1},'layout:18':{t:200},
     'tile:12:group:b':{x:2,y:0,w:4,h:3},'tile:12:group:a':{x:0,y:0,w:4,h:3},
+    'tile:12:group:c':{x:0,y:3,w:4,h:3},
     'tile:18:group:wrong':{x:0,y:0,w:4,h:3},'tile:clock':{x:0,y:1,w:4,h:3},railCells:7,keep:1});
   ff.calls.length=0; const state=store.createBoardStore(ff.browser); await state.load();
   const data=await ff.browser.storage.sync.get(null);
-  assert.deepEqual(data.board.order,['group:a','group:b']);
+  assert.deepEqual(data.board.order,['group:a','group:b','group:c']);
   assert.deepEqual(data.settings,{showClock:false,railWidth:304});
   assert.equal(data.keep,1); assert.equal(Object.keys(data).some(k=>k.startsWith('tile:')||k.startsWith('layout:')||k==='railCells'),false);
   assert.equal(ff.calls.filter(c=>c.api==='storage.sync.remove').length,1);
@@ -55,6 +56,34 @@ test('reset clears the board and both widths but retains other settings', async 
   await store.resetBoard(ff.browser);
   assert.deepEqual(await ff.browser.storage.sync.get(null),{settings:{showClock:false}});
 });
+test('reset removes board and all legacy keys in the same batch, without touching unrelated data', async () => {
+  const ff = createFirefox();
+  await ff.browser.storage.sync.set({board: defaults, settings: {railWidth: 400, railCells: 2, showClock: false},
+    'tile:12:group:a': {}, 'tile:clock': {}, 'layout:12': {}, layouts: {}, railCells: 2, keep: 7});
+  ff.calls.length = 0;
+  await store.resetBoard(ff.browser);
+  assert.deepEqual(await ff.browser.storage.sync.get(null), {settings: {showClock: false}, keep: 7});
+  const removes = ff.calls.filter(c => c.api === 'storage.sync.remove');
+  assert.equal(removes.length, 1);
+  assert.deepEqual([...removes[0].args[0]].sort(), ['board', 'layout:12', 'layouts', 'railCells', 'tile:12:group:a', 'tile:clock']);
+});
+test('reset writes default widths before removing board, in exactly two write calls', async () => {
+  const ff = createFirefox();
+  await ff.browser.storage.sync.set({board: defaults, settings: {widgetsWidth: 400, railWidth: 400, showClock: false}});
+  ff.calls.length = 0;
+  await store.resetBoard(ff.browser);
+  assert.deepEqual(ff.calls.filter(c => /storage\.sync\.(set|remove)$/.test(c.api)).map(c => [c.api, c.args[0]]), [
+    ['storage.sync.set', {settings: {showClock: false}}], ['storage.sync.remove', ['board']],
+  ]);
+});
+for (const [railCells, railWidth] of [[2, 240], [3, 240], [16, 960]]) {
+  test(`upgrade clamps ${railCells} rail cells to ${railWidth}px`, async () => {
+    const ff = createFirefox();
+    await ff.browser.storage.sync.set({settings: {railCells}});
+    await store.createBoardStore(ff.browser).load();
+    assert.deepEqual((await ff.browser.storage.sync.get('settings')).settings, {railWidth});
+  });
+}
 test('failed load rejects so a default cannot overwrite unread data',async t=>{
   assert.equal(typeof store.createBoardStore,'function');
   const ff=createFirefox(); t.mock.method(ff.browser.storage.sync,'get',async()=>{throw Error('offline');});

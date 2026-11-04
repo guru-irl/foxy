@@ -91,6 +91,27 @@ async function controller(set = setup(), listener, layout = {}, options = {}) {
   return { root, ff, control };
 }
 
+test('remote pin dropped on empty kanban space creates a group and opens its name editor', async () => {
+  const {root, ff} = await controller();
+  const source = root.querySelector('[data-tab-id="21"] .row-open'), dataTransfer = start(source);
+  const kanban = root.querySelector('.kanban'), dropPoint = point(kanban, 0.8, 0.95);
+  ff.calls.length = 0;
+  try {
+    assert.equal(document.elementFromPoint(dropPoint.clientX, dropPoint.clientY), kanban);
+    assert.ok(dispatchDrag('dragover', kanban, {dataTransfer, ...dropPoint}).defaultPrevented);
+    dispatchDrag('drop', kanban, {dataTransfer, ...dropPoint});
+  } finally { dispatchDrag('dragend', source, {dataTransfer}); }
+  await flush(ff); await flush(ff);
+  const moved = await ff.browser.tabs.get(21);
+  assert.equal(moved.windowId, 1);
+  assert.equal(moved.pinned, false);
+  assert.ok(moved.groupId !== -1 && ![101, 102, 201].includes(moved.groupId), 'a new group is created');
+  assert.equal((await ff.browser.tabGroups.get(moved.groupId)).windowId, 1);
+  assert.ok(root.querySelector(`[data-group-id="${moved.groupId}"] .name-editor`));
+  assert.equal(ff.calls.filter(c => /storage\.sync\.(set|remove)$/.test(c.api)).length, 0);
+  clean(root);
+});
+
 // Without controller board-membership guards, foreign MIME payloads can reach
 // executor reads/mutations, including the Foxy page and another Foxy page.
 for (const [id, label] of [[99, "self"], [55, "other Foxy-page"], [123456, "unknown"]]) {

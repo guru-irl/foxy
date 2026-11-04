@@ -89,6 +89,48 @@ test('pin tooltip overlays do not add a flex gap or widen the board', async () =
   assert.equal(root.scrollWidth, root.clientWidth, 'tooltips do not change the board scroll extent');
 });
 
+for (const h of [1, 2]) test(`${h} pin rows keep icon centres stable and scroll only in the 12px edge band`, async () => {
+  const {root, list} = await draw({count: 40, w: 6, h});
+  list.scrollTop = 64; await nextFrame();
+  const source = list.querySelector('.row-open'), dataTransfer = new DataTransfer();
+  dispatchDrag('dragstart', source, {dataTransfer});
+  const r = list.getBoundingClientRect(), x = r.left + 24, initial = list.scrollTop;
+  const over = y => dispatchDrag('dragover', list, {dataTransfer, clientX: x, clientY: y});
+  try {
+    for (const y of [r.top + 24, r.bottom - 24]) {
+      over(y); await nextFrame(); await nextFrame();
+      assert.equal(list.scrollTop, initial, 'icon centres remain stable drop slots');
+    }
+    over(r.bottom - 13); await nextFrame();
+    assert.equal(list.scrollTop, initial, '13px is outside the edge band');
+    over(r.bottom - 1); await nextFrame();
+    assert.equal(list.scrollTop, initial + 12, 'bottom band scrolls down');
+    over(r.top + 1); await nextFrame();
+    assert.equal(list.scrollTop, initial, 'top band scrolls up');
+  } finally { dispatchDrag('dragend', source, {dataTransfer}); }
+});
+
+for (const width of [1280, 640]) for (const [count, direction] of [[1, 'down'], [40, 'down'], [40, 'up']]) {
+  test(`${width}px pin drag scrolls the widget scroller ${direction} when ${count === 1 ? 'pins fit' : 'pins reach their edge'}`, async () => {
+    const {root, tile, list} = await draw({width, height: 180, count, w: 6, h: 1});
+    const widgets = root.querySelector('.widgets'), scroller = widgets.closest('.kanban') ?? widgets;
+    const spacer = document.createElement('div'); spacer.style.cssText = 'height:128px;flex:none'; widgets.prepend(spacer);
+    const extent = document.createElement('div'); extent.style.cssText = 'height:800px;flex:none;pointer-events:none'; widgets.append(extent);
+    scroller.scrollTop = tile.offsetTop + list.offsetTop + (direction === 'up' ? 0 : list.clientHeight - scroller.clientHeight);
+    list.scrollTop = direction === 'up' ? 0 : list.scrollHeight;
+    await nextFrame(); await nextFrame();
+    const r = scroller.getBoundingClientRect(), x = r.left + 24, y = direction === 'up' ? r.top + 2 : r.bottom - 2;
+    const initial = scroller.scrollTop, pinsTop = list.scrollTop;
+    const source = list.querySelector('.row-open'), dataTransfer = new DataTransfer();
+    dispatchDrag('dragstart', source, {dataTransfer});
+    try {
+      dispatchDrag('dragover', list, {dataTransfer, clientX: x, clientY: y}); await nextFrame();
+      assert.equal(scroller.scrollTop, initial + (direction === 'up' ? -12 : 12), 'the bar takes over edge scrolling');
+      assert.equal(list.scrollTop, pinsTop, 'exhausted pins do not move');
+    } finally { dispatchDrag('dragend', source, {dataTransfer}); }
+  });
+}
+
 for (const backwards of [false, true]) test(`Tab ${backwards ? 'backwards from close' : 'from open'} reveals a hidden ALLOW tooltip and moves focus`, async () => {
   const { root, list } = await draw({ count: 3, names: { 3: { name: 'Named', origin: 'https://example.invalid/*', allowed: false } } });
   const pin = list.lastElementChild, open = pin.querySelector('.row-open'), close = pin.querySelector('.row-close');

@@ -13,6 +13,13 @@ test('shortest-column placement uses leftmost ties and does not leave holes', ()
       {id:'c',height:80,x:316,y:116,w:300},{id:'d',height:70,x:316,y:212,w:300}],
   });
 });
+test('odd-width kanban floors each track and gives all leftover pixels to the last column', () => {
+  assert.deepEqual(model.columns(871), {count: 2, width: 427});
+  const {tiles} = model.placeTiles([{id: 'a', height: 100}, {id: 'b', height: 100}], 871);
+  assert.deepEqual(tiles, [{id: 'a', height: 100, x: 0, y: 0, w: 427}, {id: 'b', height: 100, x: 443, y: 0, w: 428}]);
+  const four = model.placeTiles([1, 2, 3, 4].map(id => ({id, height: 100})), 1251).tiles;
+  assert.deepEqual(four.map(t => [t.x, t.w]), [[0, 300], [316, 300], [632, 300], [948, 303]]);
+});
 test('group heights fit three to twelve rows unless explicitly resized', () => {
   for (const [tabs,rows,density,want] of [[0,null,'normal',144],[20,null,'normal',432],[1,2,'normal',112],[99,40,'compact',1000],[6,null,'compact',184]]) {
     assert.equal(model.groupHeight?.(tabs, rows, density), want);
@@ -21,8 +28,7 @@ test('group heights fit three to twelve rows unless explicitly resized', () => {
 test('bars clamp before testing the narrow fallback without mutating preferences', () => {
   assert.deepEqual(model.pageColumns?.(2560,304,304),{widgets:304,rail:304,kanban:1920,fallback:false});
   const clamped = model.pageColumns?.(1024,999,999);
-  assert.equal(clamped.widgets,1024/3); assert.equal(clamped.rail,1024/3);
-  assert.ok(Math.abs(clamped.kanban - 309.3333333333) < 1e-8); assert.equal(clamped.fallback,false);
+  assert.deepEqual(clamped,{widgets:341,rail:341,kanban:310,fallback:false});
   assert.deepEqual(model.pageColumns?.(640,304,304),{widgets:240,rail:240,kanban:384,fallback:true});
 });
 test('widget default sizes follow content and respect their minimums', () => {

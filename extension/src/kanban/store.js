@@ -56,7 +56,7 @@ async function upgrade(api, entries) {
   const board = bounded(validBoard({ order: tiles.map(([key]) => key.slice(prefix.length)), t: Date.now() }), new Set(), new Map());
   const settings = { ...(object(entries.settings) ? entries.settings : {}) };
   const cells = settings.railCells ?? entries.railCells;
-  if (Number.isInteger(cells) && cells > 0 && !own(settings, 'railWidth')) settings.railWidth = cells * 48 + (cells - 1) * 16;
+  if (Number.isInteger(cells) && cells > 0 && !own(settings, 'railWidth')) settings.railWidth = Math.max(240, Math.min(960, cells * 48 + (cells - 1) * 16));
   delete settings.railCells;
   await api.storage.sync.set({ board, ...(entries.settings !== undefined || cells !== undefined ? { settings } : {}) });
   // WebExtension storage has no atomic set-and-remove. New data is durable first;
@@ -99,8 +99,9 @@ export function createBoardStore(api) {
 }
 
 export async function resetBoard(api) {
-  const { settings = {} } = await api.storage.sync.get(null);
-  const { widgetsWidth, railWidth, ...rest } = settings;
-  await api.storage.sync.remove('board');
+  const entries = await api.storage.sync.get(null);
+  const { widgetsWidth, railWidth, railCells, ...rest } = entries.settings ?? {};
   await api.storage.sync.set({ settings: rest });
+  await api.storage.sync.remove(['board', ...Object.keys(entries).filter(key =>
+    key.startsWith('tile:') || key.startsWith('layout:') || key === 'layouts' || key === 'railCells')]);
 }
