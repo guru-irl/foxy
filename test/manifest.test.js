@@ -49,6 +49,7 @@ test("manifest has the gecko settings AMO needs", () => {
   const gecko = manifest.browser_specific_settings.gecko;
   assert.equal(gecko.id, "{4408f971-7930-41ea-9f93-b01231e40861}");
   assert.equal(gecko.strict_min_version, "140.0");
+  assert.equal(gecko.update_url, "https://github.com/guru-irl/foxy/releases/latest/download/updates.json");
   assert.deepEqual(gecko.data_collection_permissions, { required: ["none"], optional: ["locationInfo"] });
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
 });
