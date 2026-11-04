@@ -17,16 +17,16 @@ function decimals(url) {
 }
 
 test("coordinates are rounded to 2 decimals", () => {
-  assert.equal(roundCoord(53.34567), 53.35);
-  assert.equal(roundCoord(-6.26789), -6.27);
+  assert.equal(roundCoord(38.71567), 38.72);
+  assert.equal(roundCoord(-9.13789), -9.14);
   assert.equal(roundCoord(-0.001), 0);
   assert.ok(Object.is(roundCoord(-0.001), 0), "no negative zero in URLs");
 });
 
 test("forecast URL asks Open-Meteo for current, 24 h and 7 day data with rounded coordinates", () => {
-  const url = new URL(forecastUrl({ lat: 53.34567, lon: -6.26789 }));
+  const url = new URL(forecastUrl({ lat: 38.71567, lon: -9.13789 }));
   assert.equal(url.origin + url.pathname, "https://api.open-meteo.com/v1/forecast");
-  assert.deepEqual(decimals(url), ["53.35", "-6.27"]);
+  assert.deepEqual(decimals(url), ["38.72", "-9.14"]);
   const p = url.searchParams;
   assert.equal(p.get("timezone"), "auto");
   assert.equal(p.get("timeformat"), "unixtime");
@@ -79,9 +79,9 @@ test("hours start at the current hour and run for 24; days start today", () => {
   assert.equal(upcomingDays(data, NOW + 2 * 86400000).length, 5, "an old cache shows the days that remain");
 });
 
-// Ireland leaves summer time on 2026-10-25 at 02:00 IST (01:00 UTC): that day has 25 hours.
+// Portugal leaves summer time on 2026-10-25 at 02:00 WEST (01:00 UTC): that day has 25 hours.
 const OCT25 = 1792886400; // 2026-10-25 00:00 UTC
-function dstData(timezone = "Europe/Dublin") {
+function dstData(timezone = "Europe/Lisbon") {
   const day = (time, code) => ({ time: time * 1000, code, min: 5, max: 12, sunrise: null, sunset: null });
   const hourly = Array.from({ length: 48 }, (_, i) => ({ time: (OCT25 - 3600 + i * 3600) * 1000, temp: 9, code: 3, pop: 0, isDay: true }));
   return { offset: 3600, timezone, current: { time: OCT25 * 1000, temp: 9, feels: null, code: 3, isDay: true, wind: null, humidity: null, precipitation: null },
@@ -108,7 +108,7 @@ test("hour and day labels follow the location's time zone across a DST change", 
   for (const timezone of [null, "Not/AZone"]) {
     assert.deepEqual([0, 1].map(h => hourLabel(at(h), dstData(timezone), "24")), ["01", "02"]);
   }
-  assert.equal(parseForecast(forecastJson()).timezone, "Europe/Dublin");
+  assert.equal(parseForecast(forecastJson()).timezone, "Europe/Lisbon");
   assert.equal(parseForecast({ ...forecastJson(), timezone: 7 }).timezone, null);
 });
 
@@ -137,7 +137,7 @@ test("cache is fresh for 15 minutes for the same place only", () => {
   assert.equal(REFRESH_MS, 15 * 60000);
   assert.equal(isFresh(cache, "auto", NOW + REFRESH_MS - 1), true);
   assert.equal(isFresh(cache, "auto", NOW + REFRESH_MS), false);
-  assert.equal(isFresh(cache, "53.35,-6.27", NOW), false);
+  assert.equal(isFresh(cache, "38.72,-9.14", NOW), false);
   assert.equal(isFresh(null, "auto", NOW), false);
   assert.equal(isFresh({ ...cache, fetchedAt: NOW + 60000 }, "auto", NOW), false, "a cache from the future is not trusted");
 });
@@ -157,14 +157,14 @@ test("WMO codes map to labels and the in-house glyphs", () => {
 
 test("validPlace accepts auto or a named place with coordinates", () => {
   assert.equal(validPlace("auto"), true);
-  assert.equal(validPlace({ name: "Dublin", lat: 53.33, lon: -6.25 }), true);
+  assert.equal(validPlace({ name: "Lisbon", lat: 38.72, lon: -9.14 }), true);
   for (const bad of ["", "home", null, [], { name: "", lat: 1, lon: 1 }, { name: "X", lat: 91, lon: 0 },
     { name: "X", lat: 0, lon: 181 }, { name: "X", lat: "1", lon: 0 }, { name: "X".repeat(201), lat: 0, lon: 0 },
     { name: "X", lat: NaN, lon: 0 }]) assert.equal(validPlace(bad), false, JSON.stringify(bad));
 });
 
 test("locate rounds the position and reports denial or missing geolocation", async () => {
-  assert.deepEqual(await locate(fakeGeolocation()), { lat: 53.35, lon: -6.27 });
+  assert.deepEqual(await locate(fakeGeolocation()), { lat: 38.72, lon: -9.14 });
   assert.deepEqual(await locate(fakeGeolocation({ error: 1 })), { error: "denied" });
   assert.deepEqual(await locate(fakeGeolocation({ error: 3 })), { error: "unavailable" });
   assert.deepEqual(await locate(undefined), { error: "denied" });
@@ -174,13 +174,13 @@ test("locate rounds the position and reports denial or missing geolocation", asy
 
 test("searchPlaces uses Open-Meteo geocoding and rounds results", async () => {
   const fetch = fakeFetch();
-  const places = await searchPlaces("  Dublin ", fetch);
+  const places = await searchPlaces("  Lisbon ", fetch);
   assert.equal(fetch.calls.length, 1);
   const url = new URL(fetch.calls[0]);
   assert.equal(url.origin + url.pathname, "https://geocoding-api.open-meteo.com/v1/search");
-  assert.equal(url.searchParams.get("name"), "Dublin");
+  assert.equal(url.searchParams.get("name"), "Lisbon");
   assert.equal(url.searchParams.get("count"), "5");
-  assert.deepEqual(places[0], { name: "Dublin", detail: "Leinster, Ireland", lat: 53.33, lon: -6.25 });
+  assert.deepEqual(places[0], { name: "Lisbon", detail: "Portugal", lat: 38.72, lon: -9.14 });
   assert.equal(places.length, 3);
   assert.deepEqual(await searchPlaces(" ", fetch), []);
   assert.deepEqual(await searchPlaces("x", fetch), []);
@@ -191,10 +191,10 @@ test("searchPlaces uses Open-Meteo geocoding and rounds results", async () => {
 
 test("reverseName asks BigDataCloud's client endpoint with rounded coordinates", async () => {
   const fetch = fakeFetch();
-  assert.equal(await reverseName({ lat: 53.34567, lon: -6.26789 }, fetch), "Dublin");
+  assert.equal(await reverseName({ lat: 38.71567, lon: -9.13789 }, fetch), "Lisbon");
   const url = new URL(fetch.calls[0]);
   assert.equal(url.origin + url.pathname, "https://api.bigdatacloud.net/data/reverse-geocode-client");
-  assert.deepEqual(decimals(url), ["53.35", "-6.27"]);
+  assert.deepEqual(decimals(url), ["38.72", "-9.14"]);
   assert.equal(await reverseName({ lat: 1, lon: 1 }, fakeFetch({ fail: true })), null);
 });
 
@@ -208,13 +208,13 @@ test("loadWeather with auto location fetches, names the place and caches with a 
   const state = await loadWeather(d);
   assert.equal(state.status, "ok");
   assert.equal(state.stale, false);
-  assert.equal(state.place, "Dublin");
+  assert.equal(state.place, "Lisbon");
   assert.equal(state.fetchedAt, NOW);
   assert.equal(state.data.current.temp, 14.4);
   assert.equal(d.fetch.calls.length, 2);
-  for (const url of d.fetch.calls) assert.deepEqual(decimals(url), ["53.35", "-6.27"]);
+  for (const url of d.fetch.calls) assert.deepEqual(decimals(url), ["38.72", "-9.14"]);
   const stored = (await d.api.storage.local.get(CACHE_KEY))[CACHE_KEY];
-  assert.deepEqual(stored, { want: "auto", key: "53.35,-6.27", place: "Dublin", fetchedAt: NOW, data: state.data });
+  assert.deepEqual(stored, { want: "auto", key: "38.72,-9.14", place: "Lisbon", fetchedAt: NOW, data: state.data });
 });
 
 test("a fresh cache is used without geolocation or requests", async () => {
@@ -235,7 +235,7 @@ test("an old cache is refreshed; the place name is reused for the same rounded p
   const state = await loadWeather(later);
   assert.equal(state.fetchedAt, NOW + REFRESH_MS);
   assert.deepEqual(later.fetch.calls.map(url => new URL(url).host), ["api.open-meteo.com"]);
-  assert.equal(state.place, "Dublin");
+  assert.equal(state.place, "Lisbon");
 });
 
 test("offline: cached data comes back marked stale, and nothing cached is an error", async () => {
@@ -364,10 +364,10 @@ test("consent for my location asks geolocation and locationInfo in one request; 
 
 test("city search asks nothing until locationInfo is granted", async () => {
   const denied = deps({ dataCollection: [] });
-  assert.deepEqual(await settingActions(denied.api, () => {}, denied.fetch).searchPlaces("Dublin"), []);
+  assert.deepEqual(await settingActions(denied.api, () => {}, denied.fetch).searchPlaces("Lisbon"), []);
   assert.equal(denied.fetch.calls.length, 0);
   const granted = deps();
-  const places = await settingActions(granted.api, () => {}, granted.fetch).searchPlaces("Dublin");
+  const places = await settingActions(granted.api, () => {}, granted.fetch).searchPlaces("Lisbon");
   assert.equal(places.length, 3);
   assert.equal(granted.fetch.calls.length, 1);
 });

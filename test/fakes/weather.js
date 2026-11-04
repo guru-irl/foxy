@@ -5,7 +5,7 @@ export function forecastJson({ start = 1790985600, offset = 3600, temp = 14.4 } 
   const codes = [0, 1, 2, 3, 45, 51, 61, 80, 71, 95];
   const days = Array.from({ length: 7 }, (_, i) => start - offset + i * 86400);
   return {
-    latitude: 53.34, longitude: -6.26, timezone: "Europe/Dublin", utc_offset_seconds: offset,
+    latitude: 38.72, longitude: -9.14, timezone: "Europe/Lisbon", utc_offset_seconds: offset,
     current: { time: start - offset + 13 * 3600 + 900, interval: 900, temperature_2m: temp,
       apparent_temperature: temp - 2.1, weather_code: 2, is_day: 1, wind_speed_10m: 18.7,
       relative_humidity_2m: 71, precipitation: 0.2 },
@@ -28,12 +28,12 @@ export function forecastJson({ start = 1790985600, offset = 3600, temp = 14.4 } 
 }
 
 export const GEOCODING = { results: [
-  { name: "Dublin", latitude: 53.33306, longitude: -6.24889, country: "Ireland", admin1: "Leinster" },
-  { name: "Dublin", latitude: 37.70215, longitude: -121.93579, country: "United States", admin1: "California" },
-  { name: "Dublin", latitude: 40.09923, longitude: -83.11408, country: "United States", admin1: "Ohio" },
+  { name: "Lisbon", latitude: 38.7223, longitude: -9.1393, country: "Portugal", admin1: "Lisbon" },
+  { name: "Lisbon", latitude: 44.21, longitude: -71.91, country: "United States", admin1: "New Hampshire" },
+  { name: "Lisbon", latitude: 40.77, longitude: -80.77, country: "United States", admin1: "Ohio" },
 ] };
 
-export const REVERSE = { city: "Dublin", locality: "Dublin 2", principalSubdivision: "Leinster", countryName: "Ireland" };
+export const REVERSE = { city: "Lisbon", locality: "Lisbon", principalSubdivision: "Lisbon", countryName: "Portugal" };
 
 /** A fetch that answers from fixtures and records every requested URL. */
 export function fakeFetch({ forecast = forecastJson(), fail = false } = {}) {
@@ -53,7 +53,7 @@ export function fakeFetch({ forecast = forecastJson(), fail = false } = {}) {
 }
 
 /** navigator.geolocation stand-in: a position, or an error code (1 denied, 2 unavailable, 3 timeout). */
-export function fakeGeolocation({ lat = 53.34567, lon = -6.26789, error } = {}) {
+export function fakeGeolocation({ lat = 38.71567, lon = -9.13789, error } = {}) {
   const geolocation = {
     calls: 0,
     getCurrentPosition(success, failure) {

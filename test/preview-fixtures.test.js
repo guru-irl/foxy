@@ -61,12 +61,15 @@ test("older preview scenarios answer with no saved groups or banner", async t =>
 });
 
 
-test('v40 preview reuses the real groups with remote groups, every widget and fake memory data',async t=>{
+test('v40 preview uses generic groups with remote groups, every widget and fake memory data',async t=>{
  const {api,board,reply}=await preview(t,'v40');
- assert.deepEqual(board.columns.filter(g=>g.current).map(g=>g.title),['TBR','DEV','COV','OCE','HARNESS','TELEMETRY']);
+ assert.deepEqual(board.columns.filter(g=>g.current).map(g=>g.title),['READING','WORK','TRAVEL','RECIPES','RESEARCH','SIDE PROJECT']);
+ assert.deepEqual(board.columns.filter(g=>g.current).slice(0,4).map(g=>g.rows[0].title),
+   ['Reading list', 'Project notes', 'City guide', 'Dinner ideas']);
  assert.equal(board.columns.filter(g=>!g.current).length,2);assert.equal(board.saved.length,3);
  const settings=await loadSettings(api);assert.equal(settings.synced.otherWindows,true);
  for(const kind of ['Clock','Pinned','Saved','Memory','Weather'])assert.equal(settings.synced[`show${kind}`],true);
  assert.equal(Object.keys(reply.folders).length,8);
+ assert.equal(new Set(Object.values(reply.folders)).size, 8, 'groups in different windows need distinct bookmark folders');
  assert.equal((await api.runtime.sendMessage({type:'foxy:memory'})).firefox,3650722202);
 });
