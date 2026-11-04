@@ -1,0 +1,27 @@
+{
+  "name": "Release",
+  "on": {"push": {"tags": ["v*"]}},
+  "permissions": {"contents": "write"},
+  "jobs": {
+    "release": {
+      "runs-on": "ubuntu-latest",
+      "environment": "release",
+      "env": {"TAG": "${{ github.ref_name }}"},
+      "steps": [
+        {"uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", # v4
+         "with": {"fetch-depth": 0}},
+        {"uses": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020", # v4
+         "with": {"node-version": "24"}},
+        {"uses": "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065", # v5
+         "with": {"python-version": "3.12"}},
+        {"name": "Check version", "run": "python3 -c 'import json, os, sys; version = json.load(open(\"extension/manifest.json\"))[\"version\"]; sys.exit(0 if os.environ[\"TAG\"] == \"v\" + version else \"Tag does not match manifest version\")'"},
+        {"name": "Test", "run": "npm test"},
+        {"name": "Build", "run": "python3 scripts/build.py"},
+        {"name": "Sign", "env": {"AMO_JWT_ISSUER": "${{ secrets.AMO_JWT_ISSUER }}", "AMO_JWT_SECRET": "${{ secrets.AMO_JWT_SECRET }}"}, "run": "python3 scripts/sign.py"},
+        {"name": "Compute SHA-256", "run": "version=${TAG#v}\ncp \"dist/foxy-$version-signed.xpi\" \"foxy-$version.xpi\"\nsha256sum \"foxy-$version.xpi\""},
+        {"name": "Generate update manifest", "run": "version=${TAG#v}\npython3 scripts/update_manifest.py \"$version\" \"$TAG\" \"foxy-$version.xpi\" \"$GITHUB_REPOSITORY\""},
+        {"name": "Create release", "env": {"GH_TOKEN": "${{ github.token }}"}, "run": "version=${TAG#v}\n: > release-notes.txt\nif [ \"$(git cat-file -t \"$TAG\")\" = tag ]; then git for-each-ref --format='%(contents)' \"refs/tags/$TAG\" > release-notes.txt; fi\nif [ ! -s release-notes.txt ] || ! grep -q '[^[:space:]]' release-notes.txt; then\n  previous=$(git describe --tags --abbrev=0 \"$TAG^\" 2>/dev/null || true)\n  if [ -n \"$previous\" ]; then git log --format='%s' \"$previous..$TAG\" > release-notes.txt; else git log --format='%s' \"$TAG\" > release-notes.txt; fi\nfi\ngh release create \"$TAG\" \"foxy-$version.xpi\" updates.json --title \"Foxy $version\" --notes-file release-notes.txt"}
+      ]
+    }
+  }
+}

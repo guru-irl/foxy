@@ -2,6 +2,8 @@ import base64
 import hashlib
 import hmac
 import http.client
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -45,10 +47,22 @@ class CredentialsTest(unittest.TestCase):
     def setUp(self):
         SCRATCH.mkdir(parents=True, exist_ok=True)
         self.path = SCRATCH / "amo.env"
+        environment = mock.patch.dict(os.environ, {}, clear=True)
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def write(self, text, mode=0o600):
         self.path.write_text(text)
         os.chmod(self.path, mode)
+
+    def test_environment_takes_priority_without_reading_file(self):
+        with mock.patch.dict(os.environ, {'AMO_JWT_ISSUER': 'env-issuer', 'AMO_JWT_SECRET': 'env-secret'}):
+            self.assertEqual(sign.read_credentials(SCRATCH / 'does-not-exist.env'), ('env-issuer', 'env-secret'))
+
+    def test_partial_environment_uses_file_for_missing_value(self):
+        self.write('AMO_JWT_ISSUER=file-issuer\nAMO_JWT_SECRET=file-secret\n')
+        with mock.patch.dict(os.environ, {'AMO_JWT_ISSUER': 'env-issuer'}):
+            self.assertEqual(sign.read_credentials(self.path), ('env-issuer', 'file-secret'))
 
     def test_reads_issuer_and_secret(self):
         self.write('# AMO\nAMO_JWT_ISSUER=user:1:2\nAMO_JWT_SECRET="abc=def"\n')
@@ -70,6 +84,50 @@ class CredentialsTest(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             sign.read_credentials(SCRATCH / "does-not-exist.env")
         self.assertIn("Missing", str(ctx.exception))
+
+
+class SecretOutputTest(unittest.TestCase):
+    def test_server_error_cannot_echo_credentials_to_output_or_exception(self):
+        secret = 'fake-secret-never-print-012345'
+        issuer = 'fake-issuer-never-print-012345'
+        error = urllib.error.HTTPError('https://example.com/', 400, 'bad', {},
+                                       io.BytesIO(f'{issuer} {secret}'.encode()))
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch('urllib.request.urlopen', side_effect=error), \
+             contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as caught:
+                sign.Amo(issuer, secret).request('GET', 'https://example.com/')
+        for value in (secret, issuer):
+            self.assertNotIn(value, stdout.getvalue() + stderr.getvalue() + str(caught.exception))
+        self.assertIn('HTTP 400', str(caught.exception))
+        error.close()
+
+    def test_network_error_cannot_echo_credentials(self):
+        secret = 'fake-secret-never-print-012345'
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch('urllib.request.urlopen', side_effect=urllib.error.URLError(secret)), \
+             contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            with self.assertRaises(BaseException) as caught:
+                sign.Amo('fake-issuer', secret).request('GET', 'https://example.com/')
+        self.assertNotIn(secret, stdout.getvalue() + stderr.getvalue() + str(caught.exception))
+
+    def test_validation_messages_cannot_echo_credentials(self):
+        secret = 'fake-secret-never-print-012345'
+        issuer = 'fake-issuer-never-print-012345'
+        SCRATCH.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=SCRATCH) as directory:
+            xpi = pathlib.Path(directory) / 'input.zip'
+            xpi.write_bytes(b'zip')
+            amo = sign.Amo(issuer, secret)
+            replies = iter([{'uuid': 'u1'}, {'processed': True, 'valid': False,
+                'validation': {'messages': [{'type': 'error', 'message': f'{issuer} {secret}'}]}}])
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with mock.patch.object(amo, 'json', side_effect=lambda *a, **k: next(replies)), \
+                 contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                with self.assertRaises(SystemExit) as caught:
+                    sign.sign(amo, xpi, '{abc}', '1.0.0', pathlib.Path(directory) / 'out.xpi')
+            for value in (secret, issuer):
+                self.assertNotIn(value, stdout.getvalue() + stderr.getvalue() + str(caught.exception))
 
 
 class MultipartTest(unittest.TestCase):

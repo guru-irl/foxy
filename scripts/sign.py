@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Sign the add-on as an unlisted addons.mozilla.org add-on and download the .xpi.
 
-Needs ~/.config/liquidfox-newtab/amo.env, readable only by you (chmod 600):
+Reads AMO_JWT_ISSUER and AMO_JWT_SECRET from the environment, then falls back
+to ~/.config/liquidfox-newtab/amo.env, readable only by you (chmod 600):
 
     AMO_JWT_ISSUER=user:12345:67
     AMO_JWT_SECRET=...
@@ -16,6 +17,7 @@ import hashlib
 import hmac
 import http.client
 import json
+import os
 import pathlib
 import stat
 import sys
@@ -48,24 +50,27 @@ def make_jwt(issuer, secret, now=None, jti=None):
 
 
 def read_credentials(path=CREDENTIALS):
-    """AMO_JWT_ISSUER and AMO_JWT_SECRET from a KEY=VALUE file only its owner can read."""
+    """Read AMO credentials from the environment, then the owner-only file."""
+    keys = ("AMO_JWT_ISSUER", "AMO_JWT_SECRET")
+    values = {key: os.environ.get(key, "") for key in keys}
+    if all(values.values()):
+        return values[keys[0]], values[keys[1]]
     if not path.exists():
-        raise SystemExit(
-            f"Missing {path}. Create it with AMO_JWT_ISSUER=... and AMO_JWT_SECRET=... (chmod 600)."
-        )
+        raise SystemExit(f"Missing AMO_JWT_ISSUER or AMO_JWT_SECRET in the environment or {path} (chmod 600).")
     if path.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO):
         raise SystemExit(f"{path} is readable by other users. Run: chmod 600 '{path}'")
-    values = {}
     for line in path.read_text().splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip("\"'")
-    missing = [key for key in ("AMO_JWT_ISSUER", "AMO_JWT_SECRET") if not values.get(key)]
+        key = key.strip()
+        if key in keys and not values[key]:
+            values[key] = value.strip().strip("\"'")
+    missing = [key for key in keys if not values[key]]
     if missing:
-        raise SystemExit(f"{path} is missing {', '.join(missing)}")
-    return values["AMO_JWT_ISSUER"], values["AMO_JWT_SECRET"]
+        raise SystemExit(f"{path} and the environment are missing {', '.join(missing)}")
+    return values[keys[0]], values[keys[1]]
 
 
 def encode_multipart(fields, files, boundary=None):
@@ -91,6 +96,14 @@ def encode_multipart(fields, files, boundary=None):
     return b"\r\n".join(lines), f"multipart/form-data; boundary={boundary}"
 
 
+def redact(text, amo):
+    text = str(text)
+    for value in (getattr(amo, "issuer", ""), getattr(amo, "secret", "")):
+        if value:
+            text = text.replace(value, "[redacted]")
+    return text
+
+
 class Amo:
     """Minimal AMO v5 client; every request carries a fresh JWT."""
 
@@ -112,7 +125,9 @@ class Amo:
                 return resp.read()
         except urllib.error.HTTPError as err:
             detail = err.read().decode("utf-8", "replace")[:2000]
-            raise SystemExit(f"{method} {url} failed: HTTP {err.code}\n{detail}")
+            raise SystemExit(redact(f"{method} {url} failed: HTTP {err.code}\n{detail}", self)) from None
+        except (OSError, http.client.HTTPException) as err:
+            raise SystemExit(redact(f"{method} {url} failed: {err}", self)) from None
 
     def json(self, method, url, payload=None, body=None, content_type=None):
         if payload is not None:
@@ -151,7 +166,7 @@ def sign(amo, xpi, guid, version, out, interval=5, timeout=900):
 
     upload = wait(validated, "validation", interval)
     for message in (upload.get("validation") or {}).get("messages", []):
-        print(f"  {message.get('type', '?')}: {message.get('message', '')}")
+        print(redact(f"  {message.get('type', '?')}: {message.get('message', '')}", amo))
     if not upload.get("valid"):
         raise SystemExit("AMO validation failed; see the messages above.")
 
@@ -172,7 +187,7 @@ def sign(amo, xpi, guid, version, out, interval=5, timeout=900):
         part.replace(out)
     except (SystemExit, OSError, http.client.HTTPException, ValueError, KeyboardInterrupt) as err:
         part.unlink(missing_ok=True)
-        cause = err.code if isinstance(err, SystemExit) and isinstance(err.code, str) else str(err)
+        cause = redact(err.code if isinstance(err, SystemExit) and isinstance(err.code, str) else str(err), amo)
         if not cause:
             cause = f"Interrupted ({type(err).__name__})"
         rejected = cause == "AMO rejected or disabled this version."
