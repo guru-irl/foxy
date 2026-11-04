@@ -11,5 +11,5 @@ Create an [AMO API key](https://addons.mozilla.org/developers/addon/api/key/) an
 For local signing, export `AMO_JWT_ISSUER` and `AMO_JWT_SECRET` before running the build and sign scripts.
 `release.py` updates the manifest, `package.json`, and `test/manifest.test.js`, runs `npm test`, commits, and creates an annotated tag. It never pushes.
 The workflow puts the tag message and commit subjects since the previous release in the release notes.
-If tests fail, inspect and undo or fix the uncommitted changes before retrying.
+If tests fail, fix or undo the uncommitted changes and retry. If the workflow fails after signing, AMO refuses that version again, so release the next patch version.
 Install the first pipeline release, 4.1.0, by hand. Later releases update automatically.

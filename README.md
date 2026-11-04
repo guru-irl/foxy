@@ -120,11 +120,11 @@ ln -s "$PWD/skills/foxy-tabs" ~/.agents/skills/foxy-tabs
 
 ```sh
 agent/foxy groups
-agent/foxy tabs "To be reviewed"
-agent/foxy add "To be reviewed" https://example.com/review
+agent/foxy tabs "Read later"
+agent/foxy add "Read later" https://example.com/review
 agent/foxy new "Side project" http://localhost:3000 --color blue
 agent/foxy add "Research" https://example.com/article --create
-agent/foxy remove "To be reviewed" https://example.com/review
+agent/foxy remove "Read later" https://example.com/review
 agent/foxy delete "Old work" --close-tabs
 ```
 

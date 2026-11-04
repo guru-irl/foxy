@@ -5,7 +5,15 @@ description: Use when an agent needs to list Firefox tab groups, inspect their U
 
 # Foxy tabs
 
-Run the commands below from the Foxy repository root. The CLI `agent/foxy` talks to running Firefox with Foxy
+The CLI is `agent/foxy` in the Foxy repository that this skill file lives in (the
+installed skill is a symlink into it). Resolve it first, then run `"$FOXY" ...`
+in place of `agent/foxy` below:
+
+```sh
+FOXY="$(cd "$(dirname "$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' ~/.agents/skills/foxy-tabs/SKILL.md)")/../.." && pwd)/agent/foxy"
+```
+
+It talks to running Firefox with Foxy
 3.2.0 or newer through the installed native host. It lists open and saved
 closed groups and adds URLs without changing the active tab or focusing a
 window. Adding to a saved group writes bookmarks and leaves it closed. Remove
@@ -15,14 +23,14 @@ and delete require Foxy 3.4.0 or newer.
 
 ```sh
 agent/foxy groups --json
-agent/foxy tabs "To be reviewed" --json
-agent/foxy add "To be reviewed" https://example.com/review
+agent/foxy tabs "Read later" --json
+agent/foxy add "Read later" https://example.com/review
 agent/foxy add "Side project" http://localhost:3000
 # Both creation forms below require a group name explicitly given by the user:
 agent/foxy new "Release notes" https://example.com/release --color blue
 agent/foxy add "Research" https://example.com/article --create --color green
-agent/foxy remove "To be reviewed" https://example.com/review --json
-agent/foxy remove "To be reviewed" https://example.com/review --close --json
+agent/foxy remove "Read later" https://example.com/review --json
+agent/foxy remove "Read later" https://example.com/review --close --json
 agent/foxy delete "Old work" --close-tabs --json
 ```
 

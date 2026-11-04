@@ -86,6 +86,7 @@ class WorkflowExecutionTest(unittest.TestCase):
         self.git('config', 'user.email', 'test@example.com')
         self.git('add', '.')
         self.git('commit', '-qm', 'Initial commit')
+        self.git('remote', 'add', 'origin', str(self.repo))
         self.bin = self.work / 'bin'
         self.bin.mkdir()
         self.executable('npm', '#!/bin/sh\n[ "$1" = test ]\n')
@@ -144,6 +145,23 @@ class WorkflowExecutionTest(unittest.TestCase):
         args = (self.work / 'gh-args').read_text().splitlines()
         self.assertEqual(args[:5], ['release', 'create', 'v4.1.0', 'foxy-4.1.0.xpi', 'updates.json'])
         self.assertEqual(args[-2:], ['--notes-file', 'release-notes.txt'])
+
+    def test_checkout_lightweight_copy_still_gets_origin_annotation(self):
+        # actions/checkout replaces an annotated tag with a lightweight one (actions/checkout#882).
+        self.git('tag', 'v4.0.0')
+        (self.repo / 'change').write_text('new')
+        self.git('add', 'change')
+        self.git('commit', '-qm', 'Add feature')
+        self.git('tag', '-a', 'v4.1.0', '-m', 'Notes for 4.1.0')
+        origin = self.work / 'origin.git'
+        subprocess.run(['git', 'clone', '-q', '--bare', str(self.repo), str(origin)], check=True)
+        self.git('tag', '-d', 'v4.1.0')
+        self.git('tag', 'v4.1.0')
+        self.git('remote', 'set-url', 'origin', str(origin))
+        result = self.run_step(self.steps[-1])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.repo / 'release-notes.txt').read_text(),
+                         'Notes for 4.1.0\n\nChanges since v4.0.0:\n- Add feature\n')
 
     def test_lightweight_tag_falls_back_to_changes_since_previous_tag(self):
         self.git('tag', 'v4.0.0')

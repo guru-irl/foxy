@@ -14,7 +14,7 @@ COLORS = ('blue', 'purple', 'cyan', 'orange', 'yellow', 'pink', 'green', 'grey',
 EXIT_CODES = 'Exit codes: 0 done, 1 refused, 2 Foxy not reachable.'
 COMMANDS = {
     'groups': ('List open and saved closed groups', 'foxy groups --json'),
-    'tabs': ('List a group\'s titles and URLs', 'foxy tabs "To be reviewed" --json'),
+    'tabs': ('List a group\'s titles and URLs', 'foxy tabs "Read later" --json'),
     'add': ('Add URLs to an existing group', 'foxy add "Dev server" http://localhost:3000'),
     'new': ('Create a named group from inactive tabs', 'foxy new "Release notes" https://example.com/release'),
     'remove': ('Remove URLs from a group (Foxy 3.4.0+)', 'foxy remove "Work" https://example.com/review'),

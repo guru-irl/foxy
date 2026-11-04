@@ -69,9 +69,9 @@ foxy/
   overrides the profile. Firefox still needs a restart to load changes.
 - Danfo and Bebas Neue are removed from the repo, the xpi and the theme.
 - Before every push: `scripts/check_private.py` checks that tracked files and
-  commit messages contain no Microsoft internal names or URLs. Its pattern
+  commit messages contain no employer-internal names or URLs. Its pattern
   list lives outside the repo (`~/.config/foxy/scan-patterns.txt`).
-- The signing credentials stay in `~/.config/liquidfox-newtab/amo.env`,
+- The signing credentials stay in a local credentials file,
   outside the repo.
 - The add-on keeps ID `{4408f971-7930-41ea-9f93-b01231e40861}`, so each
   signed version installs over the last.

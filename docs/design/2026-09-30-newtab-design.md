@@ -145,7 +145,7 @@ other than clicking a tab on it) still adds a "New Tab" entry to Recently Closed
 
 ## Signing and install
 
-- Credentials: `~/.config/liquidfox-newtab/amo.env` (mode 600, created by the user) with
+- Credentials: a local credentials file (mode 600, created by the user) with
   `AMO_JWT_ISSUER=...` and `AMO_JWT_SECRET=...`. Never in the repo, never in chat.
 - `scripts/build.py` → `scripts/sign.py`: upload with channel `unlisted`, poll until
   processed, stop on validation errors, `PUT /addons/addon/<guid>/` with the upload uuid,
