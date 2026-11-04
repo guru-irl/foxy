@@ -73,7 +73,7 @@ test('memory placements reload and a hidden tile retains its saved rectangle wit
   await saveTiles(ff.browser, 13, [{id:'memory',x:2,y:1,w:5,h:6}], {now:10});
   const {layouts} = await loadLayouts(ff.browser);
   assert.deepEqual(layouts[13].tiles, [{id:'memory',x:2,y:1,w:5,h:6}]);
-  const options = {layouts,synced:{...DEFAULT_SETTINGS,showClock:false,showPinned:false,showWeather:false},device:DEFAULT_DEVICE,contentWidth:1600};
+  const options = {layouts,synced:{...DEFAULT_SETTINGS,railCells:5,showClock:false,showPinned:false,showWeather:false},device:DEFAULT_DEVICE,contentWidth:1600};
   const board = {columns:[],saved:[],tabs:[],pinned:[]};
   assert.deepEqual(buildView(board,options).newTiles, []);
   const hidden = buildView(board,{...options,synced:{...options.synced,showMemory:false}});
@@ -88,7 +88,7 @@ test('memory is visible by default with a 5 x 6 rectangle and its own minimum', 
   assert.deepEqual(defaultSize('memory', 48, 20), {w:5,h:6});
   assert.deepEqual(defaultSize('memory', 80, 20), {w:5,h:6});
   assert.deepEqual(clampRect('memory', {x:0,y:0,w:1,h:1}, 20), {id:'memory',x:0,y:0,w:4,h:5});
-  const options = {layouts:{},synced:{...DEFAULT_SETTINGS,showClock:false,showPinned:false,showWeather:false},device:DEFAULT_DEVICE,contentWidth:1600};
+  const options = {layouts:{},synced:{...DEFAULT_SETTINGS,railCells:5,showClock:false,showPinned:false,showWeather:false},device:DEFAULT_DEVICE,contentWidth:1600};
   const board = {columns:[],saved:[],tabs:[],pinned:[]};
   assert.deepEqual(buildView(board,options).tiles.map(t=>t.kind), ['memory']);
   await saveSetting(ff.browser,'synced','showMemory',false);

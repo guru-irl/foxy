@@ -2,16 +2,17 @@ import { CELL_PRESETS } from "../grid/layout.js";
 import { validPlace } from "../weather/location.js";
 
 export const DEFAULT_SETTINGS = Object.freeze({
-  railCells: 5, showClock: true, showPinned: true, showSaved: true, showMemory: true, timeFormat: "24",
+  widgetsWidth: 304, railWidth: 304, showClock: true, showPinned: true, showSaved: true, showMemory: true, timeFormat: "24",
   showDate: true, transparency: "medium", otherWindows: true, pinsMoveHere: true, switchToOpenTab: true,
   showWeather: true, tempUnit: "C",
 });
-export const DEFAULT_DEVICE = Object.freeze({ cellSize: "S", customCell: 80, density: "normal", weatherPlace: "auto" });
+export const DEFAULT_DEVICE = Object.freeze({ density: "normal", weatherPlace: "auto" });
 
 const integer = (value, min, max) => Number.isInteger(value) && value >= min && value <= max;
 const boolean = value => typeof value === "boolean";
 const syncedRules = {
-  railCells: value => integer(value, 2, 10000),
+  widgetsWidth: value => integer(value, 240, 10000),
+  railWidth: value => integer(value, 240, 10000),
   showClock: boolean, showPinned: boolean, showSaved: boolean, showMemory: boolean, showDate: boolean,
   otherWindows: boolean, pinsMoveHere: boolean, switchToOpenTab: boolean,
   timeFormat: value => ["24", "12"].includes(value),
@@ -19,8 +20,6 @@ const syncedRules = {
   showWeather: boolean, tempUnit: value => ["C", "F"].includes(value),
 };
 const deviceRules = {
-  cellSize: value => ["S", "custom"].includes(value),
-  customCell: value => integer(value, 40, 240),
   density: value => ["normal", "compact"].includes(value),
   weatherPlace: validPlace,
 };
@@ -72,9 +71,6 @@ async function writeSetting(api, scope, key, value) {
     const stored = (await api.storage[area].get(storageKey))[storageKey];
     const base = stored !== null && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
     written = { ...base, [key]: value };
-    // Reading legacy presets is display-only. Normalize on the next device
-    // write, leaving synced writes and unknown newer-version keys alone.
-    if (scope === "device" && ["M", "L", "XL"].includes(written.cellSize)) written.cellSize = "S";
     await api.storage[area].set({ [storageKey]: written });
   } catch (error) {
     console.warn(`Foxy: could not save ${storageKey}`, error);

@@ -5,14 +5,14 @@ import { buildBoard } from "../extension/src/board/model.js";
 import { DEFAULT_SETTINGS as ALL_SETTINGS, DEFAULT_DEVICE } from "../extension/src/settings/store.js";
 
 // The weather tests below start from the product defaults without the memory tile.
-const DEFAULTS = { ...ALL_SETTINGS, showMemory: false };
+const DEFAULTS = { ...ALL_SETTINGS, railCells: 5, showMemory: false };
 
 // These fixtures pin existing group geometry independently of optional widgets.
-const DEFAULT_SETTINGS = { ...ALL_SETTINGS, showMemory: false, showWeather: false };
+const DEFAULT_SETTINGS = { ...ALL_SETTINGS, railCells: 5, showMemory: false, showWeather: false };
 const group = (id, current = true) => ({ id, current, windowId: current ? 1 : 2, rows: [] });
 const board = { columns: [group(1), group(2)], saved: [], pinned: [], tabs: [] };
 // Geometry fixtures retain a three-cell rail; the default consumer test opts out.
-const geometrySettings = { ...DEFAULT_SETTINGS, railCells: 3 };
+const geometrySettings = { ...DEFAULT_SETTINGS,railCells:5, railCells: 3 };
 const options = (overrides = {}) => {
   const { layout = [], ...rest } = overrides;
   const k = Math.max(7, ...layout.map(t => t.x + t.w));
@@ -144,7 +144,7 @@ test("overlapping saved tiles are fitted without becoming new writes", () => {
 
 for (const [width, railCells, expected] of [[30, 100, [1, 2, 1]], [944, 100, [10, 5, 5]], [944, 2, [10, 2, 8]]]) {
   test(`rail clamps to limits at content width ${width} and requested cells ${railCells}`, () => {
-    const view = buildView(board, options({ contentWidth: width, synced: { ...DEFAULT_SETTINGS, railCells } }));
+    const view = buildView(board, options({ contentWidth: width, synced: { ...DEFAULT_SETTINGS,railCells:5, railCells } }));
     assert.deepEqual([view.total, view.railCells, view.cols], expected);
   });
 }

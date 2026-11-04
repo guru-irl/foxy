@@ -70,6 +70,8 @@ for (const [name, cell, width] of [["grid-custom-80", 1616 / 16 - 16, 1600], ["g
     assert.equal(board.saved.length, 3);
     const stored = await loadLayouts(api), layout = stored.layouts[9].tiles;
     const settings = await loadSettings(api);
+    settings.synced.railCells = 3;
+    settings.device = { ...settings.device, cellSize: "custom", customCell: name === "grid-custom-144" ? 144 : 80 };
     const view = buildView(board, { layouts: stored.layouts, ...settings,
       synced: { ...settings.synced, showMemory: false }, contentWidth: width,
       folders: reply.folders });
