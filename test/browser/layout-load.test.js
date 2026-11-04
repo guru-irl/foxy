@@ -87,3 +87,27 @@ test('a persistent layout failure gets only one automatic retry', async () => {
     assert.equal(root.querySelectorAll('.kanban-tile').length, 3);
   } finally { console.warn = warn; root.remove(); }
 }, {timeout: 10000});
+
+test('a later read failure keeps the last loaded layout read-only instead of defaults', async () => {
+  const ff = createBoardFirefox(setup, m => m.type === 'foxy:saved' ? {saved: [], missing: [], folders}
+    : m.type === 'foxy:reconcile' ? {ok: true} : undefined);
+  await ff.browser.storage.sync.set({settings: {showClock: false, widgetsWidth: 400},
+    board: {order: ['group:c', 'group:b', 'group:a'], heights: {}, widgets: [], t: 1}});
+  const warn = console.warn; console.warn = () => {};
+  const root = await makeRoot(1600);
+  const original = ff.browser.storage.sync.get;
+  try {
+    const control = createController(root, ff.browser);
+    await control.refresh(); await flush(ff);
+    assert.equal(root.querySelector('.clock'), null);
+    ff.browser.storage.sync.get = async () => { throw new Error('storage disabled'); };
+    // Another page's write arrives; reloading it fails.
+    await ff.browser.storage.sync.set({board: {order: ['group:c', 'group:b', 'group:a'], heights: {}, widgets: [], t: 2}}); await flush(ff);
+    assert.equal(root.querySelector('.clock'), null, 'loaded settings stay; defaults would show the clock');
+    assert.equal(root.querySelector('.widgets-column').getBoundingClientRect().width, 400);
+    assert.deepEqual([...root.querySelectorAll('.kanban-tile .group-name')].map(n => n.textContent), ['G3', 'G2', 'G1']);
+    ff.calls.length = 0;
+    await resize(root, '.pinned .tile-resize', 0, 64); await flush(ff);
+    assert.equal(writes(ff).length, 0, 'still read-only until a load succeeds');
+  } finally { console.warn = warn; ff.browser.storage.sync.get = original; root.remove(); }
+}, {timeout: 10000});

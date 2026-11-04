@@ -151,8 +151,9 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
             ++storageVersion; pendingLayout = true; enqueue();
           }, 2000);
         }
-        return { layout: validBoard(null), synced: { ...DEFAULT_SETTINGS }, device: { ...DEFAULT_DEVICE },
-          writable: false, version };
+        return layoutState ? { ...layoutState, writable: false, version }
+          : { layout: validBoard(null), synced: { ...DEFAULT_SETTINGS }, device: { ...DEFAULT_DEVICE },
+            writable: false, version };
       });
     }
     const next = await layoutRead; layoutRead = null;
