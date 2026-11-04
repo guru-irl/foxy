@@ -27,5 +27,7 @@ def firefox_environment(scratch):
             sock = alias / 's'
         if len(str(sock).encode()) >= 104:
             raise ValueError('Scratch root is too long for a Unix socket')
+        # Firefox 159 refuses chrome-context Marionette (used by the smoke
+        # harnesses on throwaway profiles) unless this is set.
         yield {**os.environ, 'TMPDIR': str(temp), 'TMP': str(temp), 'TEMP': str(temp),
-               'FOXY_AGENT_SOCK': str(sock)}
+               'FOXY_AGENT_SOCK': str(sock), 'MOZ_REMOTE_ALLOW_SYSTEM_ACCESS': '1'}
