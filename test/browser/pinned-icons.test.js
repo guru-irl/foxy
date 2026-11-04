@@ -3,7 +3,7 @@ import { buildBoard } from '../../extension/src/board/model.js';
 import { renderBoard } from './view.js';
 
 let css;
-async function draw({ width = 1280, height = 600, target = 48, count = 9, w = 3, h = 2, x = 1, y = 1, scheme = 'dark', names } = {}, handlers = {}) {
+async function draw({ width = 1280, height = 600, count = 9, w = 3, h = 2, scheme = 'dark', names } = {}, handlers = {}) {
   css ??= new Promise(resolve => {
     const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = '/extension/newtab.css';
     link.onload = resolve; document.head.append(link);
@@ -16,12 +16,12 @@ async function draw({ width = 1280, height = 600, target = 48, count = 9, w = 3,
       title: `Page ${i + 1}`, url: `https://example.invalid/${i}`, pinned: true, active: i === 0 })),
     groups: [], currentWindowId: 1, pins: names ?? { [count]: { name: 'Named pin', origin: null, allowed: false } } });
   const view = renderBoard(root, board, {}, handlers, { boxes: [{ id: 'pinned', width: w * 64, height: 32 + h * 64 }],
-    synced: { showClock: false, showPinned: true, showSaved: false, railCells: 3 },
-    device: { cellSize: target === 48 ? 'S' : 'custom', customCell: target, density: 'normal' } });
+    synced: { showClock: false, showPinned: true, showSaved: false },
+    device: { density: 'normal' } });
   await nextFrame();
   return { root, view, board, options: { boxes: [{ id: 'pinned', width: w * 64, height: 32 + h * 64 }],
-    synced: { showClock: false, showPinned: true, showSaved: false, railCells: 3 },
-    device: { cellSize: target === 48 ? 'S' : 'custom', customCell: target, density: 'normal' } }, tile: root.querySelector('[data-kind="pinned"]'), list: root.querySelector('.rows[data-zone="pinned"]') };
+    synced: { showClock: false, showPinned: true, showSaved: false },
+    device: { density: 'normal' } }, tile: root.querySelector('[data-kind="pinned"]'), list: root.querySelector('.rows[data-zone="pinned"]') };
 }
 function near(got, want, label) { assert.ok(Math.abs(got - want) < 0.03, `${label}: ${got} != ${want}`); }
 function key(node, value) { node.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true })); }

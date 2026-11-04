@@ -11,7 +11,7 @@ async function styles() {
   await css; await document.fonts.ready;
 }
 async function flush(ff) { for (let i = 0; i < 5; i++) { await ff.settle(); await nextFrame(); } }
-async function setup({ folders = { 1: "one", 2: "two" }, width = 1232, railCells = 3 } = {}) {
+async function setup({ folders = { 1: "one", 2: "two" }, width = 1232, railWidth = 304 } = {}) {
   await styles();
   const ff = createBoardFirefox({ windows: [{ id: 1, focused: true }, { id: 2 }], selfTabId: 99,
     groups: [{ id: 1, windowId: 1, title: "Here" }, { id: 2, windowId: 2, title: "There" }],
@@ -22,9 +22,7 @@ async function setup({ folders = { 1: "one", 2: "two" }, width = 1232, railCells
   const host = document.createElement("div"), node = document.createElement("div"), pane = document.createElement("aside");
   host.className = "page"; host.style.cssText = `position:fixed;top:0;right:0;width:${width}px`;
   node.className = "board";
-  // These geometry fixtures use Custom 80, independent of the S default.
-  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
-  await ff.browser.storage.sync.set({ settings: { railCells } }); await ff.settle();
+  await ff.browser.storage.sync.set({ settings: { widgetsWidth: 304, railWidth } }); await ff.settle();
   pane.className = "settings-pane"; pane.hidden = true;
   host.append(node, pane); fixture().append(host);
   const control = createController(node, ff.browser); await control.refresh(); await flush(ff);

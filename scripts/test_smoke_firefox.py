@@ -184,7 +184,7 @@ class SmokeSequenceTests(unittest.TestCase):
             smoke.run_checks(client, smoke.ROOT, Path(directory), results, base)
         self.assertEqual(results.exit_code, 0)
         self.assertIn("PASS named inbound pins", output.getvalue())
-        self.assertIn("PASS grid: tiles and rail rendered", output.getvalue())
+        self.assertIn("PASS board: widgets, kanban and rail rendered", output.getvalue())
         self.assertIn("PASS settings: pane opens", output.getvalue())
         self.assertEqual(len(navigations), 2)
         self.assertGreaterEqual(navigations[1], root_seen[0] + 1)

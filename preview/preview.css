@@ -1,7 +1,7 @@
 /* Preview only: neutral glass behind the transparent page. */
 html {
   min-height: 100%;
-  background: #26272a;
+  background: #262628;
 }
 
 html[data-scheme="light"] {

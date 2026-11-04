@@ -23,18 +23,18 @@ const ask = params.get("weather") === "ask";
 const dataCollection = ask ? [] : ["locationInfo"];
 const ff = createFirefox({ ...scenario, tabs: [...scenario.tabs, self], selfTabId: self.id, dataCollection, permissions: ask ? [] : ["geolocation"] });
 ff.browser.runtime.onMessage.addListener(message => {
+  if (message?.type === 'foxy:memory') return {firefox:3650722202,system:{total:51539607552,used:36593121362}};
+  if (message?.type === 'foxy:reconcile' && name.startsWith('v40')) return {ok:true};
   if (message?.type === "foxy:saved") {
     return { saved: scenario.saved ?? [], missing: scenario.missing ?? [],
       ...(scenario.folders ? { folders: scenario.folders } : {}) };
   }
 });
-if (scenario.layout) {
-  const k = scenario.layoutWidth ?? 9;
-  await ff.browser.storage.sync.set({ [`layout:${k}`]: { t: 1 },
-    ...Object.fromEntries(Object.entries(scenario.layout).map(([id, rect]) => [`tile:${k}:${id}`, rect])),
-    ...(scenario.syncedSettings ? { settings: scenario.syncedSettings } : {}) });
-  await ff.browser.storage.local.set({ deviceSettings: scenario.deviceSettings });
+if (scenario.board || scenario.syncedSettings) {
+  await ff.browser.storage.sync.set({ ...(scenario.board ? {board:scenario.board} : {}),
+    ...(scenario.syncedSettings ? {settings:scenario.syncedSettings} : {}) });
 }
+if (scenario.deviceSettings) await ff.browser.storage.local.set({ deviceSettings: scenario.deviceSettings });
 globalThis.browser = ff.browser;
 
 // Open the real pane through its gear once main.js has rendered the board.

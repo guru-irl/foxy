@@ -2,7 +2,7 @@
 
 A private Firefox add-on and browser theme.
 
-- Replaces the new tab and home pages with a grid of your tabs and tab groups from every window.
+- Replaces the new tab and home pages with widgets, group tiles and ungrouped tabs from every window.
 - Saves groups and pinned tabs as bookmarks, so they survive a failed session restore and sync to your other devices through Firefox Sync.
 - Switches to an open tab instead of opening a duplicate, including through Safe Links and sign-in pages.
 - Lets local agents add tabs to your groups.
@@ -10,49 +10,39 @@ A private Firefox add-on and browser theme.
 
 **Platforms:** desktop Firefox 140+ on macOS, Windows and Linux, not Android. The theme supports glass blur on macOS only.
 
-Version 3.3.1. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-10-03-foxy-grid-design.md`, `2026-10-04-foxy-3.2-design.md` and `2026-10-04-foxy-3.3-design.md`.
+Version 3.3.1. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-11-01-foxy-4.0-design.md`.
 
 ## Board
 
-- **Tiles:** groups, PINNED, SAVED, a clock, MEMORY and weather on a scrolling grid that fills the page edge to edge. Groups and SAVED have scrolling lists.
-- **PINNED:** one icon per cell, in tab order. Hover shows the name, other-window label and ×; the active pin has a neutral bottom dot. A muted top-left dot means the name needs site access; hover or focus the icon for ALLOW. Extra pins scroll with edge fades. Default 6 × 2 cells, minimum 1 × 1.
-- **Memory:** the helper measures Firefox's process total and system use, with a five-minute sparkline. Loaded sites are grouped by host; UNLOAD discards inactive tabs. Firefox cannot report per-site memory. Without the helper, the tile shows installation guidance; see Agents to install it.
-- **Weather:** your location (rounded to about 1 km) or a city you pick in Settings. The tile shows more as it grows, in one column: temperature, then place, condition and high / low, then the next 24 hours (scroll them with the wheel, the arrow keys or a swipe), then feels like, wind and humidity, then up to 7 days. It refreshes every 15 minutes while a Foxy page is visible; offline it shows the last reading and when it was updated.
-- **UNGROUPED TABS rail:** ungrouped tabs stay on the right, running to the board bottom with their own scroll. A round Settings gear sits inside the rail at its bottom right; the tab list ends above it.
-- **Move and resize:** drag a tile's header (empty space or the 4 px icon margins for PINNED, even at 1 × 1; the weather tile by its body), or any of its four corners. The tile follows the pointer; an outline and corner dots show the cells it will take, and tiles in the way slide aside. Release to place, Escape to cancel. Drag the rail edge to resize it.
-- **Window widths:** each width keeps its own layout (up to 4). A width without one shows the closest: tiles narrow slightly, or columns of tiles pack together in order. Resizing saves nothing. Moving a tile updates the layout shown if the result still fits it; otherwise it saves a new layout for this width.
-- **Windows:** this window comes first; others are labelled. Tile places do not change tab order.
-- **Open a tab:** click it. A pin from another window moves here unless that setting is off.
-- **Move tabs:** drag to a group, UNGROUPED TABS or PINNED. Drop on empty grid space to create and name a group.
-- **Groups:** click the name to rename or the dot to recolour, use the arrow to bring a group here, × to close it on this device.
-- **Close a tab:** × on its row or pinned icon.
-- **Rename a pin:** focus its icon and press F2, or right-click it. Enter or click away saves, Escape cancels, an empty name removes it. Arrow keys move between icons.
-- **Page closing:** picking a tab closes Foxy only when it has no history, without a Recently Closed entry.
+- Widgets stack on the left. Group tiles fill the middle in up to four fixed-width columns. UNGROUPED TABS stays on the right, with the gear at its bottom right.
+- Each column scrolls independently. On narrow pages, widgets move above the groups in the middle scroll.
+- Drag either bar's inner edge to change its width. Both default to 304 px, between 240 px and a third of the page.
+- Drag a widget by its header or empty space, or weather by its body, to reorder it. Its bottom edge changes its height.
+- Drag a group header to reorder it, or focus the header and press Alt+Arrow. Its bottom edge sets 2 to 40 tab rows. Double-click the handle to fit 3 to 12 rows again.
+- A neutral insertion line marks the drop. Release to save, Escape to cancel. Resizing the window never saves a layout.
+- PINNED icons flow left to right. Hover or focus shows the name, other-window label and close button. Arrow keys move between icons.
+- A muted pin dot means its name needs site access. Hover or focus for ALLOW. F2 or right-click renames a pin. Enter saves and Escape cancels.
+- SAVED lists closed groups in the widgets bar. Click to open, or click × then DELETE? to delete everywhere.
+- MEMORY shows Firefox's process total, system use and a five-minute sparkline. UNLOAD discards inactive, silent tabs by site. Per-site memory is unavailable. The helper is required.
+- Weather uses your rounded location or a city from Settings. Larger boxes add condition, high and low, hourly forecasts, details and up to seven days. It refreshes every 15 minutes while visible and retains the last reading offline.
+- This window's groups come first. Other windows are labelled. Changing tile order does not change tab order.
+- Click a tab to open it. A pin from another window moves here unless that setting is off. Close it with ×.
+- Drag tabs between groups, UNGROUPED TABS and PINNED. Drop on empty kanban space to create and name a group.
+- Click a group name to rename it or its dot to recolour it. The arrow brings it here, and × closes it on this device.
+- Picking a tab closes Foxy only when it has no history, without a Recently Closed entry.
 
 ## Settings
 
-Open the gear inside the rail's bottom right corner. The pane opens at the page's top right, 360 px wide, and ends one gap above the gear so it stays clickable. Changes apply immediately; Escape or the gear closes the pane.
-The same settings are in about:addons, Foxy, Options.
+Open the gear inside the rail, or about:addons, Foxy, Options. Changes apply immediately. Escape or the gear closes the pane.
 
-After updating, boards saved with M, L or XL cells show smaller tiles; resize them or use Reset layout.
-
-| Setting | Values | Scope |
-|---|---|---|
-| Cell size | S 48 px (default); Custom 40 to 240 px (cells stretch a little to fill the width) | Per device |
-| Ungrouped tabs rail width | 2 cells to half the available width; default 5 | Synced |
-| Show clock, pinned, saved, memory, weather | On or off for each | Synced |
-| Reset layout | Click twice within 3 seconds; clears saved tile places for every width | Synced |
-| Time format | 24-hour or 12-hour | Synced |
-| Show date | On or off | Synced |
-| Temperature | °C (wind in km/h) or °F (wind in mph) | Synced |
-| Location | Current location, or a city found by search (Enter picks the first match); Use my location goes back | Per device |
-| Transparency | Low, medium, high | Synced |
-| Row density | Normal 32 px, compact 24 px | Per device |
-| Other windows | Show or hide their tabs and groups | Synced |
-| Move other-window pins here on click | On; off focuses their window instead | Synced |
-| Switch to an open tab instead of opening a duplicate | On or off | Synced |
-
-Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their places in each layout until a reset.
+- Show or hide clock, pinned, saved, memory and weather independently.
+- Reset layout needs two clicks within 3 seconds. It resets widget and group order, heights and both bar widths, without changing visibility or other settings.
+- Choose a 24-hour or 12-hour clock, with an optional date.
+- Weather offers °C with km/h or °F with mph. Search for a city or use your location. Location stays on this device.
+- Cards have low, medium or high transparency. Row density is 32 px or compact 24 px and stays on this device.
+- Other windows can be shown or hidden. Pins from another window can move here on click or focus their original window.
+- Switch to an open tab instead of opening a duplicate can be turned off.
+- Order, heights and bar widths sync with Firefox Sync's Add-ons enabled. Hidden widgets keep their order and height until Reset layout.
 
 ## Pinned tab names
 
@@ -89,7 +79,7 @@ Tile places sync with Firefox Sync's Add-ons enabled. Hidden tiles keep their pl
 | `tabs` | Read, open, move, pin and close tabs |
 | `tabGroups` | Read, create, move, rename and recolour groups |
 | `bookmarks` | Save groups and pins |
-| `storage` | Remember mappings and pending changes; tile layout and settings (synced), device settings (local) |
+| `storage` | Remember mappings and pending changes; board layout and settings (synced), device settings (local) |
 | `scripting` | Keep a renamed pin's title |
 | `nativeMessaging` | Connect the local helper: the agent CLI and the MEMORY tile |
 | `geolocation` (optional) | Weather for where you are, asked by "Allow weather". Not needed for a searched city. Coordinates are rounded to 2 decimals before any request |
@@ -150,6 +140,7 @@ The add-on lives in `extension/`; scripts and tests are at the repo root. No npm
 | `npm run test:smoke` | Real add-on and duplicate-tab checks in headless Firefox |
 | `python3 scripts/smoke_agent.py` | Agent CLI and memory end to end in headless Firefox (disposable native manifest) |
 | `python3 scripts/preview.py` | Headless screenshots in `dist/preview/` |
+| `python3 scripts/preview_v40.py` | Offline dark and light viewport matrix and contact sheet in `.spider/scratch/renders/` |
 | `python3 scripts/check_private.py` | Scan for private data; run after committing, before pushing |
 
 Every headless run uses a throwaway profile under `.spider/scratch/`, never your real one.

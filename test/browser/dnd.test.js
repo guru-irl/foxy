@@ -64,7 +64,7 @@ function point(node, x = 0.5, y = 0.5) {
   return { clientX: r.left + r.width * x, clientY: r.top + r.height * y };
 }
 function clean(root) {
-  assert.equal(root.querySelectorAll(".dragging, .drop-target, .drop-line, .cell-preview").length, 0);
+  assert.equal(root.querySelectorAll(".dragging, .drop-target, .drop-line").length, 0);
 }
 function rgba(color) {
   const canvas = document.createElement("canvas"), ctx = canvas.getContext("2d");
@@ -82,14 +82,12 @@ function luminance(rgb) {
 async function flush(ff) { await ff.settle(); await nextFrame(); await nextFrame(); }
 async function controller(set = setup(), listener, layout = {}, options = {}) {
   const ff = createFirefox(set, listener), root = await makeRoot();
-  // These geometry fixtures use Custom 80, independent of the S default.
-  await ff.browser.storage.local.set({ deviceSettings: { cellSize: "custom", customCell: 80 } });
-  await ff.browser.storage.sync.set({ ...layout, settings: { railCells: 3, ...layout.settings } }); await ff.settle();
+  await ff.browser.storage.sync.set({ ...layout, settings: { widgetsWidth: 304, railWidth: 304, ...layout.settings } }); await ff.settle();
   const { createController } = await import("../../extension/src/main.js");
   const control = createController(root, ff.browser, undefined, options);
   await control.refresh();
   await flush(ff); // Drain the one-time reconcile and deferred first paint.
-  await flush(ff); // Deliver fake storage events from the initial tile writes.
+  await flush(ff); // Deliver fake storage events from the one-time upgrade.
   return { root, ff, control };
 }
 
@@ -200,7 +198,7 @@ async function longRail() {
   for (let i = 0; i < 30; i++) set.tabs.push({ id: 1000 + i, windowId: 1 });
   const result = await draw(set);
   result.renderBoard(result.root, result.board, {}, result.handlers, {
-    device: { cellSize: "S", density: "normal" }, synced: { railCells: 2 },
+    device: { density: "normal" }, synced: { railWidth: 240 },
   });
   await nextFrame(); await nextFrame();
   return result;

@@ -352,7 +352,7 @@ test("controller batches remote tab, group, window and activation events per fra
   assert.equal(ff.calls.filter(call => call.api === "windows.getAll").length, 1);
 });
 
-test("controller retains grid and row scroll and focus through rebuild", async () => {
+test("controller retains kanban and row scroll and focus through rebuild", async () => {
   const set = setup();
   for (let i = 0; i < 30; i++) set.tabs.push({ id: 1000 + i, windowId: 1, groupId: 101, title: `Tab ${i}` });
   const { ff, node, control } = await controller(set);

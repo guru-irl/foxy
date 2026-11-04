@@ -297,12 +297,14 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
   // Promote them in memory when the bookmark mapping arrives; a later gesture
   // can persist that identity, but the mapping/render itself writes nothing.
   function displayLayout() {
-    if (!transientLayout || transientLayout.t !== layoutState.layout.t) return layoutState.layout;
+    if (transientLayout && JSON.stringify(transientLayout.base) !== JSON.stringify(layoutState.layout)) transientLayout = null;
+    if (!transientLayout) return layoutState.layout;
     const mapped = id => id.startsWith('local:') && savedReply.folders?.[id.slice(6)]
       ? `group:${savedReply.folders[id.slice(6)]}` : id;
-    transientLayout = { ...transientLayout, order: transientLayout.order.map(mapped),
-      heights: Object.fromEntries(Object.entries(transientLayout.heights).map(([id,h]) => [mapped(id),h])) };
-    return transientLayout;
+    const draft = transientLayout.draft;
+    transientLayout.draft = { ...draft, order: draft.order.map(mapped),
+      heights: Object.fromEntries(Object.entries(draft.heights).map(([id,h]) => [mapped(id),h])) };
+    return transientLayout.draft;
   }
 
   function makeView(layout, widths = {}) {
@@ -513,7 +515,7 @@ export function createController(root, api, ui = { editGroupId: null, dragging: 
           layoutState.synced = { ...layoutState.synced, [key]: value };
         } else {
           const written = await boardStore.gesture(() => draft, liveIds());
-          transientLayout = { ...draft, t: written.t };
+          transientLayout = { base: written, draft: { ...draft, t: written.t } };
           layoutState.layout = written;
         }
         lastRenderedKey = undefined; pendingView = true;

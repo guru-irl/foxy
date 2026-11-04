@@ -214,6 +214,7 @@ body {
 .weather-auto { margin-top: 8px; background: var(--hover); }
 .weather-search [hidden] { display: none; }
 .weather-search .weather-allow { display: block; margin-top: 6px; background: var(--hover); }
+.settings-help { margin: 12px 0 8px; color: var(--text-muted); font-size: 11px; line-height: 16px; }
 .settings-reset { background: var(--hover); }
 .settings-pane button:focus-visible { background: var(--thumb); }
 .options-page .settings-pane {

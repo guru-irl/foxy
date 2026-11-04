@@ -109,3 +109,14 @@ for(const compact of [false,true])test(`${compact?'compact':'normal'} remote til
  const [x,y]=begin(tile.querySelector('.tile-resize'));pointer(document,'pointermove',x,y+2*row);pointer(document,'pointerup',x,y+2*row);await flush(ff);
  assert.equal((await board(ff)).heights['group:three'],5);assert.equal(root.querySelector('[data-tile-id="group:three"] .rows').clientHeight,5*row);
 });
+
+test('a later synced board wins even when its timestamp matches this page draft',async()=>{
+ const {root,ff}=await setup();const [x,y]=begin(root.querySelector('.clock .tile-resize'));
+ pointer(document,'pointermove',x,y+71);pointer(document,'pointerup',x,y+71);await flush(ff);
+ const current=await board(ff),next={...current,order:['group:three','group:one','group:two'],
+  widgets:current.widgets.map(w=>w.kind==='clock'?{...w,h:280}:w)};
+ await ff.browser.storage.sync.set({board:next});await flush(ff);
+ assert.equal(root.querySelector('.clock').getBoundingClientRect().height,280);
+ const first=[...root.querySelectorAll('.kanban-tile')].sort((a,b)=>a.getBoundingClientRect().left-b.getBoundingClientRect().left)[0];
+ assert.equal(first.dataset.tileId,'group:three');
+});
