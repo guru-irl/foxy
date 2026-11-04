@@ -6,7 +6,12 @@ import { createAgentHandler, connectAgent } from "./src/agent.js";
 const api = globalThis.browser;
 const sync = createSync({ api });
 createTabSwitch(api);
-const agentHandler = createAgentHandler({ api, saved: () => sync.onMessage({ type: "foxy:saved" }) });
+const agentHandler = createAgentHandler({
+  api,
+  saved: () => sync.onMessage({ type: "foxy:saved" }),
+  idle: () => sync.idle(),
+  deleteSaved: folderId => sync.onMessage({ type: "foxy:delete-saved", folderId }),
+});
 connectAgent({ api, handle: agentHandler });
 
 // Register synchronously: Firefox uses these listeners to wake this event page.

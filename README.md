@@ -5,12 +5,12 @@ A private Firefox add-on and browser theme.
 - Replaces the new tab and home pages with a grid of your tabs and tab groups from every window.
 - Saves groups and pinned tabs as bookmarks, so they survive a failed session restore and sync to your other devices through Firefox Sync.
 - Switches to an open tab instead of opening a duplicate, including through Safe Links and sign-in pages.
-- Lets local agents add tabs to your groups.
+- Lets local agents manage tabs and groups when you ask.
 - Ships a glass, neutral, borderless Firefox theme with bundled fonts.
 
 **Platforms:** desktop Firefox 140+ on macOS, Windows and Linux, not Android. The theme supports glass blur on macOS only.
 
-Version 3.3.1. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-10-03-foxy-grid-design.md`, `2026-10-04-foxy-3.2-design.md` and `2026-10-04-foxy-3.3-design.md`.
+Version 3.4.0. Distributed as an unlisted add-on. Design: `docs/superpowers/specs/2026-10-03-foxy-grid-design.md`, `2026-10-04-foxy-3.2-design.md`, `2026-10-04-foxy-3.3-design.md` and `2026-11-01-foxy-3.4-design.md`.
 
 ## Board
 
@@ -113,7 +113,7 @@ To remove: uninstall in about:addons. The `Foxy` bookmark folders stay; delete t
 
 ## Agents
 
-- **What:** agents list groups and add URLs through your running Firefox (Foxy 3.2.0 or newer). macOS and Linux; Python 3, no packages. The same helper powers the MEMORY tile in Foxy 3.3.0, using macOS physical footprint (RSS fallback) or Linux PSS (RSS fallback). Windows has no helper memory measurement.
+- **What:** agents list, create and manage groups through your running Firefox (Foxy 3.2.0 or newer; remove and delete need 3.4.0). macOS and Linux; Python 3, no packages. The same helper powers the MEMORY tile in Foxy 3.3.0, using macOS physical footprint (RSS fallback) or Linux PSS (RSS fallback). Windows has no helper memory measurement.
 - **Install once** (keep this repo in place):
   - `python3 scripts/install_agent.py` registers the native host;
   - `ln -s "$PWD/skills/foxy-tabs" ~/.agents/skills/foxy-tabs` registers the skill.
@@ -124,9 +124,13 @@ agent/foxy groups
 agent/foxy tabs "To be reviewed"
 agent/foxy add "To be reviewed" https://example.com/review
 agent/foxy new "Dev server" http://localhost:3000 --color blue
+agent/foxy add "Research" https://example.com/article --create
+agent/foxy remove "To be reviewed" https://example.com/review
+agent/foxy delete "Old work" --close-tabs
 ```
 
 - **Behaviour:** tabs open in the background and never take focus; saved closed groups get bookmarks and stay closed; a missing group is refused unless `add --create`.
+- **Safety:** remove or delete only what the user asks for. Prefer ungrouping to `--close`; report deleted URLs. Active tabs cannot be closed. An open group on another synced device may reappear there.
 - **Exit codes:** 0 done, 1 refused, 2 Foxy not reachable. Every command accepts `--json`.
 - **Update:** the helper runs from this repo, so `git pull` here before installing a newer Foxy. An older helper leaves MEMORY on "Memory unavailable".
 - **Remove:** `python3 scripts/install_agent.py --uninstall`.

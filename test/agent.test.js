@@ -143,12 +143,342 @@ test('validation refuses invalid input before creating any tabs or bookmarks', a
   assert.equal((await handle({command:'new',title:'x'.repeat(200),color:'grey',urls:Array.from({length:50},(_,i)=>`https://example.com/${i}`)})).added,50);
 });
 
+test('mutation deadlines are validated and expired requests leave tabs and bookmarks untouched', async () => {
+  const requests = [
+    {command:'add',group:'Work',urls:['https://example.com/new']},
+    {command:'new',title:'New',urls:['https://example.com/new']},
+    {command:'remove',group:'Work',urls:['https://example.com/a']},
+    {command:'delete',group:'Work',closeTabs:true},
+    {command:'add',group:'Later',urls:['https://example.com/new']},
+    {command:'remove',group:'Later',urls:['https://example.com/saved']},
+    {command:'delete',group:'Later'},
+  ];
+  for (const request of requests) {
+    const {ff,handle} = await removalFixture();
+    const tabs = await ff.browser.tabs.query({}), tree = await ff.browser.bookmarks.getTree();
+    assert.deepEqual(await handle({...request,deadline:0}),
+      {ok:false,error:'Request expired before Foxy could start it; nothing changed'});
+    assert.equal((await handle({...request,deadline:'0'})).ok,false);
+    assert.deepEqual(await ff.browser.tabs.query({}),tabs);
+    assert.deepEqual(await ff.browser.bookmarks.getTree(),tree);
+    assert.equal((await handle(request)).ok,true, 'older clients need no deadline');
+  }
+});
+
+test('a request expiring while waiting for the snapshot does not start', async () => {
+  const {ff} = await fixture();
+  const deadline = Date.now() + 250;
+  const handle = agent.createAgentHandler({api:ff.browser, saved:async()=>{
+    await new Promise(resolve=>setTimeout(resolve,300));
+    return {saved:[],folders:{}};
+  }});
+  const before = await ff.browser.tabs.query({});
+  assert.deepEqual(await handle({command:'new',title:'Late',urls:['https://example.com/late'],deadline}),
+    {ok:false,error:'Request expired before Foxy could start it; nothing changed'});
+  assert.deepEqual(await ff.browser.tabs.query({}),before);
+});
+
 test('no normal non-private window refuses creation', async () => {
   assert.equal(typeof agent.createAgentHandler,'function');
   const ff = createFirefox({windows:[{id:1,type:'popup',focused:true}],tabs:[{id:1,windowId:1,url:'about:blank'}]});
   const handle=agent.createAgentHandler({api:ff.browser,saved:async()=>({saved:[],folders:{}})});
   assert.equal((await handle({command:'new',title:'No',urls:['https://example.com/']})).ok,false);
   assert.equal((await ff.browser.tabs.query({})).length,1);
+});
+
+// Breaking the agent's mutation or its sync ordering must change these public
+// replies, tab membership, or the real bookmark tree.
+async function removalFixture({wrapApi = api => api, productionIdle = false, failIdle = false} = {}) {
+  const ff = createFirefox({
+    groups: [{id:11, windowId:1, title:'Work', color:'red'},
+      {id:22, windowId:1, title:'Other', color:'blue'}],
+    tabs: [{id:1, windowId:1, url:'about:blank', active:true},
+      {id:2, windowId:1, groupId:11, url:'https://example.com/a#one', title:'A one'},
+      {id:3, windowId:1, groupId:11, url:'https://example.com/a#two', title:'A two'},
+      {id:4, windowId:1, groupId:11, url:'https://example.com/keep', title:'Keep'},
+      {id:5, windowId:1, groupId:22, url:'https://example.net/other', title:'Other page'}],
+    bookmarks: [{id:'root', title:'Foxy', children:[{id:'pinned', title:'📌 Pinned'},
+      {id:'later', title:'🟢 Later', children:[
+        {id:'later-a', url:'https://example.com/saved#one', title:'Saved one'},
+        {id:'later-b', url:'https://example.com/saved#two', title:'Saved two'},
+        {id:'later-keep', url:'https://example.com/saved-keep', title:'Saved keep'}]},
+      {id:'archive', title:'🔵 Archive', children:[{url:'https://example.net/archive', title:'Archive page'}]}]}],
+  });
+  const sync = createSync({api:ff.browser, settleMs:0, maxWaitMs:0, removeDelayMs:0});
+  for (const [name,fn] of Object.entries(sync.handlers)) {
+    const [ns,event] = name.split('.'); ff.browser[ns][event].addListener(fn);
+  }
+  await sync.start(); await ff.settle(); await sync.idle(); await ff.settle();
+  const saved = () => sync.onMessage({type:'foxy:saved'});
+  const idle = async () => {
+    await ff.settle(); await sync.idle();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await sync.idle(); await ff.settle(); await sync.idle();
+  };
+  const handle = agent.createAgentHandler({api:wrapApi(ff.browser), saved,
+    idle: failIdle ? async () => { throw new Error('sync failed'); } : productionIdle ? () => sync.idle() : idle,
+    deleteSaved: folderId => sync.onMessage({type:'foxy:delete-saved', folderId})});
+  return {ff, sync, saved, idle, handle};
+}
+
+async function folderUrls(ff, id) {
+  return (await ff.browser.bookmarks.getChildren(id)).filter(b=>b.type === 'bookmark').map(b=>b.url);
+}
+
+test('remove ungroups all fragment matches, reports missing URLs and syncs only that group', async () => {
+  const {ff, saved, idle, handle} = await removalFixture();
+  const before = await saved();
+  const workFolder = before.folders[11], otherFolder = before.folders[22];
+  const reply = await handle({command:'remove', group:' WORK ', urls:[
+    'https://example.com/a#new', 'https://example.com/a', 'https://example.com/missing']});
+  assert.deepEqual({ok:reply.ok, title:reply.group?.title, closed:reply.closed, removed:reply.removed, missing:reply.missing},
+    {ok:true, title:'Work', closed:false, removed:2, missing:['https://example.com/missing']});
+  assert.equal((await ff.browser.tabs.get(2)).groupId,-1);
+  assert.equal((await ff.browser.tabs.get(3)).groupId,-1);
+  assert.deepEqual((await ff.browser.tabs.query({groupId:11})).map(t=>t.id),[4]);
+  await idle();
+  assert.deepEqual(await folderUrls(ff,workFolder),['https://example.com/keep']);
+  assert.deepEqual(await folderUrls(ff,otherFolder),['https://example.net/other']);
+  assert.deepEqual(await folderUrls(ff,'archive'),['https://example.net/archive']);
+});
+
+test('remove --close closes inactive matches and syncs their bookmarks', async () => {
+  const {ff, saved, idle, handle} = await removalFixture();
+  const folder = (await saved()).folders[11];
+  const reply = await handle({command:'remove', group:'Work', urls:['https://example.com/a'], close:true});
+  assert.equal(reply.ok,true); assert.equal(reply.removed,2); assert.equal(reply.closed,false);
+  assert.deepEqual((await ff.browser.tabs.query({windowId:1})).map(t=>t.id),[1,4,5]);
+  await idle();
+  assert.deepEqual(await folderUrls(ff,folder),['https://example.com/keep']);
+});
+
+test('remove on a saved group deletes all matching bookmarks even with --close', async () => {
+  const {ff, idle, handle} = await removalFixture();
+  const reply = await handle({command:'remove', group:' later ', urls:['https://example.com/saved#x','https://example.com/missing'], close:true});
+  assert.deepEqual({ok:reply.ok, title:reply.group?.title, closed:reply.closed, removed:reply.removed, missing:reply.missing},
+    {ok:true, title:'Later', closed:true, removed:2, missing:['https://example.com/missing']});
+  await idle();
+  assert.deepEqual(await folderUrls(ff,'later'),['https://example.com/saved-keep']);
+  assert.deepEqual(await folderUrls(ff,'archive'),['https://example.net/archive']);
+});
+
+test('remove refuses no matches or an empty group without changing tabs or bookmarks', async () => {
+  for (const [group,urls,error] of [
+    ['Work',['https://example.com/missing'],'No matching tabs in Work'],
+    ['Work',['https://example.com/a','https://example.com/keep'],'This would empty Work; use delete'],
+    ['Later',['https://example.com/saved','https://example.com/saved-keep'],'This would empty Later; use delete'],
+  ]) {
+    const {ff, saved, handle} = await removalFixture();
+    const tree = await ff.browser.bookmarks.getTree(), tabs = await ff.browser.tabs.query({});
+    assert.deepEqual(await handle({command:'remove',group,urls}),{ok:false,error});
+    assert.deepEqual(await ff.browser.tabs.query({}),tabs);
+    assert.deepEqual(await ff.browser.bookmarks.getTree(),tree);
+    assert.ok((await saved()).saved.some(g=>g.title === 'Later'));
+  }
+});
+
+test('remove --close refuses an active tab before closing any matches', async () => {
+  const {ff, handle} = await removalFixture();
+  await ff.browser.tabs.update(3,{active:true}); await ff.settle();
+  const before = await ff.browser.tabs.query({});
+  assert.deepEqual(await handle({command:'remove',group:'Work',urls:['https://example.com/a'],close:true}),
+    {ok:false,error:'https://example.com/a#two is the active tab in a window; remove without --close or ask the user'});
+  assert.deepEqual(await ff.browser.tabs.query({}),before);
+  const ungroup = await handle({command:'remove',group:'Work',urls:['https://example.com/a']});
+  assert.equal(ungroup.ok,true);
+  assert.equal((await ff.browser.tabs.get(3)).active,true);
+});
+
+test('delete a saved group returns its contents and deletes only its folder', async () => {
+  const {ff, saved, idle, handle} = await removalFixture();
+  const reply = await handle({command:'delete',group:' LATER '});
+  assert.deepEqual(reply,{ok:true, group:{title:'Later',color:'green'}, closedTabs:0,
+    deleted:{title:'Later',color:'green',tabs:[
+      {title:'Saved one',url:'https://example.com/saved#one'},
+      {title:'Saved two',url:'https://example.com/saved#two'},
+      {title:'Saved keep',url:'https://example.com/saved-keep'}]}});
+  await idle();
+  assert.equal((await saved()).saved.some(g=>g.title === 'Later'),false);
+  await assert.rejects(ff.browser.bookmarks.get('later'));
+  assert.deepEqual(await folderUrls(ff,'archive'),['https://example.net/archive']);
+  assert.ok((await ff.browser.bookmarks.get('pinned')).length);
+});
+
+test('delete an open group requires --close-tabs and refuses active tabs without changing state', async () => {
+  const {ff, handle} = await removalFixture();
+  const before = await ff.browser.tabs.query({}), tree = await ff.browser.bookmarks.getTree();
+  assert.deepEqual(await handle({command:'delete',group:'Work'}),
+    {ok:false,error:'Work is open in a window; pass --close-tabs to close its 3 tabs and delete it'});
+  await ff.browser.tabs.update(3,{active:true}); await ff.settle();
+  assert.deepEqual(await handle({command:'delete',group:'Work',closeTabs:true}),
+    {ok:false,error:'https://example.com/a#two is the active tab in a window; ask the user to switch away or close it'});
+  assert.deepEqual((await ff.browser.tabs.query({})).map(t=>t.id),before.map(t=>t.id));
+  assert.deepEqual(await ff.browser.bookmarks.getTree(),tree);
+});
+
+test('delete closes an open group before deleting its saved folder without recreation', async () => {
+  const {ff, saved, idle, handle} = await removalFixture();
+  const folders = (await saved()).folders;
+  const reply = await handle({command:'delete',group:'Work',closeTabs:true});
+  assert.deepEqual(reply,{ok:true,group:{title:'Work',color:'red'},closedTabs:3,
+    deleted:{title:'Work',color:'red',tabs:[
+      {title:'A one',url:'https://example.com/a#one'},
+      {title:'A two',url:'https://example.com/a#two'},
+      {title:'Keep',url:'https://example.com/keep'}]}});
+  await idle();
+  assert.deepEqual((await ff.browser.tabs.query({})).map(t=>t.id),[1,5]);
+  await assert.rejects(ff.browser.bookmarks.get(folders[11]));
+  assert.equal((await saved()).saved.some(g=>g.title === 'Work'),false);
+  assert.deepEqual(await ff.browser.bookmarks.search({title:'🔴 Work'}),[]);
+  assert.deepEqual(await folderUrls(ff,folders[22]),['https://example.net/other']);
+  assert.deepEqual(await folderUrls(ff,'archive'),['https://example.net/archive']);
+});
+
+test('delete failures after closing tabs report the closed count and original URLs', async () => {
+  const expected = {title:'Work',color:'red',tabs:[
+    {title:'A one',url:'https://example.com/a#one'},
+    {title:'A two',url:'https://example.com/a#two'},
+    {title:'Keep',url:'https://example.com/keep'}]};
+  for (const options of [{productionIdle:true}, {failIdle:true}, {
+    wrapApi: api => {
+      let added = false;
+      return {...api,tabs:{...api.tabs,remove:async ids => {
+        if (!added) {
+          added = true;
+          const tab = await api.tabs.create({windowId:1,url:'https://example.com/user',active:false});
+          await api.tabs.group({groupId:11,tabIds:[tab.id]});
+        }
+        await api.tabs.remove(ids);
+      }}};
+    },
+  }]) {
+    const {ff,handle,idle} = await removalFixture(options);
+    const reply = await handle({command:'delete',group:'Work',closeTabs:true});
+    assert.equal(reply.ok,false);
+    assert.equal(reply.closedTabs,3);
+    assert.deepEqual(reply.deleted,expected);
+    assert.equal((await ff.browser.tabs.query({})).some(t=>[2,3,4].includes(t.id)),false);
+    await idle();
+  }
+});
+
+test('close operations recheck activity after the snapshot and before closing', async () => {
+  for (const [request,error] of [
+    [{command:'remove',group:'Work',urls:['https://example.com/a'],close:true},
+      'https://example.com/a#two is the active tab in a window; remove without --close or ask the user'],
+    [{command:'delete',group:'Work',closeTabs:true},
+      'https://example.com/a#two is the active tab in a window; ask the user to switch away or close it'],
+  ]) {
+    let queries = 0;
+    const {ff,handle} = await removalFixture({wrapApi:api=>({...api,tabs:{...api.tabs,
+      query:async query => {
+        const result = await api.tabs.query(query);
+        if (query.groupId === 11 && ++queries === 2) await api.tabs.update(3,{active:true});
+        return result;
+      },
+    }})});
+    assert.deepEqual(await handle(request),{ok:false,error});
+    assert.deepEqual((await ff.browser.tabs.query({groupId:11})).map(t=>t.id),[2,3,4]);
+  }
+});
+
+test('a tab becoming active after one close refuses and reports the closed tab', async () => {
+  for (const request of [
+    {command:'remove',group:'Work',urls:['https://example.com/a'],close:true},
+    {command:'delete',group:'Work',closeTabs:true},
+  ]) {
+    let calls = 0;
+    const {ff,handle,idle} = await removalFixture({wrapApi:api=>({...api,tabs:{...api.tabs,
+      remove:async ids => {
+        await api.tabs.remove(ids);
+        if (++calls === 1) await api.tabs.update(3,{active:true});
+      },
+    }})});
+    const reply = await handle(request);
+    assert.equal(reply.ok,false);
+    assert.match(reply.error,/https:\/\/example\.com\/a#two is the active tab in a window/);
+    assert.equal(reply.closedTabs,1);
+    assert.equal(reply.deleted.title,'Work');
+    assert.ok(reply.deleted.tabs.some(tab=>tab.url === 'https://example.com/a#one'));
+    assert.deepEqual((await ff.browser.tabs.query({groupId:11})).map(t=>t.id),[3,4]);
+    await idle();
+  }
+});
+
+test('a close error after the first tab reports the partial deletion', async () => {
+  let calls = 0;
+  const {ff,handle,idle} = await removalFixture({wrapApi:api=>({...api,tabs:{...api.tabs,
+    remove:async ids => {
+      if (++calls === 2) throw new Error('close failed');
+      await api.tabs.remove(ids);
+    },
+  }})});
+  const reply = await handle({command:'delete',group:'Work',closeTabs:true});
+  assert.equal(reply.ok,false);
+  assert.equal(reply.closedTabs,1);
+  assert.equal(reply.deleted.tabs[0].url,'https://example.com/a#one');
+  assert.deepEqual((await ff.browser.tabs.query({groupId:11})).map(t=>t.id),[3,4]);
+  await idle();
+});
+
+test('a close rejection after the browser removed a tab still reports that tab', async () => {
+  for (const request of [
+    {command:'remove',group:'Work',urls:['https://example.com/a'],close:true},
+    {command:'delete',group:'Work',closeTabs:true},
+  ]) {
+    const {ff,handle,idle} = await removalFixture({wrapApi:api=>({...api,tabs:{...api.tabs,
+      remove:async ids => { await api.tabs.remove(ids); throw new Error('close failed after removal'); },
+    }})});
+    const reply = await handle(request);
+    assert.equal(reply.ok,false);
+    assert.equal(reply.closedTabs,1);
+    assert.ok(reply.deleted.tabs.some(tab=>tab.url === 'https://example.com/a#one'));
+    assert.deepEqual((await ff.browser.tabs.query({groupId:11})).map(t=>t.id),[3,4]);
+    await idle();
+  }
+});
+
+test('remove prefers the last focused open group over namesakes and saved groups', async () => {
+  const {ff} = await fixture();
+  const extra = await ff.browser.tabs.create({windowId:2,url:'https://example.com/keep',active:false});
+  await ff.browser.tabs.group({groupId:22,tabIds:[extra.id]});
+  const handle = agent.createAgentHandler({api:ff.browser, saved:async()=>({
+    saved:[{folderId:'saved',title:'work',color:'green',count:1}],folders:{}})});
+  const reply = await handle({command:'remove',group:'WORK',urls:['https://example.com/two']});
+  assert.equal(reply.ok,true); assert.equal(reply.group.id,22);
+  assert.equal((await ff.browser.tabs.get(2)).groupId,-1);
+  assert.equal((await ff.browser.tabs.get(1)).groupId,11);
+  assert.deepEqual(await folderUrls(ff,'saved'),['https://example.com/later#one']);
+});
+
+test('delete refuses an open group without a sync folder before closing any tabs', async () => {
+  const {ff} = await removalFixture();
+  const handle = agent.createAgentHandler({api:ff.browser,
+    saved:async()=>({saved:[],folders:{}}), idle:async()=>{}, deleteSaved:async()=>({ok:true})});
+  const before = await ff.browser.tabs.query({});
+  const reply = await handle({command:'delete',group:'Work',closeTabs:true});
+  assert.equal(reply.ok,false); assert.match(reply.error,/saved folder.*not available/);
+  assert.deepEqual(await ff.browser.tabs.query({}),before);
+});
+
+test('remove and delete validate commands, URLs and flags before mutation', async () => {
+  const {ff,handle} = await removalFixture();
+  const tabs = await ff.browser.tabs.query({}), tree = await ff.browser.bookmarks.getTree();
+  for (const request of [
+    {command:'remove',group:'Work',urls:[]},
+    {command:'remove',group:'Work',urls:Array(51).fill('https://example.com/a')},
+    {command:'remove',group:'Work',urls:['file:///bad']},
+    {command:'remove',group:'Work',urls:['https://example.com/a'],close:'yes'},
+    {command:'delete',group:'Work',closeTabs:'yes'},
+    {command:'unknown'},
+  ]) assert.equal((await handle(request)).ok,false,JSON.stringify(request));
+  assert.deepEqual(await handle({command:'unknown'}),{ok:false,error:'Unknown command'});
+  assert.match((await handle({command:'delete',group:'Pinned'})).error,/No group named Pinned.*Work.*Later/);
+  assert.match((await handle({command:'delete',group:'📌 Pinned'})).error,/No group named/);
+  assert.deepEqual(await ff.browser.tabs.query({}),tabs);
+  assert.deepEqual(await ff.browser.bookmarks.getTree(),tree);
+  const fifty = await handle({command:'remove',group:'Work',urls:Array(50).fill('https://example.com/a')});
+  assert.equal(fifty.ok,true); assert.equal(fifty.removed,2);
 });
 
 test('native port connects on startup and retries after 5 seconds then every 60 seconds', async () => {

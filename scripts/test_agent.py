@@ -268,12 +268,33 @@ class CliTests(unittest.TestCase):
           (['tabs','Work','--json'],{'command':'tabs','group':'Work'}),
           (['add','Work','https://example.com/','--create','--color','red','--json'],
            {'command':'add','group':'Work','urls':['https://example.com/'],'create':True,'color':'red'}),
-          (['new','New','https://example.com/','--json'],{'command':'new','title':'New','urls':['https://example.com/']})]
+          (['new','New','https://example.com/','--json'],{'command':'new','title':'New','urls':['https://example.com/']}),
+          (['remove','Work','https://example.com/a','https://example.com/b','--close','--json'],
+           {'command':'remove','group':'Work','urls':['https://example.com/a','https://example.com/b'],'close':True}),
+          (['delete','Work','--close-tabs','--json'],{'command':'delete','group':'Work','closeTabs':True})]
         for args,want in examples:
             result,requests=self.invoke(args,{'ok':True,'added':1})
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual(json.loads(result.stdout),{'ok':True,'added':1})
-            self.assertEqual(requests,[want])
+            request, = requests
+            if want['command'] in ('add', 'new', 'remove', 'delete'):
+                self.assertIsInstance(request.pop('deadline'), int)
+            self.assertEqual(request,want)
+
+    def test_only_mutating_commands_send_an_eight_second_deadline(self):
+        for args in [['groups'], ['tabs', 'Work'], ['add', 'Work', 'https://example.com/'],
+                     ['new', 'Work', 'https://example.com/'],
+                     ['remove', 'Work', 'https://example.com/'], ['delete', 'Work']]:
+            before = int(time.time() * 1000)
+            result, requests = self.invoke([*args, '--json'], {'ok': False, 'error': 'refused'})
+            after = int(time.time() * 1000)
+            self.assertEqual(result.returncode, 1)
+            request, = requests
+            if args[0] in ('groups', 'tabs'):
+                self.assertNotIn('deadline', request)
+            else:
+                self.assertGreaterEqual(request['deadline'], before + 8000)
+                self.assertLessEqual(request['deadline'], after + 8000)
 
     def test_refusal_is_exit_one_with_message_in_text_and_json(self):
         for json_flag in [[],['--json']]:
@@ -314,10 +335,55 @@ class CliTests(unittest.TestCase):
         result, _ = self.invoke(['add', 'Later', 'https://example.com/', '--json'], reply)
         self.assertTrue(json.loads(result.stdout)['closed'])
 
+    def test_remove_and_delete_text_and_default_flags(self):
+        reply = {'ok':True, 'group':{'title':'Work'}, 'closed':False, 'removed':2,
+                 'missing':['https://example.com/missing']}
+        result, requests = self.invoke(['remove','Work','https://example.com/a'], reply)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.strip(),'Removed 2 from Work; not found: 1')
+        request, = requests
+        self.assertIsInstance(request.pop('deadline'), int)
+        self.assertEqual(request,{'command':'remove','group':'Work','urls':['https://example.com/a']})
+        reply = {'ok':True, 'group':{'title':'Work','color':'red'}, 'closedTabs':3,
+                 'deleted':{'title':'Work','color':'red','tabs':[]}}
+        result, requests = self.invoke(['delete','Work'], reply)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(result.stdout.strip(),'Deleted Work (3 tabs)')
+        request, = requests
+        self.assertIsInstance(request.pop('deadline'), int)
+        self.assertEqual(request,{'command':'delete','group':'Work'})
+
+    def test_failed_delete_prints_closed_tab_urls_in_text_and_json(self):
+        reply = {'ok':False, 'error':'Closed 2 tabs but could not delete Work; run delete again',
+                 'closedTabs':2, 'deleted':{'title':'Work','color':'red','tabs':[
+                     {'title':'A','url':'https://example.com/a'},
+                     {'title':'B','url':'https://example.com/b'}]}}
+        for args in [['delete','Work','--close-tabs'], ['remove','Work','https://example.com/a','--close']]:
+            for flag in [[], ['--json']]:
+                result,_ = self.invoke([*args,*flag], reply)
+                self.assertEqual(result.returncode,1)
+                if flag:
+                    self.assertEqual(json.loads(result.stdout),reply)
+                else:
+                    self.assertIn(reply['error'],result.stderr)
+                    self.assertIn('https://example.com/a',result.stderr)
+                    self.assertIn('https://example.com/b',result.stderr)
+
+    def test_old_foxy_unknown_command_gets_update_message_in_text_and_json(self):
+        for command, args in [('remove',['Work','https://example.com/a']),('delete',['Work'])]:
+            for json_flag in [[],['--json']]:
+                result,_ = self.invoke([command,*args,*json_flag], {'ok':False,'error':'Unknown command'})
+                self.assertEqual(result.returncode,1)
+                self.assertIn(f'This Foxy does not support {command}; update to 3.4.0', result.stdout+result.stderr)
+                if json_flag:
+                    self.assertFalse(json.loads(result.stdout)['ok'])
+        result,_ = self.invoke(['groups'], {'ok':False,'error':'Unknown command'})
+        self.assertIn('Unknown command',result.stderr)
+
     def test_help_describes_every_command_with_an_example_and_exit_codes(self):
         result, _ = self.invoke(['--help'])
         self.assertEqual(result.returncode, 0)
-        for command in ('groups', 'tabs', 'add', 'new'):
+        for command in ('groups', 'tabs', 'add', 'new', 'remove', 'delete'):
             self.assertRegex(result.stdout, rf'{command} +[^\n]*example:')
             specific, _ = self.invoke([command, '--help'])
             self.assertEqual(specific.returncode, 0)
@@ -329,6 +395,10 @@ class CliTests(unittest.TestCase):
         self.assertIn('missing', specific.stdout)
         for color in ('blue', 'purple', 'cyan', 'orange', 'yellow', 'pink', 'green', 'grey', 'red'):
             self.assertIn(color, specific.stdout)
+
+    def test_delete_help_explains_active_tab_refusal(self):
+        result, _ = self.invoke(['delete', '--help'])
+        self.assertIn('refuses if any of its tabs is the active tab in a window', ' '.join(result.stdout.split()))
 
     def test_invalid_color_is_refused_locally_with_valid_choices(self):
         result, _ = self.invoke(['new', 'Wrong', 'https://example.com/', '--color', 'black'])

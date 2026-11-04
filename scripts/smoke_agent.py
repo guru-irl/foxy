@@ -102,6 +102,58 @@ def run(*, root=ROOT, firefox=FIREFOX):
                     results.record('normal sync path', True, folder)
                     missing = json.loads(cli(root, env, 'add', 'Missing smoke', 'https://example.com/no', '--json', expected=1).stdout)
                     results.record('missing group exit 1', not missing['ok'] and 'Agent smoke' in missing['error'])
+
+                    cli(root, env, 'add', 'Agent smoke', 'https://example.com/agent-c')
+                    poll('three synced bookmarks', lambda: client.script("return (await browser.bookmarks.getChildren(arguments[0])).map(b=>b.url);", [folder]),
+                         lambda urls: len(urls) == 3)
+                    original_tabs = client.script("return await browser.tabs.query({groupId:arguments[0]});", [group_id])
+                    first_id = next(t['id'] for t in original_tabs if t['url'] == 'https://example.com/agent-a')
+                    middle = next(t for t in original_tabs if t['url'] == 'https://example.com/agent-b')
+                    removed = json.loads(cli(root, env, 'remove', 'Agent smoke', 'https://example.com/agent-b#fragment', '--json').stdout)
+                    loose = client.script("return await browser.tabs.get(arguments[0]);", [middle['id']])
+                    poll('ungroup removes bookmark', lambda: client.script("return (await browser.bookmarks.getChildren(arguments[0])).map(b=>b.url);", [folder]),
+                         lambda urls: sorted(urls) == ['https://example.com/agent-a','https://example.com/agent-c'])
+                    results.record('remove ungroups and syncs', removed['removed'] == 1 and loose['groupId'] == -1
+                        and loose['windowId'] == middle['windowId'],
+                        f"middle tab index {middle['index']} to {loose['index']}")
+                    closed = json.loads(cli(root, env, 'remove', 'Agent smoke', 'https://example.com/agent-a', '--close', '--json').stdout)
+                    remaining = client.script("return await browser.tabs.query({});")
+                    poll('close removes bookmark', lambda: client.script("return (await browser.bookmarks.getChildren(arguments[0])).map(b=>b.url);", [folder]),
+                         lambda urls: urls == ['https://example.com/agent-c'])
+                    results.record('remove closes and syncs', closed['removed'] == 1 and all(t['id'] != first_id for t in remaining), json.dumps(closed))
+
+                    cli(root, env, 'add', 'Agent smoke', 'https://example.com/agent-d')
+                    poll('two bookmarks before delete', lambda: client.script("return (await browser.bookmarks.getChildren(arguments[0])).map(b=>b.url);", [folder]),
+                         lambda urls: sorted(urls) == ['https://example.com/agent-c', 'https://example.com/agent-d'])
+                    other = json.loads(cli(root, env, 'new', 'Other smoke', 'https://example.net/other', '--json').stdout)
+                    other_id = other['group']['id']
+                    other_folder = poll('other group saved', lambda: client.script("return await browser.runtime.sendMessage({type:'foxy:saved'});"),
+                        lambda reply: str(other_id) in reply['folders'])['folders'][str(other_id)]
+                    deleted = json.loads(cli(root, env, 'delete', 'Agent smoke', '--close-tabs', '--json').stdout)
+                    poll('deleted open group stays deleted', lambda: client.script("""
+                      const state = await browser.runtime.sendMessage({type:'foxy:saved'});
+                      const folders = await browser.bookmarks.search({title:'🟢 Agent smoke'});
+                      return {saved:state.saved, folders, open:await browser.tabGroups.query({})};
+                    """), lambda value: not value['folders'] and all(g['title'] != 'Agent smoke' for g in value['saved'])
+                        and all(g['id'] != group_id for g in value['open']), minimum=3)
+                    other_urls = client.script("return (await browser.bookmarks.getChildren(arguments[0])).map(b=>b.url);", [other_folder])
+                    results.record('delete open group and keep other group', deleted['closedTabs'] == 2
+                        and [t['url'] for t in deleted['deleted']['tabs']] == ['https://example.com/agent-c', 'https://example.com/agent-d']
+                        and other_urls == ['https://example.net/other'], json.dumps(deleted))
+
+                    saved_group = json.loads(cli(root, env, 'new', 'Saved smoke', 'https://example.com/saved', '--json').stdout)
+                    saved_id = saved_group['group']['id']
+                    saved_folder = poll('saved smoke synced', lambda: client.script("return await browser.runtime.sendMessage({type:'foxy:saved'});"),
+                        lambda reply: str(saved_id) in reply['folders'])['folders'][str(saved_id)]
+                    client.script("const tabs = await browser.tabs.query({groupId:arguments[0]}); await browser.tabs.remove(tabs.map(t=>t.id));", [saved_id])
+                    poll('saved smoke closed', lambda: client.script("return await browser.runtime.sendMessage({type:'foxy:saved'});"),
+                        lambda reply: any(g['folderId'] == saved_folder for g in reply['saved']))
+                    deleted = json.loads(cli(root, env, 'delete', 'Saved smoke', '--json').stdout)
+                    state = client.script("return await browser.runtime.sendMessage({type:'foxy:saved'});")
+                    exists = client.script("try { await browser.bookmarks.get(arguments[0]); return true; } catch { return false; }", [saved_folder])
+                    results.record('delete saved group', deleted['closedTabs'] == 0 and not exists
+                        and all(g['folderId'] != saved_folder for g in state['saved']
+                        ) and deleted['deleted']['tabs'][0]['url'] == 'https://example.com/saved', json.dumps(deleted))
                 finally:
                     quit_firefox(client, process)
                     client = process = None
