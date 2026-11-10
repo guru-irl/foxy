@@ -142,7 +142,9 @@ To undo the install, quit Firefox, delete the four links, and restore the backup
 
 ## Develop
 
-The add-on is in `extension/`. No npm packages are required. Headless runs use throwaway profiles under `.spider/scratch/`.
+The add-on is in `extension/`. Run `npm ci` before testing or building. Headless runs use throwaway profiles under `.spider/scratch/`.
+
+Store builds are minified; every release has a source archive and `docs/amo/BUILD.md` rebuilds it.
 
 - `npm test` runs Node and Python tests.
 - `npm run test:browser` runs DOM tests in headless Firefox.
