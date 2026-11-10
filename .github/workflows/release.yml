@@ -1,26 +1,96 @@
 {
   "name": "Release",
-  "on": {"push": {"tags": ["v*"]}},
-  "permissions": {"contents": "write"},
+  "on": {
+    "push": {
+      "tags": [
+        "v*"
+      ]
+    }
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "concurrency": {
+    "group": "amo-releases",
+    "cancel-in-progress": false
+  },
   "jobs": {
     "release": {
       "runs-on": "ubuntu-latest",
       "environment": "release",
-      "env": {"TAG": "${{ github.ref_name }}"},
+      "permissions": {
+        "contents": "write"
+      },
+      "env": {
+        "TAG": "${{ github.ref_name }}"
+      },
       "steps": [
-        {"uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", # v4
-         "with": {"fetch-depth": 0, "persist-credentials": false}},
-        {"uses": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020", # v4
-         "with": {"node-version": "24"}},
-        {"uses": "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065", # v5
-         "with": {"python-version": "3.12"}},
-        {"name": "Check version", "run": "python3 -c 'import json, os, sys; version = json.load(open(\"extension/manifest.json\"))[\"version\"]; sys.exit(0 if os.environ[\"TAG\"] == \"v\" + version else \"Tag does not match manifest version\")'"},
-        {"name": "Test", "run": "npm test"},
-        {"name": "Build", "run": "python3 scripts/build.py"},
-        {"name": "Sign", "env": {"AMO_JWT_ISSUER": "${{ secrets.AMO_JWT_ISSUER }}", "AMO_JWT_SECRET": "${{ secrets.AMO_JWT_SECRET }}"}, "run": "python3 scripts/sign.py"},
-        {"name": "Compute SHA-256", "run": "version=${TAG#v}\ncp \"dist/foxy-$version-signed.xpi\" \"foxy-$version.xpi\"\nsha256sum \"foxy-$version.xpi\""},
-        {"name": "Generate update manifest", "run": "version=${TAG#v}\npython3 scripts/update_manifest.py \"$version\" \"$TAG\" \"foxy-$version.xpi\" \"$GITHUB_REPOSITORY\""},
-        {"name": "Create release", "env": {"GH_TOKEN": "${{ github.token }}"}, "run": "version=${TAG#v}\ngit fetch --force origin \"+refs/tags/$TAG:refs/tags/$TAG\"\n: > release-notes.txt\nif [ \"$(git cat-file -t \"$TAG\")\" = tag ]; then\n  message=$(git for-each-ref --format='%(contents)' \"refs/tags/$TAG\")\n  if [ -n \"$message\" ]; then printf '%s\\n\\n' \"$message\" >> release-notes.txt; fi\nfi\nprevious=$(git describe --tags --match 'v*' --abbrev=0 \"$TAG^\" 2>/dev/null || true)\nif [ -n \"$previous\" ]; then\n  printf 'Changes since %s:\\n' \"$previous\" >> release-notes.txt\n  git log --format='- %s' \"$previous..$TAG\" >> release-notes.txt\nelse\n  printf 'Changes:\\n' >> release-notes.txt\n  git log --format='- %s' \"$TAG\" >> release-notes.txt\nfi\ngh release create \"$TAG\" \"foxy-$version.xpi\" updates.json --title \"Foxy $version\" --notes-file release-notes.txt"}
+        {
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", # v4
+          "with": {
+            "fetch-depth": 0,
+            "persist-credentials": false
+          }
+        },
+        {
+          "uses": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020", # v4
+          "with": {
+            "node-version": "24"
+          }
+        },
+        {
+          "uses": "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065", # v5
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "name": "Check version",
+          "run": "python3 - <<'PY'\nimport json, os, re, sys\nversion = json.load(open('extension/manifest.json'))['version']\ntag = os.environ['TAG']\nif not re.fullmatch(r'v[0-9]+\\.[0-9]+\\.[0-9]+', tag) or tag != 'v' + version:\n    sys.exit('Tag does not match manifest version')\nPY"
+        },
+        {
+          "name": "Install dependencies",
+          "run": "npm ci"
+        },
+        {
+          "name": "Test",
+          "run": "npm test"
+        },
+        {
+          "name": "Build",
+          "run": "python3 scripts/build.py"
+        },
+        {
+          "name": "Archive source",
+          "run": "python3 scripts/source_archive.py \"$TAG\""
+        },
+        {
+          "name": "Verify source rebuild",
+          "run": "version=${TAG#v}\npython3 - \"$version\" <<'PY'\nimport pathlib, sys, zipfile\nwith zipfile.ZipFile(f'dist/foxy-{sys.argv[1]}-source.zip') as archive:\n    archive.extractall('source-rebuild')\nPY\n(cd source-rebuild && npm ci && python3 scripts/build.py)\npython3 - \"$version\" <<'PY'\nimport hashlib, pathlib, sys\nname = f'foxy-{sys.argv[1]}.zip'\noriginal = hashlib.sha256((pathlib.Path('dist') / name).read_bytes()).hexdigest()\nrebuilt = hashlib.sha256((pathlib.Path('source-rebuild/dist') / name).read_bytes()).hexdigest()\nif original != rebuilt:\n    sys.exit(f'Source rebuild differs: {original} != {rebuilt}')\nprint(f'Reproducible SHA-256: {original}')\nPY"
+        },
+        {
+          "name": "Sync AMO listing",
+          "env": {
+            "AMO_JWT_ISSUER": "${{ secrets.AMO_JWT_ISSUER }}",
+            "AMO_JWT_SECRET": "${{ secrets.AMO_JWT_SECRET }}"
+          },
+          "run": "python3 scripts/amo_listing.py"
+        },
+        {
+          "name": "Submit listed version",
+          "env": {
+            "AMO_JWT_ISSUER": "${{ secrets.AMO_JWT_ISSUER }}",
+            "AMO_JWT_SECRET": "${{ secrets.AMO_JWT_SECRET }}"
+          },
+          "run": "version=${TAG#v}\npython3 scripts/sign.py --channel listed --source \"dist/foxy-$version-source.zip\" --wait 15"
+        },
+        {
+          "name": "Create release",
+          "env": {
+            "GH_TOKEN": "${{ github.token }}"
+          },
+          "run": "version=${TAG#v}\ngit fetch --force origin \"+refs/tags/$TAG:refs/tags/$TAG\"\n: > release-notes.txt\nif [ \"$(git cat-file -t \"$TAG\")\" = tag ]; then\n  message=$(git for-each-ref --format='%(contents)' \"refs/tags/$TAG\")\n  if [ -n \"$message\" ]; then printf '%s\\n\\n' \"$message\" >> release-notes.txt; fi\nfi\nprevious=$(git describe --tags --match 'v*' --abbrev=0 \"$TAG^\" 2>/dev/null || true)\nif [ -n \"$previous\" ]; then\n  printf 'Changes since %s:\\n' \"$previous\" >> release-notes.txt\n  git log --format='- %s' \"$previous..$TAG\" >> release-notes.txt\nelse\n  printf 'Changes:\\n' >> release-notes.txt\n  git log --format='- %s' \"$TAG\" >> release-notes.txt\nfi\nstate=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[\"status\"])' \"dist/foxy-$version-status.json\")\ncase \"$state\" in\n  signed)\npython3 - \"$TAG\" <<'PY'\nimport json, pathlib, subprocess, sys, zipfile\nversion = sys.argv[1][1:]\nexpected = json.loads(subprocess.check_output(['git', 'show', sys.argv[1] + ':extension/manifest.json']))\nwith zipfile.ZipFile(f'dist/foxy-{version}-signed.xpi') as archive:\n    actual = json.loads(archive.read('manifest.json'))\nif actual['version'] != version or expected['version'] != version:\n    sys.exit('Signed XPI or tag manifest version does not match tag')\nif actual['browser_specific_settings']['gecko']['id'] != expected['browser_specific_settings']['gecko']['id']:\n    sys.exit('Signed XPI add-on ID does not match tag')\nPY\ncp \"dist/foxy-$version-signed.xpi\" \"foxy-$version.xpi\"\nurl=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))[\"url\"])' \"dist/foxy-$version-status.json\")\npython3 scripts/update_manifest.py \"$version\" \"foxy-$version.xpi\" \"$url\"\ngh release create \"$TAG\" \"foxy-$version.xpi\" \"dist/foxy-$version-source.zip\" updates.json --verify-tag --title \"Foxy $version\" --notes-file release-notes.txt\n    ;;\n  pending)\n    gh release create \"$TAG\" \"dist/foxy-$version-source.zip\" --draft --verify-tag --title \"Foxy $version\" --notes-file release-notes.txt\n    echo \"Waiting for AMO review\" >> \"$GITHUB_STEP_SUMMARY\"\n    ;;\n  *) echo \"Unexpected AMO status: $state\" >&2; exit 1 ;;\nesac"
+        }
       ]
     }
   }
