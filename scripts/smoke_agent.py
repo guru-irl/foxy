@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 
+from build import ensure_built
 from firefox_env import firefox_environment
 from install_agent import install
 
@@ -51,6 +52,7 @@ def run(*, root=ROOT, firefox=FIREFOX):
         process = client = None
         results = Results()
         try:
+            addon_dir = ensure_built(root)
             with socket.socket() as reserve:
                 reserve.bind(('127.0.0.1', 0))
                 port = reserve.getsockname()[1]
@@ -66,7 +68,7 @@ def run(*, root=ROOT, firefox=FIREFOX):
                         'timeouts': {'script': 10000, 'pageLoad': 15000, 'implicit': 0}}}})
                     print('Firefox: ' + session['capabilities']['browserVersion'], flush=True)
                     register_smoke_host(root, scratch, client)
-                    addon = client.command('Addon:Install', {'path': str(root / 'extension'), 'temporary': True})['value']
+                    addon = client.command('Addon:Install', {'path': str(addon_dir), 'temporary': True})['value']
                     results.record('install', addon == ADDON_ID, addon)
                     poll('agent socket', lambda: sock_path.exists(), bool)
 

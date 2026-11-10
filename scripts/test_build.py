@@ -1,110 +1,124 @@
+import hashlib
+from html.parser import HTMLParser
 import json
-import pathlib
+import os
+from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 import build  # noqa: E402
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
-SCRATCH = ROOT / ".spider" / "scratch" / "tests"
-OUT_DIR = SCRATCH / "test-build"
+ROOT = Path(__file__).resolve().parent.parent
+SCRATCH = ROOT / '.spider' / 'scratch' / 'tests'
+
+
+class Scripts(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.scripts = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'script':
+            self.scripts.append(dict(attrs))
 
 
 class BuildTest(unittest.TestCase):
-    def test_package_has_only_addon_files(self):
-        names = build.package_files()
-        for required in [
-            "manifest.json", "newtab.html", "newtab.css", "background.js",
-            "src/close.js", "src/main.js", "src/model.js", "src/actions.js",
-            "src/board/model.js", "src/board/targets.js", "src/board/moves.js", "src/board/render.js",
-            "fonts/GoogleSansFlex.ttf", "fonts/GoogleSansFlex-OFL.txt",
-            "fonts/GoogleSansFlex-TRADEMARKS.md",
-            "fonts/CascadiaMono.ttf", "fonts/CascadiaMono-OFL.txt",
-            "fonts/EBGaramond.ttf", "fonts/EBGaramond-OFL.txt",
-            "icons/globe.svg",
-        ]:
-            self.assertIn(required, names)
-        self.assertEqual(
-            sorted(name for name in names if name.startswith("fonts/")),
-            ["fonts/CascadiaMono-OFL.txt", "fonts/CascadiaMono.ttf",
-             "fonts/EBGaramond-OFL.txt", "fonts/EBGaramond.ttf",
-             "fonts/GoogleSansFlex-OFL.txt", "fonts/GoogleSansFlex-TRADEMARKS.md",
-             "fonts/GoogleSansFlex.ttf"],
-        )
-        for name in names:
-            self.assertFalse(
-                name.startswith(("extension/", "theme/", "test/", "preview/", "docs/", "scripts/", "dist/", ".")),
-                name,
-            )
-            self.assertNotIn("/.", name)
-
-    def test_package_holds_everything_the_manifest_reaches(self):
-        import re
-        addon = ROOT / "extension"
-        manifest = json.loads((addon / "manifest.json").read_text())
-        pending = [*manifest["background"]["scripts"], manifest["options_ui"]["page"],
-                   *manifest["chrome_url_overrides"].values(), *manifest["chrome_settings_overrides"].values()]
-        reached = set()
-        while pending:
-            name = pending.pop()
-            if name in reached:
-                continue
-            reached.add(name)
-            text = (addon / name).read_text(errors="ignore")
-            base = pathlib.PurePosixPath(name).parent
-            if name.endswith(".html"):
-                refs = re.findall(r'(?:src|href)="([^":#?]+)"', text)
-            elif name.endswith(".js"):
-                refs = re.findall(r'(?:from|import)\s*\(?\s*["\'](\.{1,2}/[^"\']+)["\']', text)
-            else:
-                refs = []
-            for ref in refs:
-                path = (addon / base / ref).resolve().relative_to(addon.resolve()).as_posix()
-                pending.append(path)
-        self.assertIn("options.html", reached)
-        missing = sorted(reached - set(build.package_files()))
-        self.assertEqual(missing, [], "files the add-on loads but the package leaves out")
-
-    def test_zip_is_named_after_the_version_and_holds_the_package_files(self):
-        out = build.build(out_dir=OUT_DIR)
-        version = json.loads((ROOT / "extension" / "manifest.json").read_text())["version"]
-        self.assertEqual(out.name, f"foxy-{version}.zip")
-        with zipfile.ZipFile(out) as zf:
-            self.assertEqual(sorted(zf.namelist()), build.package_files())
-            self.assertIn("manifest.json", zf.namelist())
-            self.assertFalse(any(name.startswith("extension/") for name in zf.namelist()))
-            self.assertEqual(zf.read("manifest.json"), (ROOT / "extension" / "manifest.json").read_bytes())
-
-    def test_build_uses_extension_under_the_supplied_repository_root(self):
+    @classmethod
+    def setUpClass(cls):
         SCRATCH.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=SCRATCH) as directory:
-            root = pathlib.Path(directory)
-            extension = root / "extension"
-            (extension / "src" / "board").mkdir(parents=True)
-            (extension / "manifest.json").write_text('{"version": "2.3.4"}')
-            (extension / "src" / "main.js").write_text('// page module\n')
-            (extension / "src" / "board" / "render.js").write_text('// board module\n')
-            (extension / ".preview.html").write_text('preview only')
-            (root / "manifest.json").write_text('{"version": "0.0.0"}')
-            (root / "theme").mkdir()
-            (root / "theme" / "userChrome.css").write_text('theme only')
-            self.assertEqual(build.package_files(root), ["manifest.json", "src/board/render.js", "src/main.js"])
-            out = build.build(root)
-            self.assertEqual(out, root / "dist" / "foxy-2.3.4.zip")
-            with zipfile.ZipFile(out) as zf:
-                self.assertEqual(zf.namelist(), ["manifest.json", "src/board/render.js", "src/main.js"])
-                self.assertEqual(zf.read("manifest.json"), b'{"version": "2.3.4"}')
-                self.assertEqual(zf.read("src/main.js"), b'// page module\n')
-                self.assertEqual(zf.read("src/board/render.js"), b'// board module\n')
+        cls.directory = tempfile.TemporaryDirectory(prefix='build-', dir=SCRATCH)
+        cls.out_dir = Path(cls.directory.name)
+        cls.archive = build.build(out_dir=cls.out_dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.directory.cleanup()
+
+    def test_build_packages_bundles_and_unchanged_assets(self):
+        with zipfile.ZipFile(self.archive) as zf:
+            names = set(zf.namelist())
+            self.assertTrue({'manifest.json', 'newtab.html', 'options.html', 'newtab.css',
+                             'newtab.js', 'options.js', 'background.js',
+                             'fonts/GoogleSansFlex-OFL.txt', 'icons/globe.svg'} <= names)
+            self.assertFalse(any(name.startswith('src/') or name.endswith('.map') for name in names))
+            for page, module in [('newtab.html', 'newtab.js'), ('options.html', 'options.js')]:
+                scripts = Scripts()
+                scripts.feed(zf.read(page).decode())
+                self.assertEqual(len(scripts.scripts), 1)
+                self.assertEqual(scripts.scripts[0].get('type'), 'module')
+                self.assertEqual(scripts.scripts[0].get('src', '').removeprefix('./'), module)
+            self.assertEqual(zf.read('manifest.json'), (ROOT / 'extension/manifest.json').read_bytes())
+            for path in (ROOT / 'extension/fonts').iterdir():
+                if path.is_file():
+                    self.assertEqual(zf.read('fonts/' + path.name), path.read_bytes())
+            for path in (ROOT / 'extension/icons').iterdir():
+                if path.is_file():
+                    self.assertEqual(zf.read('icons/' + path.name), path.read_bytes())
+            self.assertLess(len(zf.read('newtab.css')), (ROOT / 'extension/newtab.css').stat().st_size)
+            built = ROOT / 'build/extension'
+            self.assertEqual(names, {p.relative_to(built).as_posix() for p in built.rglob('*') if p.is_file()})
+            for name in names:
+                self.assertEqual(zf.read(name), (built / name).read_bytes())
 
     def test_zip_is_reproducible(self):
-        first = build.build(out_dir=OUT_DIR).read_bytes()
-        second = build.build(out_dir=OUT_DIR).read_bytes()
+        first = hashlib.sha256(self.archive.read_bytes()).hexdigest()
+        second = hashlib.sha256(build.build(out_dir=self.out_dir).read_bytes()).hexdigest()
         self.assertEqual(first, second)
 
+    def test_smoke_build_is_created_when_missing_or_stale(self):
+        self.assertTrue(callable(getattr(build, 'ensure_built', None)), 'smoke build helper is missing')
+        with tempfile.TemporaryDirectory(prefix='freshness-', dir=SCRATCH) as directory:
+            root = Path(directory)
+            sources = [root / 'extension/src/main.js', root / 'scripts/build.py',
+                       root / 'vite.config.js', root / 'package.json', root / 'package-lock.json',
+                       root / 'node_modules/vite/package.json']
+            outputs = [root / 'build/extension' / name for name in
+                       ('manifest.json', 'newtab.html', 'options.html', 'newtab.js',
+                        'options.js', 'background.js', 'newtab.css', 'chunks/shared.js')]
+            for path in sources + outputs:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('fixture')
+            marker = root / 'build/.built'
+            def run_build(root):
+                marker.write_text(json.dumps([path.relative_to(root / 'build/extension').as_posix() for path in outputs]))
+            with patch.object(build, 'build', side_effect=run_build) as run:
+                self.assertEqual(build.ensure_built(root), root / 'build/extension')
+                self.assertEqual(run.call_count, 1)
+                for path in sources:
+                    os.utime(path, ns=(1_000_000_000, 1_000_000_000))
+                # Directories are inputs too, so deletion or creation marks a build stale.
+                for path in [root / 'extension', root / 'extension/src']:
+                    os.utime(path, ns=(1_000_000_000, 1_000_000_000))
+                marker.touch()
+                build.ensure_built(root)
+                self.assertEqual(run.call_count, 1)
+                for index, path in enumerate(sources):
+                    marker.touch()
+                    ns = marker.stat().st_mtime_ns + 2_000_000_000
+                    os.utime(path, ns=(ns, ns))
+                    build.ensure_built(root)
+                    self.assertEqual(run.call_count, 2 + index, str(path))
+                    os.utime(path, ns=(1_000_000_000, 1_000_000_000))
+                outputs[-1].unlink()
+                build.ensure_built(root)
+                self.assertEqual(run.call_count, 2 + len(sources))
 
-if __name__ == "__main__":
+    def test_missing_dependencies_explain_how_to_install(self):
+        with tempfile.TemporaryDirectory(prefix='missing-', dir=SCRATCH) as directory:
+            root = Path(directory)
+            (root / 'scripts').mkdir()
+            shutil.copy(ROOT / 'scripts/build.py', root / 'scripts/build.py')
+            result = subprocess.run([sys.executable, str(root / 'scripts/build.py')],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Run `npm ci` first', result.stdout + result.stderr)
+
+
+if __name__ == '__main__':
     unittest.main()

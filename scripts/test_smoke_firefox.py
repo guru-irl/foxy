@@ -67,6 +67,7 @@ class ProfileTests(unittest.TestCase):
                     launches.append((profile, sock, Path(sock).resolve()))
                     raise OSError('controlled launch failure')
                 with patch.dict('os.environ', {'FOXY_AGENT_SOCK': '/not-a-test/agent.sock'}), \
+                        patch.object(launcher, 'ensure_built', return_value=self.root / 'build/extension'), \
                         patch.object(launcher.subprocess, 'Popen', side_effect=launch), \
                         contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(launcher.run(root=self.root), 1)

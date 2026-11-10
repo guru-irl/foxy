@@ -116,6 +116,7 @@ def run(root=ROOT):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     client = process = base = None
     try:
+        addon_dir = smoke.ensure_built(Path(root))
         profile = scratch / "profile"
         with socket.socket() as reserved:
             reserved.bind(("127.0.0.1", 0))
@@ -135,7 +136,7 @@ def run(root=ROOT):
                 env=env, start_new_session=True, stdout=log, stderr=log)
             client = smoke.connect_firefox(process, port)
             client.command("WebDriver:NewSession", {"capabilities": {"alwaysMatch": {"timeouts": {"script": 10000}}}})
-            client.command("Addon:Install", {"path": str(Path(root) / "extension"), "temporary": True})
+            client.command("Addon:Install", {"path": str(addon_dir), "temporary": True})
             installed = time.monotonic()
             base = client.script("return WebExtensionPolicy.getByID(arguments[0]).getURL('');",
                                  [smoke.ADDON_ID], chrome=True)

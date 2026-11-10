@@ -14,6 +14,7 @@ import socket
 import subprocess
 import sys
 
+from build import ensure_built
 from firefox_env import firefox_environment
 import time
 import threading
@@ -684,6 +685,7 @@ def run(*, firefox=FIREFOX, keep_going=False, root=ROOT):
     results = Results(keep_going)
     process = client = base = None
     try:
+        addon_dir = ensure_built(root)
         profile = scratch / "profile"
         with socket.socket() as reserved:
             reserved.bind(("127.0.0.1", 0))
@@ -706,7 +708,7 @@ def run(*, firefox=FIREFOX, keep_going=False, root=ROOT):
                 }}})
                 print("Firefox: " + session["capabilities"]["browserVersion"], flush=True)
                 addon_id = client.command("Addon:Install", {
-                    "path": str((root / "extension").resolve()), "temporary": True,
+                    "path": str(addon_dir.resolve()), "temporary": True,
                 })["value"]
                 results.record("install", addon_id == ADDON_ID, addon_id)
                 base = client.script("return WebExtensionPolicy.getByID(arguments[0]).getURL('');",

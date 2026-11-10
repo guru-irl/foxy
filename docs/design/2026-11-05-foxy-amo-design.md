@@ -15,22 +15,15 @@ This spec extends `2026-11-04-foxy-public-design.md` §5. Where the two differ, 
 
 ## 2. Minified build
 
-- **Tool:** esbuild, a pinned exact version, as the only devDependency.
-  - `package-lock.json` is committed.
-  - Every `resolved` URL in it must point to `https://registry.npmjs.org/`. This Mac's npm uses an internal feed, so rewrite the URLs, and add a test that fails on any other host.
+- **Tool:** Vite 8.3.5, pinned as the only devDependency. Vite uses Rolldown for bundling, Oxc for JavaScript minification, and Lightning CSS for CSS minification.
+  - `package-lock.json` is committed. Every `resolved` URL uses `https://registry.npmjs.org/`, and every integrity value uses SHA-512. A test enforces both.
   - No `.npmrc` is committed.
 - **`python3 scripts/build.py`** does the build:
   1. It needs `node_modules`. Without it, it prints "Run `npm ci` first" and exits non-zero.
-  2. Bundle and minify three entry points into `build/extension/`:
-     - `src/main.js` → `newtab.js`;
-     - `src/options.js` → `options.js`;
-     - `background.js` → `background.js`.
-     - Settings: `format: esm`, `bundle`, `minify`, `target: firefox140`, `charset: utf8`, `legalComments: none`. There is no third-party JS, so there are no notices to keep.
-     - No source maps in the package.
-  3. Minify `newtab.css` with esbuild into the same name.
-  4. Copy the HTML files. Rewrite their `<script type="module" src="src/…">` to point to the bundle. Remove whitespace only between tags, by a simple, tested rule, or leave the HTML as is.
-  5. Copy `manifest.json`, `icons/` and `fonts/` (licence files included), unchanged.
-  6. Zip `build/extension/` into `dist/foxy-<version>.zip` with the existing fixed timestamps.
+  2. Vite builds `newtab.html`, `options.html`, and `background.js` into `build/extension/`. It emits stable `newtab.js`, `options.js`, and `background.js` module entries and shared chunks. It targets Firefox 140, disables module preload and source maps, and uses no inline scripts.
+  3. Lightning CSS minifies `newtab.css`. Fonts retain their `fonts/` paths without duplicates.
+  4. Copy `manifest.json`, `icons/`, and `fonts/` (licence files included), unchanged. Keep the source fonts in `extension/fonts/` for the theme symlink.
+  5. Zip `build/extension/` into `dist/foxy-<version>.zip` with the existing fixed timestamps.
 - **`build/` is ignored by git.** Tests and browser tests keep importing the unbuilt `extension/src`.
 - **Pin rename:** the `executeScript` function in `sync/names.js` must still work after bundling. Add a test that loads the **built** `newtab.js` or `background.js` bundle, takes the serialized title-keeper function and runs it alone. Or add a smoke step that renames a pin using the built add-on. Pick whichever is reliable.
 - **Smoke tests:** `scripts/smoke_firefox.py`, `smoke_tab_switch.py` and `smoke_agent.py` install `build/extension/`, not `extension/`, and run `build.py` first if the build is missing or stale. CI runs `npm ci` before `npm test`.
@@ -43,7 +36,7 @@ This spec extends `2026-11-04-foxy-public-design.md` §5. Where the two differ, 
 
 - **`scripts/source_archive.py <tag>`** writes `dist/foxy-<version>-source.zip`, using `git archive` of the tag (tracked files only). It includes `docs/amo/BUILD.md`.
 - **`docs/amo/BUILD.md`** (reviewer instructions, at most 20 lines):
-  - requirements: Ubuntu 24.04 or macOS, Node 22 LTS or newer with npm, Python 3.10 or newer;
+  - requirements: Ubuntu 24.04 or macOS, Node 22.12 or newer with npm, Python 3.10 or newer;
   - steps: `npm ci`, then `python3 scripts/build.py`;
   - the result: `dist/foxy-<version>.zip`, byte-identical to the submitted file. Unpacked, it matches `build/extension/`;
   - the readable source is in `extension/`; the repository URL.

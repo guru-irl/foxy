@@ -1,4 +1,5 @@
 dist/
+build/
 .superpowers/
 .spider/
 .preview.html
