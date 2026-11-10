@@ -62,7 +62,7 @@ This spec extends `2026-11-04-foxy-public-design.md` §5. Where the two differ, 
   4. If signed: write `updates.json` pointing to the **AMO file URL** (the move to AMO), then create the GitHub release with the XPI, the source zip and `updates.json`.
   5. If pending: create a **draft** GitHub release with the source zip, and end successfully with a summary line "Waiting for AMO review".
 - **`.github/workflows/publish.yml`:** `workflow_dispatch` with a tag input, plus a daily schedule.
-  - For each `v*` tag whose GitHub release is a draft or missing, and whose AMO version is now public, it downloads the signed file, checks the version, writes `updates.json` and publishes the release.
+  - On schedule, for each `v*` tag whose GitHub release is a **draft** (made by `release.yml` while AMO reviews) and whose AMO version is now public, it downloads the signed file, checks the version, writes `updates.json` and publishes the release. A tag with no release at all is handled only when dispatched by name.
   - Same permissions and pinning rules as `release.yml`.
 - **Updates:**
   - GitHub-installed 4.1.0 reads `updates.json` from GitHub, gets the AMO-signed 4.2.0, and from then on updates from AMO.

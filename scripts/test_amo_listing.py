@@ -70,6 +70,39 @@ class ListingServer:
         return self.images[url]
 
 
+class RenderingServer(ListingServer):
+    """AMO stores description and privacy policy as rendered HTML (seen live 2026-11-10):
+    headings are dropped, lists become <ul>, bold becomes <strong>, links are wrapped."""
+
+    @staticmethod
+    def render(text):
+        import re
+        out, items = [], []
+        for line in text.strip().splitlines():
+            if line.startswith('#'):
+                continue
+            line = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', line)
+            line = re.sub(r'\[([^\]]+)\]\(([^)]+)\)',
+                          lambda m: f'<a href="https://outgoing.example/v1/x/{m.group(2)}" rel="nofollow">{m.group(1)}</a>', line)
+            if line.startswith('- '):
+                items.append(f'<li>{line[2:]}</li>')
+                continue
+            if items:
+                out.append('<ul>' + ''.join(items) + '</ul>')
+                items = []
+            out.append(line)
+        if items:
+            out.append('<ul>' + ''.join(items) + '</ul>')
+        return '\n'.join(out)
+
+    def json(self, method, url, payload=None, body=None, content_type=None):
+        if method == 'PATCH' and payload:
+            payload = {key: ({locale: self.render(text) for locale, text in value.items()}
+                             if key in ('description', 'privacy_policy') else value)
+                       for key, value in payload.items()}
+        return super().json(method, url, payload, body, content_type)
+
+
 class ListingSyncTest(unittest.TestCase):
     def setUp(self):
         import amo_listing
@@ -185,6 +218,33 @@ class ListingSyncTest(unittest.TestCase):
         self.listing.sync_listing(self.server, '{abc}', self.desired, privacy,
                                   read_image=lambda path: self.files[path])
         self.assertTrue(all(call[0] == 'GET' for call in self.server.calls))
+
+    def test_rendering_amo_accepts_supported_markdown_and_repeat_sync_is_read_only(self):
+        self.server = RenderingServer()
+        source = json.loads((ROOT / 'docs/amo/listing.json').read_text())
+        privacy = (ROOT / 'docs/amo/privacy.md').read_text()
+        self.desired['description'] = source['description']
+        self.listing.sync_listing(self.server, '{abc}', self.desired, privacy,
+                                  read_image=lambda path: self.files[path])
+        self.assertIn('<li>', self.server.addon['description']['en-US'])
+        self.server.calls.clear()
+        self.listing.sync_listing(self.server, '{abc}', self.desired, privacy,
+                                  read_image=lambda path: self.files[path])
+        self.assertTrue(all(call[0] == 'GET' for call in self.server.calls))
+
+    def test_rendering_amo_that_drops_a_heading_fails_loudly(self):
+        self.server = RenderingServer()
+        self.desired['description'] = {'en-US': '## Lost heading\n\nKept **text** with a [link](https://example.com/a).\n'}
+        with self.assertRaises(SystemExit) as caught:
+            self.sync()
+        self.assertIn('AMO did not apply fields: description', str(caught.exception))
+
+    def test_store_text_uses_only_markdown_that_amo_keeps(self):
+        source = json.loads((ROOT / 'docs/amo/listing.json').read_text())
+        for name, text in (('description', source['description']['en-US']),
+                           ('privacy', (ROOT / 'docs/amo/privacy.md').read_text())):
+            headings = [line for line in text.splitlines() if line.lstrip().startswith('#')]
+            self.assertEqual(headings, [], f'{name}: AMO drops Markdown headings; use **bold** lines')
 
     def test_invalid_tags_are_warned_and_never_sent(self):
         self.desired['tags'] = ['dark mode', 'invented tag']

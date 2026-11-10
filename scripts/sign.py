@@ -133,6 +133,16 @@ class Amo:
         self.secret = secret
 
     def request(self, method, url, body=None, content_type=None):
+        # AMO throttles bursts of writes with HTTP 429 and says when to retry.
+        for attempt in range(6):
+            try:
+                return self._request_once(method, url, body, content_type)
+            except AmoError as err:
+                if err.status != 429 or attempt == 5:
+                    raise
+                time.sleep(min(120, err.retry_after + 1))
+
+    def _request_once(self, method, url, body=None, content_type=None):
         token = make_jwt(self.issuer, self.secret) if self.issuer else ''
         headers = {
             "User-Agent": USER_AGENT,
@@ -151,7 +161,12 @@ class Amo:
             message = redact(f"{method} {url} failed: HTTP {err.code}\n{detail}", self)
             if token:
                 message = message.replace(token, "[redacted]")
-            raise AmoError(err.code, message) from None
+            error = AmoError(err.code, message)
+            hint = re.search(r"available in (\d+) seconds", detail)
+            retry_after = (err.headers or {}).get("Retry-After") if err.headers else None
+            error.retry_after = (int(retry_after) if retry_after and retry_after.isdigit()
+                                 else int(hint.group(1)) if hint else 30)
+            raise error from None
         except (OSError, http.client.HTTPException) as err:
             raise SystemExit(redact(f"{method} {url} failed: {err}", self)) from None
 

@@ -130,6 +130,50 @@ class SecretOutputTest(unittest.TestCase):
                 self.assertNotIn(value, stdout.getvalue() + stderr.getvalue() + str(caught.exception))
 
 
+class ThrottleTest(unittest.TestCase):
+    """AMO throttles bursts of writes (HTTP 429, seen live 2026-11-10 after a preview upload)."""
+
+    class Reply(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def throttled(self, headers=None, body=b'{"detail":"Request was throttled. Expected available in 55 seconds."}'):
+        import email.message
+        message = email.message.Message()
+        for key, value in (headers or {}).items():
+            message[key] = value
+        return urllib.error.HTTPError('https://addons.mozilla.org/api/v5/x/', 429, 'throttled',
+                                      message, io.BytesIO(body))
+
+    def test_429_waits_for_the_amo_hint_and_retries(self):
+        replies = [self.throttled(), self.Reply(b'{"ok": true}')]
+        sleeps = []
+        with mock.patch('urllib.request.urlopen', side_effect=replies), \
+             mock.patch('time.sleep', side_effect=sleeps.append):
+            self.assertEqual(sign.Amo('i', 's').json('PATCH', sign.API + '/x/', payload={}), {'ok': True})
+        self.assertEqual(sleeps, [56])
+
+    def test_retry_after_header_wins_and_is_capped(self):
+        replies = [self.throttled({'Retry-After': '7'}), self.throttled({'Retry-After': '9999'}),
+                   self.Reply(b'{}')]
+        sleeps = []
+        with mock.patch('urllib.request.urlopen', side_effect=replies), \
+             mock.patch('time.sleep', side_effect=sleeps.append):
+            sign.Amo('i', 's').json('GET', sign.API + '/x/')
+        self.assertEqual(sleeps, [8, 120])
+
+    def test_persistent_throttling_gives_up_with_the_amo_message(self):
+        replies = [self.throttled() for _ in range(10)]
+        with mock.patch('urllib.request.urlopen', side_effect=replies), \
+             mock.patch('time.sleep'):
+            with self.assertRaises(SystemExit) as caught:
+                sign.Amo('i', 's').json('GET', sign.API + '/x/')
+        self.assertIn('HTTP 429', str(caught.exception))
+
+
 class DownloadAuthorizationTest(unittest.TestCase):
     def test_api_uses_jwt_but_public_file_download_has_no_authorization(self):
         seen = []

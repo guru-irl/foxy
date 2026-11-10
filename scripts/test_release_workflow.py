@@ -354,31 +354,39 @@ class WorkflowExecutionTest(unittest.TestCase):
         self.execute('publish')
         self.assertEqual(len([c for c in self.calls() if c[0] == 'python3' and c[2][0] == 'scripts/sign.py']), before)
 
-    def test_publish_creates_missing_release_and_keeps_pending_versions_unpublished(self):
+    def test_scheduled_publish_finishes_drafts_and_ignores_tags_without_releases(self):
+        # Old tags (never listed on AMO) and failed tags have no release; looking them up
+        # every day would only print noise. release.yml makes a draft while AMO reviews.
         self.manifest('4.3.0')
         self.git('add', 'extension/manifest.json')
         self.git('commit', '-qm', 'Next version')
         self.git('tag', '-a', 'v4.3.0', '-m', 'Next release')
+        (self.capture / 'releases.json').write_text('{"v4.3.0":{"draft":true}}')
         self.env['AMO_STATES'] = '{"4.2.0":"pending"}'
         self.execute('publish')
         self.assertEqual(set(self.releases()), {'v4.3.0'})
         self.assert_assets('v4.3.0')
+        looked_up = [c for c in self.calls() if '--fetch-only' in c[2]]
+        self.assertTrue(looked_up)
+        self.assertFalse(any('4.2.0' in c[2] for c in looked_up))
 
     def test_publish_skips_rejected_version_and_publishes_next_approved_tag(self):
         self.manifest('4.3.0')
         self.git('add', 'extension/manifest.json')
         self.git('commit', '-qm', 'Next version')
         self.git('tag', 'v4.3.0')
+        (self.capture / 'releases.json').write_text('{"v4.2.0":{"draft":true},"v4.3.0":{"draft":true}}')
         self.env['AMO_STATES'] = '{"4.2.0":"rejected"}'
         self.execute('publish')
-        self.assertEqual(set(self.releases()), {'v4.3.0'})
+        self.assertEqual(self.releases()['v4.2.0']['draft'], True)
+        self.assertFalse(self.releases()['v4.3.0']['draft'])
         self.assert_assets('v4.3.0')
 
     def test_publishing_an_older_approval_does_not_replace_latest(self):
-        (self.capture / 'releases.json').write_text('{"v5.0.0":{"draft":false}}')
+        (self.capture / 'releases.json').write_text('{"v5.0.0":{"draft":false},"v4.2.0":{"draft":true}}')
         self.execute('publish')
-        create = next(c[2] for c in self.calls() if c[0] == 'gh' and c[2][:2] == ['release', 'create'])
-        self.assertIn('--latest=false', create)
+        finish = next(c[2] for c in self.calls() if c[0] == 'gh' and c[2][:2] == ['release', 'edit'])
+        self.assertIn('--latest=false', finish)
 
     def test_dispatch_only_checks_the_requested_tag(self):
         self.env['REQUESTED_TAG'] = 'v4.2.0'
@@ -394,8 +402,9 @@ class WorkflowExecutionTest(unittest.TestCase):
 
     def test_publish_rejects_mismatched_download_before_github_mutations(self):
         self.env['BAD_XPI'] = '1'
+        (self.capture / 'releases.json').write_text('{"v4.2.0":{"draft":true}}')
         self.execute('publish', fail_at='Publish approved versions')
-        self.assertEqual(self.releases(), {})
+        self.assertEqual(self.releases(), {'v4.2.0': {'draft': True}})
 
     def test_lightweight_tag_keeps_changes_since_the_previous_release(self):
         self.git('tag', '-d', 'v4.2.0')

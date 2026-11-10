@@ -1,5 +1,3 @@
-# Foxy privacy policy
-
 Foxy collects no data. It has no analytics, advertising, or Foxy account.
 
 Weather requests go to Open-Meteo and BigDataCloud only after you select **Allow weather**. Coordinates are rounded to two decimals before requests. These services receive your IP address and the location needed for the request. Searching for a city does not require geolocation permission. Weather does not use cookies or an API key.

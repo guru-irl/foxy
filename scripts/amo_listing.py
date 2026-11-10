@@ -1,13 +1,28 @@
 #!/usr/bin/env python3
 """Sync the AMO listing from docs/amo. This command edits the real listing."""
+import html
 import json
 from pathlib import Path
+import re
 import struct
 import sys
 import urllib.parse
 import zlib
 
 from sign import API, Amo, ROOT, encode_multipart, https_url, read_credentials, redact
+
+
+# AMO stores these as rendered HTML, even with show_source=true: headings are
+# dropped, lists become <ul>, links are wrapped. Compare their words instead.
+RICH_TEXT = ('description', 'privacy_policy')
+
+
+def rich_words(text):
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text or '')
+    text = re.sub(r'(?i)</?(?:p|br|li|ul|ol|blockquote|h[1-6]|div)\b[^>]*>', ' ', text)
+    text = html.unescape(re.sub(r'<[^>]+>', '', text))
+    text = re.sub(r'(?m)^\s*(?:[-*]|\d+\.)\s+', ' ', text)
+    return re.sub(r'[*_`#]', '', text).split()
 
 
 def comparable(value):
@@ -34,6 +49,10 @@ def changed_fields(current, desired):
                    for locale, text in (old or {}).items()}
             value = {**old, **{locale: text.strip() if isinstance(text, str) else text
                                for locale, text in value.items()}}
+            if key in RICH_TEXT:
+                if {k: rich_words(v) for k, v in value.items()} != {k: rich_words(v) for k, v in old.items()}:
+                    patch[key] = value
+                continue
         if comparable(value) != comparable(old):
             patch[key] = value
     return patch
