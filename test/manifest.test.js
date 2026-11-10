@@ -6,12 +6,12 @@ const root = new URL("../extension/", import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), "utf8");
 const manifest = JSON.parse(read("manifest.json"));
 
-test("manifest and package name the add-on Foxy 4.1.0", () => {
+test("manifest and package name the add-on Foxy 4.2.0", () => {
   assert.equal(manifest.name, "Foxy");
-  assert.equal(manifest.version, "4.1.0");
+  assert.equal(manifest.version, "4.2.0");
   assert.equal(manifest.description, "A board of your tabs, tab groups and pinned tabs, saved as bookmarks and synced across devices.");
   const pkg = JSON.parse(readFileSync(new URL("../package.json", root), "utf8"));
-  assert.equal(pkg.version, "4.1.0");
+  assert.equal(pkg.version, "4.2.0");
 });
 
 test("manifest replaces the new tab page and the home page with newtab.html", () => {
