@@ -66,7 +66,7 @@ This spec extends `2026-11-04-foxy-public-design.md` §5. Where the two differ, 
   - Same permissions and pinning rules as `release.yml`.
 - **Updates:**
   - GitHub-installed 4.1.0 reads `updates.json` from GitHub, gets the AMO-signed 4.2.0, and from then on updates from AMO.
-  - `updates.json` keeps being published, so anyone on an older GitHub build still moves over.
+  - `updates.json` keeps being published for 4.1.0. Older GitHub builds have no update URL and need one manual AMO install.
 - **Docs:** `docs/releasing.md` is updated, in at most 20 lines.
 
 ## 5. Store listing content (`docs/amo/`)

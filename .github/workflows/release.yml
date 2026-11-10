@@ -15,12 +15,8 @@
     "cancel-in-progress": false
   },
   "jobs": {
-    "release": {
+    "build": {
       "runs-on": "ubuntu-latest",
-      "environment": "release",
-      "permissions": {
-        "contents": "write"
-      },
       "env": {
         "TAG": "${{ github.ref_name }}"
       },
@@ -66,7 +62,48 @@
         },
         {
           "name": "Verify source rebuild",
-          "run": "version=${TAG#v}\npython3 - \"$version\" <<'PY'\nimport pathlib, sys, zipfile\nwith zipfile.ZipFile(f'dist/foxy-{sys.argv[1]}-source.zip') as archive:\n    archive.extractall('source-rebuild')\nPY\n(cd source-rebuild && npm ci && python3 scripts/build.py)\npython3 - \"$version\" <<'PY'\nimport hashlib, pathlib, sys\nname = f'foxy-{sys.argv[1]}.zip'\noriginal = hashlib.sha256((pathlib.Path('dist') / name).read_bytes()).hexdigest()\nrebuilt = hashlib.sha256((pathlib.Path('source-rebuild/dist') / name).read_bytes()).hexdigest()\nif original != rebuilt:\n    sys.exit(f'Source rebuild differs: {original} != {rebuilt}')\nprint(f'Reproducible SHA-256: {original}')\nPY"
+          "run": "version=${TAG#v}\npython3 - \"$version\" <<'PY'\nimport pathlib, sys, zipfile\nwith zipfile.ZipFile(f'dist/foxy-{sys.argv[1]}-source.zip') as archive:\n    archive.extractall('source-rebuild')\nPY\n(cd source-rebuild && npm ci && python3 scripts/build.py)\npython3 - \"$version\" <<'PY'\nimport hashlib, os, pathlib, sys\nname = f'foxy-{sys.argv[1]}.zip'\noriginal = hashlib.sha256((pathlib.Path('dist') / name).read_bytes()).hexdigest()\nrebuilt = hashlib.sha256((pathlib.Path('source-rebuild/dist') / name).read_bytes()).hexdigest()\nif original != rebuilt:\n    sys.exit(f'Source rebuild differs: {original} != {rebuilt}')\nline = f'Reproducible SHA-256: {original}'\nprint(line)\nwith open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:\n    print(line, file=summary)\nPY"
+        },
+        {
+          "uses": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", # v4
+          "with": {
+            "name": "release-dist",
+            "path": "dist/",
+            "if-no-files-found": "error"
+          }
+        }
+      ]
+    },
+    "release": {
+      "runs-on": "ubuntu-latest",
+      "needs": "build",
+      "environment": "release",
+      "permissions": {
+        "contents": "write"
+      },
+      "env": {
+        "TAG": "${{ github.ref_name }}"
+      },
+      "steps": [
+        {
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262", # v4
+          "with": {
+            "fetch-depth": 0,
+            "persist-credentials": false
+          }
+        },
+        {
+          "uses": "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065", # v5
+          "with": {
+            "python-version": "3.12"
+          }
+        },
+        {
+          "uses": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093", # v4
+          "with": {
+            "name": "release-dist",
+            "path": "dist/"
+          }
         },
         {
           "name": "Sync AMO listing",

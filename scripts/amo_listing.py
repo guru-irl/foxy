@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 import struct
+import sys
 import urllib.parse
 import zlib
 
@@ -22,12 +23,17 @@ def changed_fields(current, desired):
     patch = {}
     for key, value in desired.items():
         old = current.get(key)
+        if key == 'categories' and isinstance(old, dict):
+            old = old.get('firefox', [])
         if key in ('homepage', 'support_url') and isinstance(old, dict) and 'url' in old:
             old = old['url']
             if isinstance(old, str):
                 old = {'en-US': old}
         if isinstance(value, dict):
-            value = {**(old or {}), **value}
+            old = {locale: text.strip() if isinstance(text, str) else text
+                   for locale, text in (old or {}).items()}
+            value = {**old, **{locale: text.strip() if isinstance(text, str) else text
+                               for locale, text in value.items()}}
         if comparable(value) != comparable(old):
             patch[key] = value
     return patch
@@ -106,6 +112,12 @@ def sync_listing(amo, guid, listing, privacy, read_image=None):
     base = f'{API}/addons/addon/{urllib.parse.quote(guid, safe="@")}/'
     current = amo.json('GET', base + '?show_source=true')
     fields = {k: v for k, v in listing.items() if k not in ('screenshots', 'license')}
+    if 'tags' in fields:
+        allowed = set(json.loads((ROOT / 'docs/amo/allowed-tags.json').read_text()))
+        for tag in fields['tags']:
+            if tag not in allowed:
+                print(f'Warning: skipping unsupported AMO tag: {tag}', file=sys.stderr)
+        fields['tags'] = [tag for tag in fields['tags'] if tag in allowed]
     current = apply_fields(amo, base, current, fields)
     # The license belongs to a version, not an add-on. sign.py sends it with source.
     policy_url = base + 'eula_policy/'

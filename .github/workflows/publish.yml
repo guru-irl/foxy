@@ -26,7 +26,6 @@
   "jobs": {
     "publish": {
       "runs-on": "ubuntu-latest",
-      "environment": "release",
       "permissions": {
         "contents": "write"
       },
@@ -39,12 +38,6 @@
           "with": {
             "fetch-depth": 0,
             "persist-credentials": false
-          }
-        },
-        {
-          "uses": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020", # v4
-          "with": {
-            "node-version": "24"
           }
         },
         {
@@ -62,10 +55,6 @@
         },
         {
           "name": "Fetch approved AMO files",
-          "env": {
-            "AMO_JWT_ISSUER": "${{ secrets.AMO_JWT_ISSUER }}",
-            "AMO_JWT_SECRET": "${{ secrets.AMO_JWT_SECRET }}"
-          },
           "run": "python3 - <<'PY'\nimport json, pathlib, subprocess, sys\ncandidates = json.loads(pathlib.Path('candidates.json').read_text())\napproved = []\nfor candidate in candidates['candidates']:\n    version = candidate['tag'][1:]\n    status_path = pathlib.Path(f'dist/foxy-{version}-status.json')\n    status_path.unlink(missing_ok=True)\n    result = subprocess.run(['python3', 'scripts/sign.py', '--fetch-only', '--channel', 'listed',\n                             '--version', version, '--wait', '0'])\n    if not status_path.exists():\n        sys.exit(f\"{candidate['tag']}: AMO lookup failed\")\n    status = json.loads(status_path.read_text())\n    if status['status'] == 'rejected':\n        print(f\"{candidate['tag']}: AMO rejected the version; skipping\")\n        continue\n    result.check_returncode()\n    if status['status'] == 'signed':\n        approved.append(candidate)\n    elif status['status'] == 'pending':\n        print(f\"{candidate['tag']}: Waiting for AMO review\")\n    else:\n        sys.exit(f\"{candidate['tag']}: AMO rejected the version\")\nkey = lambda tag: tuple(map(int, tag[1:].split('.')))\nlatest = max(candidates['published'] + [item['tag'] for item in approved], key=key, default='')\nfor item in approved:\n    item['latest'] = item['tag'] == latest\npathlib.Path('approved.json').write_text(json.dumps(approved))\nPY"
         },
         {

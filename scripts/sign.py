@@ -128,17 +128,17 @@ def https_url(url):
 class Amo:
     """AMO v5 client. Only API requests carry a fresh JWT."""
 
-    def __init__(self, issuer, secret):
+    def __init__(self, issuer=None, secret=None):
         self.issuer = issuer
         self.secret = secret
 
     def request(self, method, url, body=None, content_type=None):
-        token = make_jwt(self.issuer, self.secret)
+        token = make_jwt(self.issuer, self.secret) if self.issuer else ''
         headers = {
             "User-Agent": USER_AGENT,
             "Accept": "application/json",
         }
-        if url.startswith(API + "/"):
+        if token and url.startswith(API + "/"):
             headers["Authorization"] = f"JWT {token}"
         if content_type:
             headers["Content-Type"] = content_type
@@ -148,7 +148,10 @@ class Amo:
                 return resp.read()
         except urllib.error.HTTPError as err:
             detail = err.read().decode("utf-8", "replace")[:2000]
-            raise AmoError(err.code, redact(f"{method} {url} failed: HTTP {err.code}\n{detail}", self).replace(token, "[redacted]")) from None
+            message = redact(f"{method} {url} failed: HTTP {err.code}\n{detail}", self)
+            if token:
+                message = message.replace(token, "[redacted]")
+            raise AmoError(err.code, message) from None
         except (OSError, http.client.HTTPException) as err:
             raise SystemExit(redact(f"{method} {url} failed: {err}", self)) from None
 
@@ -286,6 +289,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.wait < 0 or not math.isfinite(args.wait):
         parser.error("--wait must be a finite non-negative number of minutes")
+    if args.fetch_only and args.channel != 'listed':
+        parser.error('--fetch-only requires the listed channel')
     if args.version and (not args.fetch_only or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", args.version)):
         parser.error("--version requires --fetch-only and a version X.Y.Z")
     if not args.fetch_only and args.channel == "listed" and not args.source:
@@ -300,8 +305,7 @@ def main(argv=None):
     xpi = ROOT / "dist" / f"foxy-{version}.zip"
     if not args.fetch_only and not xpi.exists():
         raise SystemExit(f"Missing {xpi}. Run: python3 scripts/build.py")
-    issuer, secret = read_credentials()
-    amo = Amo(issuer, secret)
+    amo = Amo() if args.fetch_only else Amo(*read_credentials())
     if args.fetch_only:
         fetch_signed(amo, guid, version, out, channel=args.channel, timeout=args.wait * 60)
     else:

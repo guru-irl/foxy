@@ -8,7 +8,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSION = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z')
-FILES = ('extension/manifest.json', 'package.json', 'test/manifest.test.js')
+FILES = ('extension/manifest.json', 'package.json', 'test/manifest.test.js', 'package-lock.json')
 
 
 def git(*args, check=True):
@@ -32,6 +32,9 @@ def main():
         raise SystemExit('The new version must be higher than the current version.')
     if json.loads(texts[FILES[1]])['version'] != current:
         raise SystemExit('Package and manifest versions differ.')
+    lock = json.loads(texts[FILES[3]])
+    if lock['version'] != current or lock['packages']['']['version'] != current:
+        raise SystemExit('Lockfile and manifest versions differ.')
     tag = f'v{version}'
     if git('show-ref', '--verify', '--quiet', f'refs/tags/{tag}', check=False).returncode == 0:
         raise SystemExit(f'Tag {tag} already exists.')
@@ -42,6 +45,13 @@ def main():
     for name in FILES[:2]:
         pattern = rf'^(\s*"version"\s*:\s*)"{re.escape(current)}"'
         texts[name], count = re.subn(pattern, lambda m: m.group(1) + json.dumps(version), texts[name], count=1, flags=re.MULTILINE)
+        if count != 1:
+            raise SystemExit(f'Cannot find the current version in {name}.')
+    name = FILES[3]
+    for indent in (2, 6):
+        pattern = rf'^( {{{indent}}}"version"\s*:\s*)"{re.escape(current)}"'
+        texts[name], count = re.subn(pattern, lambda m: m.group(1) + json.dumps(version),
+                                     texts[name], count=1, flags=re.MULTILINE)
         if count != 1:
             raise SystemExit(f'Cannot find the current version in {name}.')
     name = FILES[2]

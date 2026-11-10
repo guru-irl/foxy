@@ -13,5 +13,5 @@ Before the first listed release, complete [the Developer Hub checks](amo/MANUAL.
 8. After approval, run **Publish approved AMO releases** with the tag, or wait for its daily check. It fetches the existing AMO version and publishes the release.
 
 `release.py` bumps versions, tests, commits, and creates an annotated tag. It never pushes.
-GitHub-installed 4.1.0 and older builds update automatically through `updates.json` to the AMO version. That version then updates from AMO.
+GitHub-installed 4.1.0 updates automatically through `updates.json` to the AMO version. Older GitHub installs need one manual install from AMO. After that, AMO handles updates.
 For rejected versions or upload errors, inspect Developer Hub before retrying. An accepted version number cannot be submitted again. Use the publish workflow to recover it, or release a new version after a correction.
