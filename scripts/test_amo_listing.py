@@ -1,4 +1,6 @@
 import copy
+import contextlib
+import io
 import json
 from pathlib import Path
 import struct
@@ -22,7 +24,7 @@ def png(pixel=b'\x11\x22\x33\xff', extra=False):
 
 class ListingServer:
     def __init__(self):
-        self.addon = {'name': {'en-US': 'Old name'}, 'categories': {'firefox': ['tabs']},
+        self.addon = {'name': {'en-US': 'Old name'}, 'categories': ['tabs'],
                       'previews': []}
         self.policy = {'privacy_policy': None}
         self.calls = []
@@ -74,7 +76,7 @@ class ListingSyncTest(unittest.TestCase):
         self.listing = amo_listing
         self.server = ListingServer()
         self.desired = {'name': {'en-US': 'Foxy Board'}, 'summary': {'en-US': 'A tab board.'},
-                        'categories': {'firefox': ['tabs', 'bookmarks']},
+                        'categories': ['tabs', 'bookmarks'],
                         'support_url': {'en-US': 'https://example.com/issues'},
                         'screenshots': [{'path': 'dark.png', 'caption': {'en-US': 'Dark board'}}],
                         'license': 'MIT'}
@@ -136,13 +138,65 @@ class ListingSyncTest(unittest.TestCase):
 
     def test_outgoing_link_wrappers_and_category_order_do_not_trigger_writes(self):
         self.sync()
-        self.server.addon['categories']['firefox'].reverse()
+        self.server.addon['categories'].reverse()
         self.server.addon['support_url'] = {
             'url': {'en-US': 'https://example.com/issues'},
             'outgoing': {'en-US': 'https://example.net/wrapped'}}
         self.server.calls.clear()
         self.sync()
         self.assertTrue(all(c[0] == 'GET' for c in self.server.calls), self.server.calls)
+
+    def test_v5_flat_categories_are_patched_and_stay_read_only_on_repeat(self):
+        data = json.loads((ROOT / 'docs/amo/listing.json').read_text())
+        self.assertEqual(data['categories'], ['tabs', 'bookmarks'])
+        self.sync()
+        self.assertEqual(self.server.addon['categories'], ['tabs', 'bookmarks'])
+        self.server.calls.clear()
+        self.sync()
+        self.assertTrue(all(call[0] == 'GET' for call in self.server.calls))
+
+    def test_translations_with_source_whitespace_sync_once_to_trimming_amo(self):
+        class TrimmingServer(ListingServer):
+            def json(self, method, url, payload=None, body=None, content_type=None):
+                if method == 'PATCH' and payload:
+                    payload = {key: ({locale: text.strip() for locale, text in value.items()}
+                                     if key in ('name', 'summary', 'description', 'privacy_policy', 'caption')
+                                     and isinstance(value, dict) else value)
+                               for key, value in payload.items()}
+                return super().json(method, url, payload, body, content_type)
+        self.server = TrimmingServer()
+        source = json.loads((ROOT / 'docs/amo/listing.json').read_text())
+        self.desired['description'] = source['description']
+        self.desired['summary'] = {'en-US': ' A tab board.\n'}
+        self.desired['screenshots'][0]['caption'] = {'en-US': ' Dark board\n'}
+        privacy = (ROOT / 'docs/amo/privacy.md').read_text()
+        self.assertTrue(privacy.endswith('\n'))
+        self.assertTrue(source['description']['en-US'].endswith('\n'))
+        self.listing.sync_listing(self.server, '{abc}', self.desired, privacy,
+                                  read_image=lambda path: self.files[path])
+        self.assertEqual(self.server.policy['privacy_policy']['en-US'], privacy.strip())
+        self.assertEqual(self.server.addon['previews'][0]['caption'], {'en-US': 'Dark board'})
+        for method, url, payload, _ in self.server.calls:
+            if method == 'PATCH':
+                for key in ('name', 'summary', 'description', 'privacy_policy', 'caption'):
+                    for value in (payload.get(key) or {}).values():
+                        self.assertEqual(value, value.strip())
+        self.server.calls.clear()
+        self.listing.sync_listing(self.server, '{abc}', self.desired, privacy,
+                                  read_image=lambda path: self.files[path])
+        self.assertTrue(all(call[0] == 'GET' for call in self.server.calls))
+
+    def test_invalid_tags_are_warned_and_never_sent(self):
+        self.desired['tags'] = ['dark mode', 'invented tag']
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.sync()
+        self.assertIn('invented tag', stderr.getvalue())
+        self.assertEqual(self.server.addon['tags'], ['dark mode'])
+        self.desired['tags'] = ['another invalid tag']
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.sync()
+        self.assertEqual(self.server.addon['tags'], [])
 
     def test_an_ignored_listing_patch_fails_loudly_instead_of_claiming_success(self):
         class IgnoringServer(ListingServer):

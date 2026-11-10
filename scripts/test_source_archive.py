@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+from unittest.mock import patch
 import shutil
 import subprocess
 import sys
@@ -79,7 +80,14 @@ class SourceArchiveTest(unittest.TestCase):
             subprocess.run([sys.executable, str(unpacked / 'scripts/build.py')],
                            cwd=unpacked, check=True, capture_output=True)
             rebuilt = (unpacked / f'dist/foxy-{version}.zip').read_bytes()
-            original = build.build(out_dir=root / 'original').read_bytes()
+            (repo / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
+            real_build = build.build
+            def scratch_build(*args, **kwargs):
+                project = Path(kwargs.get('root', ROOT))
+                self.assertTrue(project.is_relative_to(SCRATCH), 'build must not touch the developer tree')
+                return real_build(*args, **kwargs)
+            with patch.object(build, 'build', side_effect=scratch_build):
+                original = build.build(root=repo, out_dir=root / 'original').read_bytes()
             self.assertEqual(hashlib.sha256(rebuilt).hexdigest(), hashlib.sha256(original).hexdigest())
 
 

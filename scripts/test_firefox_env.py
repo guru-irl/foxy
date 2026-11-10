@@ -33,7 +33,7 @@ class FirefoxEnvironmentTests(unittest.TestCase):
 
     def test_non_scratch_path_is_refused(self):
         with self.assertRaises(ValueError):
-            with firefox_environment(Path.home() / 'not-scratch'):
+            with firefox_environment(Path('/not-scratch')):
                 self.fail('non-scratch environment was accepted')
 
     def test_disposable_runs_allow_marionette_system_access(self):

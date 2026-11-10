@@ -9,7 +9,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRATCH = ROOT / '.spider' / 'scratch' / 'release-tests'
-FILES = ('extension/manifest.json', 'package.json', 'test/manifest.test.js', 'README.md')
+FILES = ('extension/manifest.json', 'package.json', 'test/manifest.test.js', 'package-lock.json', 'README.md')
 
 
 def git(root, *args):
@@ -32,7 +32,7 @@ class ReleaseTest(unittest.TestCase):
             shutil.copyfile(ROOT / name, dest)
         # Use a fixed old version so these tests also pass during a real version bump.
         current = json.loads((self.repo / FILES[0]).read_text())['version']
-        for name in FILES[:3]:
+        for name in FILES[:4]:
             path = self.repo / name
             path.write_text(path.read_text().replace(current, '4.0.0'))
         git(self.repo, 'init', '-q')
@@ -85,7 +85,7 @@ class ReleaseTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((repo / 'README.md').read_bytes(), readme)
         self.assertEqual(set(git(repo, 'diff-tree', '--no-commit-id', '--name-only', '-r', 'HEAD').splitlines()),
-                         set(FILES[:3]))
+                         set(FILES[:4]))
         self.assertEqual(json.loads((repo / FILES[0]).read_text())['version'], version)
         self.assertEqual(git(repo, 'cat-file', '-t', f'v{version}'), 'tag')
         self.assertEqual((self.work / 'npm.log').read_text(), 'test\n')
@@ -132,6 +132,9 @@ class ReleaseTest(unittest.TestCase):
         self.assertEqual((self.work / 'npm.log').read_text(), 'test\n')
         self.assertEqual(json.loads((self.repo / FILES[0]).read_text())['version'], '4.1.0')
         self.assertEqual(json.loads((self.repo / FILES[1]).read_text())['version'], '4.1.0')
+        lock = json.loads((self.repo / 'package-lock.json').read_text())
+        self.assertEqual(lock['version'], '4.1.0')
+        self.assertEqual(lock['packages']['']['version'], '4.1.0')
         test = (self.repo / FILES[2]).read_text()
         self.assertIn('manifest.version, "4.1.0"', test)
         self.assertIn('pkg.version, "4.1.0"', test)

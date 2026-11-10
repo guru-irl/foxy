@@ -527,6 +527,29 @@ class ListedCliTest(unittest.TestCase):
                 sign.main(args)
             credentials.assert_not_called()
 
+    def test_fetch_only_downloads_public_listed_version_without_credentials(self):
+        requests = []
+        def transport(request, timeout):
+            requests.append(request)
+            if '/versions/' in request.full_url:
+                return contextlib.closing(io.BytesIO(json.dumps({'version': '1.2.3', 'channel': 'listed',
+                    'file': {'status': 'public', 'url': 'https://example.com/foxy.xpi'}}).encode()))
+            return contextlib.closing(io.BytesIO(b'SIGNED'))
+        with mock.patch.object(sign, 'ROOT', self.root), \
+             mock.patch.dict(os.environ, {}, clear=True), \
+             mock.patch.object(sign, 'read_credentials', side_effect=AssertionError('credentials accessed')), \
+             mock.patch('urllib.request.urlopen', side_effect=transport):
+            sign.main(['--fetch-only', '--version', '1.2.3', '--wait', '0'])
+        self.assertEqual((self.root / 'dist/foxy-1.2.3-signed.xpi').read_bytes(), b'SIGNED')
+        self.assertEqual(len(requests), 2)
+        self.assertTrue(all(req.method == 'GET' and req.get_header('Authorization') is None for req in requests))
+
+    def test_fetch_only_rejects_unlisted_channel(self):
+        with mock.patch.object(sign, 'ROOT', self.root), \
+             mock.patch.object(sign, 'read_credentials', side_effect=AssertionError('credentials accessed')), \
+             contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            sign.main(['--fetch-only', '--channel', 'unlisted', '--wait', '0'])
+
     def test_fetch_only_uses_requested_version_without_a_build(self):
         with mock.patch.object(sign, 'ROOT', self.root), \
              mock.patch.object(sign, 'read_credentials', return_value=('issuer', 'fake-secret')), \

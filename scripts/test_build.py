@@ -28,13 +28,29 @@ class Scripts(HTMLParser):
             self.scripts.append(dict(attrs))
 
 
+class BuildIsolationTest(unittest.TestCase):
+    def test_build_test_setup_uses_a_scratch_project_root(self):
+        with patch.object(build, 'build', return_value=Path('fixture.zip')) as run:
+            try:
+                BuildTest.setUpClass()
+                root = Path(run.call_args.kwargs.get('root', ROOT))
+                self.assertNotEqual(root, ROOT)
+                self.assertTrue(root.is_relative_to(SCRATCH))
+            finally:
+                BuildTest.tearDownClass()
+
+
 class BuildTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         SCRATCH.mkdir(parents=True, exist_ok=True)
         cls.directory = tempfile.TemporaryDirectory(prefix='build-', dir=SCRATCH)
-        cls.out_dir = Path(cls.directory.name)
-        cls.archive = build.build(out_dir=cls.out_dir)
+        cls.root = Path(cls.directory.name)
+        (cls.root / 'extension').symlink_to(ROOT / 'extension', target_is_directory=True)
+        (cls.root / 'node_modules').symlink_to(ROOT / 'node_modules', target_is_directory=True)
+        shutil.copyfile(ROOT / 'vite.config.js', cls.root / 'vite.config.js')
+        cls.out_dir = cls.root / 'dist'
+        cls.archive = build.build(root=cls.root, out_dir=cls.out_dir)
 
     @classmethod
     def tearDownClass(cls):
@@ -61,14 +77,14 @@ class BuildTest(unittest.TestCase):
                 if path.is_file():
                     self.assertEqual(zf.read('icons/' + path.name), path.read_bytes())
             self.assertLess(len(zf.read('newtab.css')), (ROOT / 'extension/newtab.css').stat().st_size)
-            built = ROOT / 'build/extension'
+            built = self.root / 'build/extension'
             self.assertEqual(names, {p.relative_to(built).as_posix() for p in built.rglob('*') if p.is_file()})
             for name in names:
                 self.assertEqual(zf.read(name), (built / name).read_bytes())
 
     def test_zip_is_reproducible(self):
         first = hashlib.sha256(self.archive.read_bytes()).hexdigest()
-        second = hashlib.sha256(build.build(out_dir=self.out_dir).read_bytes()).hexdigest()
+        second = hashlib.sha256(build.build(root=self.root, out_dir=self.out_dir).read_bytes()).hexdigest()
         self.assertEqual(first, second)
 
     def test_smoke_build_is_created_when_missing_or_stale(self):

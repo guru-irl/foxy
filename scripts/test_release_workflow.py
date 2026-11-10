@@ -15,6 +15,8 @@ PINS = {
     'actions/checkout': '11d5960a326750d5838078e36cf38b85af677262',
     'actions/setup-node': '49933ea5288caeca8642d1e84afbd3f7d6820020',
     'actions/setup-python': 'a26af69be951a213d495a4c3e4e4022e16d87065',
+    'actions/upload-artifact': 'ea165f8d65b6e75b540449e92b4886f43607fa02',
+    'actions/download-artifact': 'd3f86a106a0bac45b974a628896c90dbdf5c8093',
 }
 GUID = '{4408f971-7930-41ea-9f93-b01231e40861}'
 
@@ -25,6 +27,32 @@ def load_workflow(name='release'):
 
 
 class ReleaseWorkflowTest(unittest.TestCase):
+    def test_publish_runs_without_release_environment_secrets_or_node(self):
+        source, workflow = load_workflow('publish')
+        self.assertNotIn('secrets.', source)
+        for job in workflow['jobs'].values():
+            self.assertNotIn('environment', job)
+            self.assertFalse(any(step.get('uses', '').startswith('actions/setup-node@')
+                                 for step in job['steps']))
+
+    def test_release_build_is_unprivileged_and_hands_verified_dist_to_signing(self):
+        _, workflow = load_workflow('release')
+        build = workflow['jobs']['build']
+        signing = workflow['jobs']['release']
+        self.assertNotIn('environment', build)
+        self.assertNotIn('secrets.', json.dumps(build))
+        self.assertNotEqual(build.get('permissions', {}).get('contents'), 'write')
+        self.assertEqual(signing['needs'], 'build')
+        self.assertEqual(signing['environment'], 'release')
+        upload = next(step for step in build['steps'] if step.get('uses', '').startswith('actions/upload-artifact@'))
+        download = next(step for step in signing['steps'] if step.get('uses', '').startswith('actions/download-artifact@'))
+        self.assertEqual(upload['with']['name'], download['with']['name'])
+        self.assertEqual(upload['with']['path'], 'dist/')
+        self.assertEqual(download['with']['path'], 'dist/')
+        self.assertFalse(any('npm ci' in step.get('run', '') for step in signing['steps']))
+        verify = next(step['run'] for step in build['steps'] if step.get('name') == 'Verify source rebuild')
+        self.assertIn('GITHUB_STEP_SUMMARY', verify)
+
     def test_both_workflows_limit_permissions_credentials_and_action_pins(self):
         for name in ['release', 'publish']:
             with self.subTest(workflow=name):
@@ -33,7 +61,10 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 for job in workflow['jobs'].values():
                     if job.get('permissions', {}).get('contents') == 'write':
                         self.assertTrue(any('gh release' in s.get('run', '') for s in job['steps']))
-                    self.assertEqual(job['environment'], 'release')
+                    if job.get('needs') == 'build':
+                        self.assertEqual(job['environment'], 'release')
+                    else:
+                        self.assertNotIn('environment', job)
                     for step in job['steps']:
                         if 'uses' in step:
                             action, pin = step['uses'].split('@')
@@ -101,7 +132,10 @@ elif name == 'python3':
     elif args[0] == 'scripts/amo_listing.py':
         assert os.environ.get('AMO_JWT_SECRET') == 'fake-secret'
     elif args[0] == 'scripts/sign.py':
-        assert os.environ.get('AMO_JWT_SECRET') == 'fake-secret'
+        if '--fetch-only' in args:
+            assert not os.environ.get('AMO_JWT_SECRET')
+        else:
+            assert os.environ.get('AMO_JWT_SECRET') == 'fake-secret'
         assert '--channel' in args and args[args.index('--channel')+1] == 'listed'
         version = args[args.index('--version')+1] if '--version' in args else json.loads((root / 'extension/manifest.json').read_text())['version']
         if '--fetch-only' in args:
@@ -226,8 +260,19 @@ class WorkflowExecutionTest(unittest.TestCase):
 
     def execute(self, name='release', fail_at=None):
         _, workflow = load_workflow(name)
-        for job in workflow['jobs'].values():
+        for job_name, job in workflow['jobs'].items():
+            if name == 'release' and job_name == 'release':
+                origin = self.git('remote', 'get-url', 'origin').stdout.strip()
+                signing_repo = self.work / 'signing-repo'
+                subprocess.run(['git', 'clone', '-q', '--no-hardlinks', str(self.repo), str(signing_repo)], check=True)
+                self.repo = signing_repo
+                self.git('remote', 'set-url', 'origin', origin)
             for step in job['steps']:
+                action = step.get('uses', '')
+                if action.startswith('actions/upload-artifact@'):
+                    shutil.copytree(self.repo / 'dist', self.work / 'artifact')
+                elif action.startswith('actions/download-artifact@'):
+                    shutil.copytree(self.work / 'artifact', self.repo / 'dist')
                 if 'run' not in step:
                     continue
                 result = self.run_step(step)
@@ -261,6 +306,9 @@ class WorkflowExecutionTest(unittest.TestCase):
         calls = self.calls()
         self.assertEqual(len([c for c in calls if c[0] == 'npm' and c[2] == ['ci']]), 2)
         self.assertEqual(len([c for c in calls if c[2] == ['scripts/build.py']]), 2)
+        self.assertIn('Reproducible SHA-256:', (self.work / 'summary').read_text())
+        signing_dir = str(self.repo)
+        self.assertFalse(any(c[0] == 'npm' and c[1] == signing_dir for c in calls))
         self.assertEqual((self.capture / 'v4.2.0/notes.txt').read_text(),
                          'Notes for 4.2.0\n\nChanges:\n- Initial commit\n')
 
