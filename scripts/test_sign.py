@@ -130,6 +130,20 @@ class SecretOutputTest(unittest.TestCase):
                 self.assertNotIn(value, stdout.getvalue() + stderr.getvalue() + str(caught.exception))
 
 
+class DownloadAuthorizationTest(unittest.TestCase):
+    def test_api_uses_jwt_but_public_file_download_has_no_authorization(self):
+        seen = []
+        def transport(request, timeout):
+            seen.append(request)
+            return contextlib.closing(io.BytesIO(b'{}'))
+        with mock.patch('urllib.request.urlopen', side_effect=transport):
+            amo = sign.Amo('fake-issuer', 'fake-secret')
+            amo.request('GET', sign.API + '/addons/addon/test/')
+            amo.request('GET', 'https://addons.mozilla.org/f/1.xpi')
+        self.assertTrue(seen[0].get_header('Authorization').startswith('JWT '))
+        self.assertIsNone(seen[1].get_header('Authorization'))
+
+
 class MultipartTest(unittest.TestCase):
     def test_encodes_fields_then_files(self):
         body, content_type = sign.encode_multipart(
@@ -195,10 +209,10 @@ class SignFlowTest(unittest.TestCase):
             {"file": {"status": "unreviewed"}},
             {"file": {"status": "public", "url": "https://addons.mozilla.org/f/1.xpi"}},
         ])
-        sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+        sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, channel="unlisted", interval=0)
         self.assertEqual(self.out.read_bytes(), b"SIGNED")
         self.assertFalse(self.part.exists())
-        self.assertEqual([c[0] for c in amo.calls], ["POST", "GET", "GET", "PUT", "GET", "GET", "GET"])
+        self.assertEqual([c[0] for c in amo.calls], ["POST", "GET", "GET", "POST", "GET", "GET", "GET"])
         self.assertEqual(amo.calls[0][1], "https://addons.mozilla.org/api/v5/addons/upload/")
         upload_body, upload_type = amo.calls[0][3:]
         self.assertTrue(upload_type.startswith("multipart/form-data; boundary="))
@@ -209,8 +223,8 @@ class SignFlowTest(unittest.TestCase):
             upload_body,
         )
         self.assertEqual(amo.calls[1][1], "https://addons.mozilla.org/api/v5/addons/upload/u1/")
-        self.assertEqual(amo.calls[3][1], "https://addons.mozilla.org/api/v5/addons/addon/%7Babc%7D/")
-        self.assertEqual(amo.calls[3][2], {"version": {"upload": "u1"}})
+        self.assertEqual(amo.calls[3][1], "https://addons.mozilla.org/api/v5/addons/addon/%7Babc%7D/versions/")
+        self.assertEqual(amo.calls[3][2], {"upload": "u1", "license": "MIT"})
         self.assertEqual(
             amo.calls[4][1],
             "https://addons.mozilla.org/api/v5/addons/addon/%7Babc%7D/versions/v1.0.0/",
@@ -224,7 +238,7 @@ class SignFlowTest(unittest.TestCase):
              "validation": {"messages": [{"type": "error", "message": "bad manifest"}]}},
         ])
         with self.assertRaises(SystemExit):
-            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, channel="unlisted", interval=0)
         self.assertEqual([c[0] for c in amo.calls], ["POST", "GET"])
         self.assertFalse(self.out.exists())
 
@@ -243,7 +257,7 @@ class SignFlowTest(unittest.TestCase):
             {"file": {"status": "disabled"}},
         ])
         with self.assertRaises(SystemExit) as ctx:
-            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, channel="unlisted", interval=0)
         self.assert_submitted_message(ctx.exception)
         self.assertIn("rejected or disabled", str(ctx.exception))
         self.assertIn("Check why at", str(ctx.exception))
@@ -263,7 +277,7 @@ class SignFlowTest(unittest.TestCase):
             {"id": 1},
         ])
         with self.assertRaises(SystemExit) as ctx:
-            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0, timeout=0)
+            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, channel="unlisted", interval=0, timeout=0)
         self.assert_submitted_message(ctx.exception)
         self.assertIn("Timed out waiting for signing", str(ctx.exception))
 
@@ -275,7 +289,7 @@ class SignFlowTest(unittest.TestCase):
             SystemExit("GET failed: HTTP 500\nserver broke"),
         ])
         with self.assertRaises(SystemExit) as ctx:
-            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, channel="unlisted", interval=0)
         self.assert_submitted_message(ctx.exception)
         self.assertIn("HTTP 500\nserver broke", str(ctx.exception))
 
@@ -287,7 +301,7 @@ class SignFlowTest(unittest.TestCase):
             {"file": {"status": "public", "url": "https://addons.mozilla.org/f/1.xpi"}},
         ], download_error=SystemExit("GET failed: HTTP 503"))
         with self.assertRaises(SystemExit) as ctx:
-            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, channel="unlisted", interval=0)
         self.assert_submitted_message(ctx.exception)
         self.assertIn("GET failed: HTTP 503", str(ctx.exception))
 
@@ -308,7 +322,7 @@ class SignFlowTest(unittest.TestCase):
                     error,
                 ])
                 with self.assertRaises(BaseException) as ctx:
-                    sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+                    sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, channel="unlisted", interval=0)
                 self.assertIsInstance(ctx.exception, SystemExit)
                 self.assert_submitted_message(ctx.exception)
                 self.assertIn(str(error), str(ctx.exception))
@@ -321,7 +335,7 @@ class SignFlowTest(unittest.TestCase):
             KeyboardInterrupt(),
         ])
         with self.assertRaises(SystemExit) as ctx:
-            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, channel="unlisted", interval=0)
         self.assert_submitted_message(ctx.exception)
         self.assertTrue(str(ctx.exception).startswith("Interrupted (KeyboardInterrupt)\n"))
 
@@ -340,7 +354,7 @@ class SignFlowTest(unittest.TestCase):
 
         with mock.patch.object(pathlib.Path, "write_bytes", fail_after_partial_write):
             with self.assertRaises(SystemExit) as ctx:
-                sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+                sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, channel="unlisted", interval=0)
         self.assert_submitted_message(ctx.exception)
         self.assertIn("disk full", str(ctx.exception))
         self.assertFalse(self.part.exists(), "a failed write must not leave a partial download")
@@ -348,8 +362,103 @@ class SignFlowTest(unittest.TestCase):
     def test_pre_submit_error_does_not_claim_submission(self):
         amo = FakeAmo([urllib.error.URLError("upload offline")])
         with self.assertRaises(urllib.error.URLError) as ctx:
-            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, interval=0)
+            sign.sign(amo, self.xpi, "{abc}", "1.0.0", self.out, channel="unlisted", interval=0)
         self.assertIn("upload offline", str(ctx.exception))
+        self.assertFalse(self.out.exists())
+
+
+class ListedSignTest(unittest.TestCase):
+    setUp = SignFlowTest.setUp
+    def test_listed_creates_version_with_source_and_review_notes(self):
+        source = SCRATCH / 'source.zip'
+        source.write_bytes(b'SOURCE')
+        amo = FakeAmo([
+            {'uuid': 'u1'}, {'uuid': 'u1', 'processed': True, 'valid': True},
+            {'id': 42}, {},
+            {'version': '1.0.0', 'channel': 'listed', 'file': {
+                'status': 'public', 'url': 'https://addons.mozilla.org/f/1.xpi'}},
+        ])
+        result = sign.sign(amo, self.xpi, '{abc}', '1.0.0', self.out,
+                           source=source, notes='No account needed.', interval=0)
+        self.assertIn(b'\r\nlisted\r\n', amo.calls[0][3])
+        create = amo.calls[2]
+        self.assertEqual(create[:2], ('POST', sign.API + '/addons/addon/%7Babc%7D/versions/'))
+        for field in [b'name="source"; filename="source.zip"', b'SOURCE',
+                      b'name="upload"\r\n\r\nu1', b'name="license"\r\n\r\nMIT']:
+            self.assertIn(field, create[3])
+        self.assertEqual(amo.calls[3][2], {'approval_notes': 'No account needed.'})
+        self.assertEqual(result['status'], 'signed')
+        self.assertEqual(result['url'], 'https://addons.mozilla.org/f/1.xpi')
+        self.assertEqual(json.loads(self.out.with_name('foxy-1.0.0-status.json').read_text()), result)
+
+    def test_listed_pending_is_success_and_leaves_no_signed_asset(self):
+        amo = FakeAmo([{'uuid': 'u1'}, {'uuid': 'u1', 'processed': True, 'valid': True},
+                       {'id': 42}, {'version': '1.0.0', 'channel': 'listed',
+                                   'file': {'status': 'unreviewed'}}])
+        result = sign.sign(amo, self.xpi, '{abc}', '1.0.0', self.out,
+                           timeout=0, interval=0)
+        self.assertEqual(result['status'], 'pending')
+        self.assertFalse(self.out.exists())
+        self.assertEqual(json.loads(self.out.with_name('foxy-1.0.0-status.json').read_text())['status'], 'pending')
+
+    def test_disabled_writes_rejected_status(self):
+        amo = FakeAmo([{'uuid': 'u1'}, {'uuid': 'u1', 'processed': True, 'valid': True},
+                       {'id': 42}, {'file': {'status': 'disabled'}}])
+        with self.assertRaises(SystemExit):
+            sign.sign(amo, self.xpi, '{abc}', '1.0.0', self.out, timeout=0)
+        self.assertEqual(json.loads(self.out.with_name('foxy-1.0.0-status.json').read_text())['status'], 'rejected')
+
+    def test_fetch_only_never_uploads_or_submits(self):
+        amo = FakeAmo([{'version': '1.0.0', 'channel': 'listed', 'file': {
+            'status': 'public', 'url': 'https://addons.mozilla.org/f/1.xpi'}}])
+        result = sign.fetch_signed(amo, '{abc}', '1.0.0', self.out, timeout=0)
+        self.assertEqual(result['status'], 'signed')
+        self.assertEqual([c[0] for c in amo.calls], ['GET', 'GET'])
+
+    def test_fetch_only_skips_unlisted_versions(self):
+        amo = FakeAmo([{'version': '1.0.0', 'channel': 'unlisted', 'file': {
+            'status': 'public', 'url': 'https://addons.mozilla.org/f/1.xpi'}}])
+        result = sign.fetch_signed(amo, '{abc}', '1.0.0', self.out, timeout=0)
+        self.assertEqual(result['status'], 'pending')
+        self.assertFalse(self.out.exists())
+
+    def test_fetch_only_missing_version_is_pending(self):
+        amo = FakeAmo([sign.AmoError(404, 'Not found.')])
+        self.assertEqual(sign.fetch_signed(amo, '{abc}', '1.0.0', self.out, timeout=0)['status'], 'pending')
+
+    def test_new_version_404_is_polled_until_public_within_wait(self):
+        amo = FakeAmo([sign.AmoError(404, 'Not visible yet.'),
+            {'version': '1.0.0', 'channel': 'listed', 'file': {
+                'status': 'public', 'url': 'https://addons.mozilla.org/f/1.xpi'}}])
+        result = sign.fetch_signed(amo, '{abc}', '1.0.0', self.out, interval=0, timeout=1)
+        self.assertEqual(result['status'], 'signed')
+        self.assertEqual(self.out.read_bytes(), b'SIGNED')
+
+    def test_fetch_only_http_errors_other_than_404_are_not_pending(self):
+        amo = FakeAmo([sign.AmoError(403, 'Not allowed.')])
+        with self.assertRaises(SystemExit) as caught:
+            sign.fetch_signed(amo, '{abc}', '1.0.0', self.out, timeout=0)
+        self.assertIn('Not allowed.', str(caught.exception))
+
+    def test_failed_fetch_does_not_leave_stale_success_status(self):
+        path = self.out.with_name('foxy-1.0.0-status.json')
+        path.write_text('{"status":"signed"}')
+        amo = FakeAmo([sign.AmoError(500, 'Server down')])
+        with self.assertRaises(SystemExit):
+            sign.fetch_signed(amo, '{abc}', '1.0.0', self.out, timeout=0)
+        self.assertFalse(path.exists())
+
+    def test_a_public_response_without_listed_channel_cannot_be_published(self):
+        amo = FakeAmo([{'version': '1.0.0', 'file': {
+            'status': 'public', 'url': 'https://example.com/foxy.xpi'}}])
+        self.assertEqual(sign.fetch_signed(amo, '{abc}', '1.0.0', self.out, timeout=0)['status'], 'pending')
+        self.assertFalse(self.out.exists())
+
+    def test_public_download_rejects_an_insecure_url(self):
+        amo = FakeAmo([{'version': '1.0.0', 'channel': 'listed', 'file': {
+            'status': 'public', 'url': 'http://example.com/unsigned.xpi'}}])
+        with self.assertRaises(SystemExit):
+            sign.fetch_signed(amo, '{abc}', '1.0.0', self.out, timeout=0)
         self.assertFalse(self.out.exists())
 
 
@@ -372,17 +481,60 @@ class MainTest(unittest.TestCase):
                 mock.patch.object(sign, "Amo") as client,
                 mock.patch.object(sign, "sign") as sign_addon,
             ):
-                sign.main()
+                sign.main(["--channel", "unlisted"])
             credentials.assert_called_once_with()
             client.assert_called_once_with("issuer", "test-secret")
             sign_addon.assert_called_once_with(
                 client.return_value, xpi, "{abc}", "2.3.4",
-                root / "dist" / "foxy-2.3.4-signed.xpi",
+                root / "dist" / "foxy-2.3.4-signed.xpi", channel="unlisted", source=None, timeout=900,
+                notes=None,
             )
             self.assertEqual(
                 sign.CREDENTIALS,
                 pathlib.Path.home() / ".config" / "liquidfox-newtab" / "amo.env",
             )
+
+
+class ListedCliTest(unittest.TestCase):
+    def setUp(self):
+        SCRATCH.mkdir(parents=True, exist_ok=True)
+        self.temp = tempfile.TemporaryDirectory(dir=SCRATCH)
+        self.addCleanup(self.temp.cleanup)
+        self.root = pathlib.Path(self.temp.name)
+        for path in ['extension', 'dist', 'docs/amo']:
+            (self.root / path).mkdir(parents=True)
+        (self.root / 'extension/manifest.json').write_text(json.dumps({'version': '2.3.4',
+            'browser_specific_settings': {'gecko': {'id': '{abc}'}}}))
+        (self.root / 'dist/foxy-2.3.4.zip').write_bytes(b'zip')
+        self.source = self.root / 'source.zip'
+        self.source.write_bytes(b'source')
+        (self.root / 'docs/amo/review-notes.md').write_text('No account needed.')
+
+    def test_default_is_listed_with_source_notes_and_wait_in_minutes(self):
+        with mock.patch.object(sign, 'ROOT', self.root), \
+             mock.patch.object(sign, 'read_credentials', return_value=('issuer', 'fake-secret')), \
+             mock.patch.object(sign, 'Amo') as client, mock.patch.object(sign, 'sign') as submit:
+            sign.main(['--source', str(self.source), '--wait', '1.5'])
+        self.assertEqual(submit.call_args.kwargs, {'channel': 'listed', 'source': self.source,
+                         'timeout': 90, 'notes': 'No account needed.'})
+
+    def test_missing_source_and_invalid_wait_fail_before_credentials_or_network(self):
+        for args in [[], ['--source', str(self.source), '--wait', '-1'],
+                     ['--source', str(self.source), '--wait', 'nan']]:
+            with self.subTest(args=args), mock.patch.object(sign, 'ROOT', self.root), \
+                 mock.patch.object(sign, 'read_credentials') as credentials, \
+                 contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                sign.main(args)
+            credentials.assert_not_called()
+
+    def test_fetch_only_uses_requested_version_without_a_build(self):
+        with mock.patch.object(sign, 'ROOT', self.root), \
+             mock.patch.object(sign, 'read_credentials', return_value=('issuer', 'fake-secret')), \
+             mock.patch.object(sign, 'fetch_signed') as fetch:
+            sign.main(['--fetch-only', '--version', '1.2.3', '--wait', '0'])
+        self.assertEqual(fetch.call_args.args[1:], ('{abc}', '1.2.3',
+                         self.root / 'dist/foxy-1.2.3-signed.xpi'))
+        self.assertEqual(fetch.call_args.kwargs, {'channel': 'listed', 'timeout': 0})
 
 
 if __name__ == "__main__":
