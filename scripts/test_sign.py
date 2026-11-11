@@ -470,6 +470,19 @@ class ListedSignTest(unittest.TestCase):
         amo = FakeAmo([sign.AmoError(404, 'Not found.')])
         self.assertEqual(sign.fetch_signed(amo, '{abc}', '1.0.0', self.out, timeout=0)['status'], 'pending')
 
+    def test_anonymous_401_for_an_unreviewed_version_is_pending(self):
+        # Seen live 2026-11-11: AMO hides unreviewed listed versions from anonymous
+        # callers with 401, and publish.yml runs without AMO credentials.
+        amo = FakeAmo([sign.AmoError(401, 'Authentication credentials were not provided.')])
+        self.assertEqual(sign.fetch_signed(amo, '{abc}', '1.0.0', self.out, timeout=0)['status'], 'pending')
+
+    def test_authenticated_401_is_a_credentials_failure(self):
+        amo = FakeAmo([sign.AmoError(401, 'Invalid token.')])
+        amo.issuer = 'issuer'
+        with self.assertRaises(SystemExit):
+            sign.fetch_signed(amo, '{abc}', '1.0.0', self.out, timeout=0)
+        self.assertFalse(self.out.with_name('foxy-1.0.0-status.json').exists())
+
     def test_new_version_404_is_polled_until_public_within_wait(self):
         amo = FakeAmo([sign.AmoError(404, 'Not visible yet.'),
             {'version': '1.0.0', 'channel': 'listed', 'file': {

@@ -216,7 +216,9 @@ def fetch_signed(amo, guid, version, out, channel="listed", interval=5, timeout=
             try:
                 current = amo.json("GET", version_url)
             except AmoError as err:
-                if err.status != 404:
+                # Anonymous callers (publish.yml) get 401 until AMO approves the version.
+                hidden = err.status == 404 or (err.status == 401 and not getattr(amo, "issuer", None))
+                if not hidden:
                     raise
                 current = {}
             file = current.get("file") or {}
