@@ -22,6 +22,8 @@
     "dark mode"
   ],
   "license": "MIT",
+  "slug": "foxy-board",
+  "icon": "docs/amo/icon.png",
   "screenshots": [
     {
       "path": "docs/images/board-dark.png",
@@ -35,6 +37,5 @@
         "en-US": "The board in light mode"
       }
     }
-  ],
-  "slug": "foxy-board"
+  ]
 }

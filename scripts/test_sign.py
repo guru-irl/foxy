@@ -175,7 +175,9 @@ class ThrottleTest(unittest.TestCase):
 
 
 class DownloadAuthorizationTest(unittest.TestCase):
-    def test_api_uses_jwt_but_public_file_download_has_no_authorization(self):
+    def test_amo_host_requests_use_jwt_that_is_never_forwarded_on_redirect(self):
+        # Unlisted file downloads need auth once an add-on also has a listed version
+        # (seen 2026-11-12: 404 without it). Redirects to a CDN must not get the token.
         seen = []
         def transport(request, timeout):
             seen.append(request)
@@ -183,9 +185,12 @@ class DownloadAuthorizationTest(unittest.TestCase):
         with mock.patch('urllib.request.urlopen', side_effect=transport):
             amo = sign.Amo('fake-issuer', 'fake-secret')
             amo.request('GET', sign.API + '/addons/addon/test/')
-            amo.request('GET', 'https://addons.mozilla.org/f/1.xpi')
-        self.assertTrue(seen[0].get_header('Authorization').startswith('JWT '))
-        self.assertIsNone(seen[1].get_header('Authorization'))
+            amo.request('GET', 'https://addons.mozilla.org/firefox/downloads/file/1/x.xpi')
+            amo.request('GET', 'https://example.com/f/1.xpi')
+        for request in seen[:2]:
+            self.assertTrue(request.get_header('Authorization').startswith('JWT '))
+            self.assertNotIn('Authorization', request.headers)
+        self.assertIsNone(seen[2].get_header('Authorization'))
 
 
 class MultipartTest(unittest.TestCase):

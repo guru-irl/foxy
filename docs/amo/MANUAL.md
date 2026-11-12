@@ -1,6 +1,6 @@
 # Check the AMO submission in Developer Hub
 
-The API syncs the listing, privacy policy, and screenshots. Each version receives the MIT licence, reviewer notes, and source archive. No Developer Hub-only field is required by this listing.
+The API syncs the listing, icon, privacy policy, and screenshots. The icon is `docs/amo/icon.png`; after changing the logo, run `python3 scripts/amo_icon.py`. Each version receives the MIT licence, reviewer notes, and source archive. No Developer Hub-only field is required by this listing.
 
 Before the first listed release, complete these checks in [Developer Hub](https://addons.mozilla.org/developers/addons/):
 

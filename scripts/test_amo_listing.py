@@ -38,6 +38,13 @@ class ListingServer:
             return copy.deepcopy(self.policy)
         if method == 'GET':
             return copy.deepcopy(self.addon)
+        if method == 'PATCH' and '/previews/' not in url and payload is None and body:
+            parts = self.multipart(body, content_type)
+            self.icon = parts['icon']
+            self.addon['icon_url'] = 'https://example.com/user-media/addon_icons/1-64.png?modified=1'
+            self.addon['icons'] = {'128': 'https://example.com/user-media/addon_icons/1-128.png'}
+            self.images[self.addon['icons']['128']] = parts['icon']
+            return copy.deepcopy(self.addon)
         if method == 'PATCH' and '/previews/' not in url:
             self.addon.update(copy.deepcopy(payload))
             return copy.deepcopy(self.addon)
@@ -64,6 +71,14 @@ class ListingServer:
             self.addon['previews'] = [p for p in self.addon['previews'] if not url.endswith(f"/{p['id']}/")]
             return {}
         raise AssertionError((method, url))
+
+    def multipart(self, body, content_type):
+        from email.parser import BytesParser
+        from email.policy import default
+        message = BytesParser(policy=default).parsebytes(
+            f'Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n'.encode() + body)
+        return {part.get_param('name', header='content-disposition'): part.get_payload(decode=True)
+                for part in message.iter_parts()}
 
     def request(self, method, url, **kwargs):
         self.calls.append((method, url, None, None))
@@ -245,6 +260,44 @@ class ListingSyncTest(unittest.TestCase):
                            ('privacy', (ROOT / 'docs/amo/privacy.md').read_text())):
             headings = [line for line in text.splitlines() if line.lstrip().startswith('#')]
             self.assertEqual(headings, [], f'{name}: AMO drops Markdown headings; use **bold** lines')
+
+    def test_icon_is_uploaded_once_while_amo_shows_its_default(self):
+        self.server.addon['icon_url'] = 'https://addons.mozilla.org/static-server/img/addon-icons/default-64.png'
+        self.desired['icon'] = 'icon.png'
+        self.files['icon.png'] = png(b'\x90\x43\xdf\xff')
+        self.sync()
+        self.assertEqual(self.server.icon, self.files['icon.png'])
+        self.assertNotIn('icon', self.server.addon)
+        self.server.calls.clear()
+        self.sync()
+        self.assertTrue(all(call[0] == 'GET' for call in self.server.calls))
+
+    def test_a_changed_logo_replaces_the_amo_icon(self):
+        self.desired['icon'] = 'icon.png'
+        self.files['icon.png'] = png(b'\x90\x43\xdf\xff')
+        self.sync()
+        self.files['icon.png'] = png(b'\xff\xc2\x43\xff')
+        self.sync()
+        self.assertEqual(self.server.icon, self.files['icon.png'])
+
+    def test_an_ignored_icon_upload_fails_loudly(self):
+        class IgnoringIcon(ListingServer):
+            def json(self, method, url, payload=None, body=None, content_type=None):
+                if method == 'PATCH' and payload is None and '/previews/' not in url:
+                    return copy.deepcopy(self.addon)
+                return super().json(method, url, payload, body, content_type)
+        self.server = IgnoringIcon()
+        self.server.addon['icon_url'] = 'https://addons.mozilla.org/static-server/img/addon-icons/default-64.png'
+        self.desired['icon'] = 'icon.png'
+        self.files['icon.png'] = png()
+        with self.assertRaises(SystemExit) as caught:
+            self.sync()
+        self.assertIn('icon', str(caught.exception))
+
+    def test_store_listing_names_the_rendered_icon(self):
+        source = json.loads((ROOT / 'docs/amo/listing.json').read_text())
+        self.assertEqual(source['icon'], 'docs/amo/icon.png')
+        self.assertTrue((ROOT / source['icon']).read_bytes().startswith(b'\x89PNG'))
 
     def test_invalid_tags_are_warned_and_never_sent(self):
         self.desired['tags'] = ['dark mode', 'invented tag']

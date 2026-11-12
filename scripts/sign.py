@@ -148,11 +148,12 @@ class Amo:
             "User-Agent": USER_AGENT,
             "Accept": "application/json",
         }
-        if token and url.startswith(API + "/"):
-            headers["Authorization"] = f"JWT {token}"
         if content_type:
             headers["Content-Type"] = content_type
         req = urllib.request.Request(url, data=body, headers=headers, method=method)
+        # Unlisted downloads need the JWT too. Unredirected: never forwarded to a CDN.
+        if token and url.startswith("https://addons.mozilla.org/"):
+            req.add_unredirected_header("Authorization", f"JWT {token}")
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 return resp.read()

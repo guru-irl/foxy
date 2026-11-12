@@ -130,7 +130,7 @@ def png_pixels(data):
 def sync_listing(amo, guid, listing, privacy, read_image=None):
     base = f'{API}/addons/addon/{urllib.parse.quote(guid, safe="@")}/'
     current = amo.json('GET', base + '?show_source=true')
-    fields = {k: v for k, v in listing.items() if k not in ('screenshots', 'license')}
+    fields = {k: v for k, v in listing.items() if k not in ('screenshots', 'license', 'icon')}
     if 'tags' in fields:
         allowed = set(json.loads((ROOT / 'docs/amo/allowed-tags.json').read_text()))
         for tag in fields['tags']:
@@ -138,12 +138,27 @@ def sync_listing(amo, guid, listing, privacy, read_image=None):
                 print(f'Warning: skipping unsupported AMO tag: {tag}', file=sys.stderr)
         fields['tags'] = [tag for tag in fields['tags'] if tag in allowed]
     current = apply_fields(amo, base, current, fields)
+    read_image = read_image or (lambda path: (ROOT / path).read_bytes())
+    # AMO shows its own icon upload, never the manifest icons. It keeps a 128 px PNG
+    # with our exact pixels (checked live), so compare pixels like the screenshots.
+    def icon_pixels(addon):
+        url = (addon.get('icons') or {}).get('128')
+        if not url or '/addon-icons/default' in url:
+            return None
+        return png_pixels(amo.request('GET', https_url(url)))
+    if listing.get('icon'):
+        data = read_image(listing['icon'])
+        if icon_pixels(current) != png_pixels(data):
+            body, content_type = encode_multipart({}, {
+                'icon': (Path(listing['icon']).name, data, 'image/png')})
+            current = amo.json('PATCH', base, body=body, content_type=content_type)
+            if icon_pixels(current) != png_pixels(data):
+                raise SystemExit('AMO did not apply the listing icon. Check docs/amo/MANUAL.md.')
     # The license belongs to a version, not an add-on. sign.py sends it with source.
     policy_url = base + 'eula_policy/'
     policy = amo.json('GET', policy_url + '?show_source=true')
     apply_fields(amo, policy_url, policy, {'privacy_policy': {'en-US': privacy}})
 
-    read_image = read_image or (lambda path: (ROOT / path).read_bytes())
     remaining = list(current.get('previews') or [])
     # Fetch and decode each existing image once. No auth is sent to image hosts.
     existing = {p['id']: png_pixels(amo.request('GET', https_url(p['image_url'])))
